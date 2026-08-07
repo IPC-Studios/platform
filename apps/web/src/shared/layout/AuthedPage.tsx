@@ -5,9 +5,17 @@ import { ModuleRouteGuard } from '../auth/ModuleRouteGuard'
 import { AppShell } from './AppShell'
 
 /** Standard authed screen: session gate → shell → module gate. */
-export function AuthedPage({ module, children }: { module: ModuleKey; children: ReactNode }) {
+export function AuthedPage({
+  module,
+  children,
+  allowExpired = false,
+}: {
+  module: ModuleKey
+  children: ReactNode
+  allowExpired?: boolean
+}) {
   return (
-    <RequireAuth>
+    <RequireAuth allowExpired={allowExpired}>
       <AppShell>
         <ModuleRouteGuard module={module}>{children}</ModuleRouteGuard>
       </AppShell>

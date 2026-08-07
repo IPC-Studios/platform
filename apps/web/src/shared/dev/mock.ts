@@ -104,6 +104,9 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'POST' && path === '/hr/check-in') return { id: uid(0xc0) }
   if (method === 'GET' && path === '/notifications') return notifs
   if (method === 'POST' && path.includes('/notifications/')) return {}
+  if (method === 'GET' && path === '/subscription/plans') return plansFx
+  if (method === 'POST' && path === '/subscription/order') return { order_id: uid(0xd0), amount: 5900 }
+  if (method === 'POST' && path === '/subscription/activate') return { duplicate: false, expires_at: '2027-01-01T00:00:00Z' }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -115,6 +118,12 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const plansFx = [
+  { id: uid(0xe0), key: 'starter', name: 'Starter', price: 2000, billing_interval: 'monthly' },
+  { id: uid(0xe1a), key: 'pro', name: 'Pro', price: 5000, billing_interval: 'monthly' },
+  { id: uid(0xe2a), key: 'studio', name: 'Studio (Yearly)', price: 50000, billing_interval: 'yearly' },
 ]
 
 const notifs = [

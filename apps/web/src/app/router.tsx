@@ -23,6 +23,7 @@ import { FinancialsPage } from '@/routes/financials'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
+import { SubscriptionPage } from '@/routes/subscription'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -61,6 +62,7 @@ const routeTree = rootRoute.addChildren([
   route('/financials', FinancialsPage),
   route('/notifications', NotificationsPage),
   route('/settings/company', comingSoon('Settings', 'settings', 'a later phase')),
+  route('/settings/subscription', SubscriptionPage),
   route('/platform/studios', comingSoon('Platform', 'studio_access', 'Phase 14')),
 ])
 

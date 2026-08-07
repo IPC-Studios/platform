@@ -45,6 +45,7 @@ async function freshDb() {
   await db.exec(mig('0013_crm.sql'))
   await db.exec(mig('0014_hr_attendance.sql'))
   await db.exec(mig('0015_notifications_jobs.sql'))
+  await db.exec(mig('0016_subscription_platform.sql'))
   return db
 }
 
@@ -819,5 +820,64 @@ describe('notifications & idempotent cron (Phase 13)', () => {
     )
     expect(dry.rows[0]!.run_reminder_cron.dry_run).toBe(true)
     expect(dry.rows[0]!.run_reminder_cron.notifications_created).toBe(0)
+  })
+})
+
+describe('subscription — activation + replay safety (Phase 14)', () => {
+  let db: PGlite
+  let planId: string
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    const p = await db.query<{ id: string }>(
+      `insert into plans (key, name, price, billing_interval) values ('pro','Pro', 5000, 'monthly') returning id;`,
+    )
+    planId = p.rows[0]!.id
+  })
+
+  it('a paid order activates the plan; a replay changes nothing', async () => {
+    const order = await db.query<{ order_id: string; amount: string }>(
+      `select * from create_payment_order('${planId}');`,
+    )
+    // Server-side price + 18% GST: 5000 * 1.18 = 5900.
+    expect(Number(order.rows[0]!.amount)).toBe(5900)
+    const orderId = order.rows[0]!.order_id
+
+    const act = await db.query<{ duplicate: boolean; expires_at: string }>(
+      `select * from activate_subscription('${orderId}', 'pay_123');`,
+    )
+    expect(act.rows[0]!.duplicate).toBe(false)
+    const expiry1 = act.rows[0]!.expires_at
+
+    // Plan expiry advanced ~1 month; the tenant is now active.
+    const active = await db.query<{ active: boolean }>(
+      `select is_company_plan_active(get_current_company_id()) as active;`,
+    )
+    expect(active.rows[0]!.active).toBe(true)
+
+    // Replay the SAME order -> duplicate, no new transaction, expiry unchanged.
+    const replay = await db.query<{ duplicate: boolean; expires_at: string }>(
+      `select * from activate_subscription('${orderId}', 'pay_123');`,
+    )
+    expect(replay.rows[0]!.duplicate).toBe(true)
+    expect(new Date(replay.rows[0]!.expires_at).getTime()).toBe(new Date(expiry1).getTime())
+
+    const txns = await db.query<{ n: string }>(
+      `select count(*) as n from payment_transactions where order_id = '${orderId}';`,
+    )
+    expect(Number(txns.rows[0]!.n)).toBe(1)
+  })
+
+  it('a replayed webhook event is recorded only once', async () => {
+    const first = await db.query<{ record_webhook_event: boolean }>(
+      `select record_webhook_event('evt_abc', '{"x":1}'::jsonb);`,
+    )
+    expect(first.rows[0]!.record_webhook_event).toBe(true)
+    const second = await db.query<{ record_webhook_event: boolean }>(
+      `select record_webhook_event('evt_abc', '{"x":1}'::jsonb);`,
+    )
+    expect(second.rows[0]!.record_webhook_event).toBe(false)
   })
 })
