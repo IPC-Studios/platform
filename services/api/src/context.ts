@@ -11,6 +11,8 @@ export interface Env {
   RAZORPAY_KEY_ID: string
   RAZORPAY_KEY_SECRET: string
   RAZORPAY_WEBHOOK_SECRET: string
+  /** Comma-separated allowlist of browser origins; empty = allow all (dev). */
+  ALLOWED_ORIGINS: string
 }
 
 /**

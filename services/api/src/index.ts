@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { AppEnv } from './context'
 import { errorBoundary } from './middleware/errors'
+import { securityHeaders, rateLimit } from './middleware/security'
 import { healthRouter } from './modules/health/router'
 import { authRouter } from './modules/auth/router'
 import { accessRouter } from './modules/access/router'
@@ -25,8 +26,24 @@ import { termsRouter, publicTermsRouter } from './modules/terms/router'
 const app = new Hono<AppEnv>()
 
 app.use('*', errorBoundary)
-// Phase 16 tightens this to known origins.
-app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'] }))
+app.use('*', securityHeaders)
+// CORS tightened to an env allowlist; empty ALLOWED_ORIGINS = allow all (dev).
+app.use('*', (c, next) => {
+  const allow = (c.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean)
+  return cors({
+    origin: (origin) => (allow.length === 0 ? origin || '*' : allow.includes(origin) ? origin : ''),
+    allowHeaders: ['Authorization', 'Content-Type'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  })(c, next)
+})
+
+// Rate limit the unauthenticated / abuse-prone surfaces.
+app.use('/auth/*', rateLimit({ windowMs: 60_000, limit: 20 }))
+app.use('/public/*', rateLimit({ windowMs: 60_000, limit: 30 }))
+app.use('/webhooks/*', rateLimit({ windowMs: 60_000, limit: 120 }))
 
 // ── Routers ───────────────────────────────────────────────────
 // One router per domain (~25 total). Domain modules land per phase and mount

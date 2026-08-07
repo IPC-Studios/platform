@@ -13,9 +13,21 @@ export async function errorBoundary(c: Context<AppEnv>, next: Next) {
     if (err instanceof HTTPException) {
       return c.json({ error: err.message }, err.status)
     }
-    // Unknown failure: log detail, return an opaque message.
-    console.error('unhandled', err)
-    return c.json({ error: 'Something went wrong. Please try again.' }, 500)
+    // Unknown failure: log structured detail with a correlation id, return an
+    // opaque message + the id (so support can find the log).
+    const correlationId = crypto.randomUUID()
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        correlationId,
+        method: c.req.method,
+        path: c.req.path,
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }),
+    )
+    c.header('X-Correlation-Id', correlationId)
+    return c.json({ error: 'Something went wrong. Please try again.', correlation_id: correlationId }, 500)
   }
 }
 
