@@ -16,6 +16,7 @@ import { ClientsListPage } from '@/routes/clients/list'
 import { ProductionBoardPage } from '@/routes/production-board'
 import { TeamAllocationPage } from '@/routes/team-allocation'
 import { DataManagementPage } from '@/routes/data-management'
+import { MyWorkPage } from '@/routes/my-work'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -41,7 +42,7 @@ const routeTree = rootRoute.addChildren([
   route('/tasks', ProductionBoardPage),
   route('/tasks/my', comingSoon('My tasks', 'tasks', 'Phase 12')),
   route('/shoots/my', comingSoon('My shoots', 'projects', 'a later phase')),
-  route('/my-work', comingSoon('My work', 'projects', 'Phase 8')),
+  route('/my-work', MyWorkPage),
   route('/production-board', ProductionBoardPage),
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),

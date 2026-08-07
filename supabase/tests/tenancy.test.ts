@@ -38,6 +38,7 @@ async function freshDb() {
   await db.exec(mig('0007_tasks_production.sql'))
   await db.exec(mig('0008_team_allocation.sql'))
   await db.exec(mig('0009_data_management.sql'))
+  await db.exec(mig('0010_work_delivery.sql'))
   return db
 }
 
@@ -423,5 +424,77 @@ describe('data custody (Phase 7)', () => {
     expect((row.rows[0] as { backup_status: string }).backup_status).toBe('verified')
     expect((row.rows[0] as { verified_at: string | null }).verified_at).not.toBeNull()
     expect((row.rows[0] as { copied_by_uid: string }).copied_by_uid).toBe(OWNER)
+  })
+})
+
+describe('work submission -> review -> tokenised delivery (Phase 8)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+  })
+
+  it('runs submit -> approve -> deliver, and the token resolves to the submission', async () => {
+    const sub = await db.query<{ submit_work: string }>(
+      `select submit_work(null, null, 'https://drive/x', 'first cut');`,
+    )
+    const subId = sub.rows[0]!.submit_work
+
+    // Delivery is blocked until approved.
+    await expect(db.query(`select deliver_work_to_client('${subId}');`)).rejects.toThrow(
+      /must be approved/i,
+    )
+
+    await db.query(`select review_work('${subId}', true, 'looks good');`)
+    const token = await db.query<{ deliver_work_to_client: string }>(
+      `select deliver_work_to_client('${subId}', 'email', 168);`,
+    )
+    const raw = token.rows[0]!.deliver_work_to_client
+    expect(raw).toBeTruthy()
+
+    // Public resolution (anon path) returns the submission id.
+    const resolved = await db.query<{ resolve_access_token: string }>(
+      `select resolve_access_token('work_delivery', '${raw}');`,
+    )
+    expect(resolved.rows[0]!.resolve_access_token).toBe(subId)
+
+    // A wrong token resolves to nothing.
+    const bad = await db.query<{ resolve_access_token: string | null }>(
+      `select resolve_access_token('work_delivery', 'not-a-real-token');`,
+    )
+    expect(bad.rows[0]!.resolve_access_token).toBeNull()
+
+    // A delivery row was recorded.
+    const del = await db.query<{ n: string }>(
+      `select count(*) as n from team_work_client_deliveries where submission_id = '${subId}';`,
+    )
+    expect(Number(del.rows[0]!.n)).toBe(1)
+  })
+
+  it('consume_access_token is one-time', async () => {
+    const sub = await db.query<{ submit_work: string }>(
+      `select submit_work(null, null, 'https://drive/y');`,
+    )
+    const subId = sub.rows[0]!.submit_work
+    await db.query(`select review_work('${subId}', true);`)
+    const raw = (
+      await db.query<{ deliver_work_to_client: string }>(
+        `select deliver_work_to_client('${subId}');`,
+      )
+    ).rows[0]!.deliver_work_to_client
+
+    const first = await db.query<{ consume_access_token: string | null }>(
+      `select consume_access_token('work_delivery', '${raw}');`,
+    )
+    expect(first.rows[0]!.consume_access_token).toBe(subId)
+    const second = await db.query<{ consume_access_token: string | null }>(
+      `select consume_access_token('work_delivery', '${raw}');`,
+    )
+    expect(second.rows[0]!.consume_access_token).toBeNull()
   })
 })

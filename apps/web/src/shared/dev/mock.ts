@@ -88,6 +88,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords
   if (method === 'POST' && path.includes('/verify')) return {}
   if (method === 'POST' && path === '/data') return dataRecords[0]
+  if (method === 'GET' && path === '/work/submissions') return workSubs
+  if (method === 'POST' && path === '/work/submissions') return { id: uid(0x8a) }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -99,6 +101,12 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const workSubs = [
+  { id: uid(0x81), project_id: PROJ.p1, task_id: null, submission_link: 'https://drive.google.com/album-v1', notes: 'First album cut', status: 'submitted', review_notes: null, created_at: '2026-07-03T08:00:00Z' },
+  { id: uid(0x82), project_id: PROJ.p1, task_id: null, submission_link: 'https://drive.google.com/film-v2', notes: 'Highlight film', status: 'approved', review_notes: 'Great work', created_at: '2026-07-01T08:00:00Z' },
+  { id: uid(0x83), project_id: PROJ.p2, task_id: null, submission_link: 'https://drive.google.com/teaser', notes: null, status: 'rejected', review_notes: 'Re-grade the outdoor shots', created_at: '2026-06-28T08:00:00Z' },
 ]
 
 const members = [
