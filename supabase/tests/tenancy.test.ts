@@ -47,6 +47,7 @@ async function freshDb() {
   await db.exec(mig('0015_notifications_jobs.sql'))
   await db.exec(mig('0016_subscription_platform.sql'))
   await db.exec(mig('0017_terms_templates.sql'))
+  await db.exec(mig('0018_open_trial_by_default.sql'))
   return db
 }
 
@@ -87,7 +88,13 @@ describe('tenancy migrations + functions', () => {
     expect(r.rows[0]?.existing).toBe(true)
   })
 
-  it('plan gate is inactive with no expiry, active when in the future', async () => {
+  it('plan gate is inactive with no live gate, active when in the future', async () => {
+    // New studios get an open-ended grandfathered trial (0018); clear it to
+    // test the raw gate logic.
+    await db.exec(
+      `update companies set grandfathered_until = null, plan_expiry = null, grace_until = null
+       where id = get_current_company_id();`,
+    )
     const off = await db.query<{ active: boolean }>(
       `select is_company_plan_active(get_current_company_id()) as active;`,
     )
