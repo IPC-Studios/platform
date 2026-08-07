@@ -32,6 +32,7 @@ async function freshDb() {
   await db.exec(mig('0001_tenancy_core.sql'))
   await db.exec(mig('0002_auth_functions.sql'))
   await db.exec(mig('0003_tenancy_rls.sql'))
+  await db.exec(mig('0004_access_control.sql'))
   return db
 }
 
@@ -91,5 +92,63 @@ describe('tenancy migrations + functions', () => {
     await asUser(db, other)
     const r = await db.query(`select * from get_auth_context();`)
     expect(r.rows.length).toBe(0)
+  })
+})
+
+describe('access control (Phase 2)', () => {
+  let db: PGlite
+  const owner = OWNER
+  const member = '33333333-3333-3333-3333-333333333333'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@s.test'),('${member}','member@s.test');`,
+    )
+    // Owner registers the studio, then adds a member (admin) to the same company.
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'admin', 'Member', 'member@s.test');`,
+    )
+  })
+
+  it('owner assigns a profile + override; it flows into the member auth context', async () => {
+    await asUser(db, owner)
+    await db.query(
+      `select set_user_access('${member}', 'finance_manager',
+         '[{"permission_key":"clients.edit","enabled":true}]'::jsonb);`,
+    )
+
+    // Read back as owner.
+    const ga = await db.query<{ profile_key: string; overrides: unknown[] }>(
+      `select * from get_user_access('${member}');`,
+    )
+    expect(ga.rows[0]?.profile_key).toBe('finance_manager')
+    expect(ga.rows[0]?.overrides).toHaveLength(1)
+
+    // The member's own auth context reflects it.
+    await asUser(db, member)
+    const ctx = await db.query<{ profile_key: string; overrides: { permission_key: string }[] }>(
+      `select * from get_auth_context();`,
+    )
+    expect(ctx.rows[0]?.profile_key).toBe('finance_manager')
+    expect(ctx.rows[0]?.overrides?.[0]?.permission_key).toBe('clients.edit')
+  })
+
+  it('a non-owner cannot call set_user_access', async () => {
+    await asUser(db, member) // admin, not owner
+    await expect(
+      db.query(`select set_user_access('${owner}', 'photographer');`),
+    ).rejects.toThrow(/owner/i)
+  })
+
+  it('clearing the profile (null) drops back to role defaults', async () => {
+    await asUser(db, owner)
+    await db.query(`select set_user_access('${member}', null, '[]'::jsonb);`)
+    await asUser(db, member)
+    const ctx = await db.query<{ profile_key: string | null }>(`select * from get_auth_context();`)
+    expect(ctx.rows[0]?.profile_key).toBeNull()
   })
 })

@@ -4,6 +4,7 @@ import type { AppEnv } from './context'
 import { errorBoundary } from './middleware/errors'
 import { healthRouter } from './modules/health/router'
 import { authRouter } from './modules/auth/router'
+import { accessRouter } from './modules/access/router'
 
 const app = new Hono<AppEnv>()
 
@@ -16,5 +17,6 @@ app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type']
 // their own auth + permission middleware; /health stays public.
 app.route('/health', healthRouter)
 app.route('/auth', authRouter)
+app.route('/access', accessRouter)
 
 export default app
