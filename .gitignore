@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.output/
+.nitro/
+.tanstack/
+.vinxi/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.wrangler/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test artifacts
+test-results/
+playwright-report/
+blob-report/
+.cache/
+
+# Large source archive (kept out of history)
+IPC Studios.zip
