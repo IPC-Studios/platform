@@ -21,6 +21,10 @@
         "zod": "^3.24.2",
       },
     },
+    "packages/domain": {
+      "name": "@ipc/domain",
+      "version": "0.0.0",
+    },
     "packages/permissions": {
       "name": "@ipc/permissions",
       "version": "0.0.0",
@@ -108,6 +112,8 @@
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
     "@ipc/contracts": ["@ipc/contracts@workspace:packages/contracts"],
+
+    "@ipc/domain": ["@ipc/domain@workspace:packages/domain"],
 
     "@ipc/permissions": ["@ipc/permissions@workspace:packages/permissions"],
 
