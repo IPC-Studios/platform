@@ -46,6 +46,7 @@ async function freshDb() {
   await db.exec(mig('0014_hr_attendance.sql'))
   await db.exec(mig('0015_notifications_jobs.sql'))
   await db.exec(mig('0016_subscription_platform.sql'))
+  await db.exec(mig('0017_terms_templates.sql'))
   return db
 }
 
@@ -879,5 +880,51 @@ describe('subscription — activation + replay safety (Phase 14)', () => {
       `select record_webhook_event('evt_abc', '{"x":1}'::jsonb);`,
     )
     expect(second.rows[0]!.record_webhook_event).toBe(false)
+  })
+})
+
+describe('terms acknowledgement via public link (Phase 15)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+  })
+
+  it('client acknowledges terms via token and the evidence is recorded', async () => {
+    const issued = await db.query<{ document_id: string; token: string }>(
+      `select * from issue_terms_document(null, 'You agree to the terms.', null, 336);`,
+    )
+    const { document_id, token } = issued.rows[0]!
+
+    // Public display works.
+    const body = await db.query<{ get_terms_for_token: string }>(
+      `select get_terms_for_token('${token}');`,
+    )
+    expect(body.rows[0]!.get_terms_for_token).toContain('agree to the terms')
+
+    // Acknowledge with evidence.
+    const ack = await db.query<{ acknowledge_terms: boolean }>(
+      `select acknowledge_terms('${token}', 'Priya Sharma', 'priya@x.in', '1.2.3.4', 'Mozilla/5.0');`,
+    )
+    expect(ack.rows[0]!.acknowledge_terms).toBe(true)
+
+    const doc = await db.query<{ acknowledged_by_name: string; acknowledged_ip: string; acknowledged_at: string | null }>(
+      `select acknowledged_by_name, acknowledged_ip, acknowledged_at
+       from project_terms_documents where id = '${document_id}';`,
+    )
+    expect(doc.rows[0]!.acknowledged_by_name).toBe('Priya Sharma')
+    expect(doc.rows[0]!.acknowledged_ip).toBe('1.2.3.4')
+    expect(doc.rows[0]!.acknowledged_at).not.toBeNull()
+
+    // The token is one-time: a second acknowledgement fails.
+    const again = await db.query<{ acknowledge_terms: boolean }>(
+      `select acknowledge_terms('${token}', 'Someone Else');`,
+    )
+    expect(again.rows[0]!.acknowledge_terms).toBe(false)
   })
 })

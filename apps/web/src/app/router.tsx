@@ -24,6 +24,7 @@ import { FollowUpsPage } from '@/routes/follow-ups'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
 import { SubscriptionPage } from '@/routes/subscription'
+import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -37,6 +38,7 @@ const route = (path: string, component: () => ReactNode): AnyRoute =>
 const routeTree = rootRoute.addChildren([
   route('/', DashboardPage),
   route('/login', LoginPage),
+  route('/terms/acknowledge', TermsAcknowledgePage),
   route('/dashboard', DashboardPage),
 
   route('/projects', ProjectsListPage),

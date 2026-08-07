@@ -107,6 +107,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/subscription/plans') return plansFx
   if (method === 'POST' && path === '/subscription/order') return { order_id: uid(0xd0), amount: 5900 }
   if (method === 'POST' && path === '/subscription/activate') return { duplicate: false, expires_at: '2027-01-01T00:00:00Z' }
+  if (method === 'GET' && path.startsWith('/public/terms/')) return { body: 'These are the terms of service for your photography package. By clicking "I agree" you accept the scope, payment schedule, and delivery timelines outlined in your quotation.' }
+  if (method === 'POST' && path.includes('/terms/') && path.endsWith('/ack')) return { ok: true }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}

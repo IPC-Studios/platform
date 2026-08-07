@@ -20,6 +20,7 @@ import { hrRouter } from './modules/hr/router'
 import { cronRouter } from './modules/cron/router'
 import { notificationsRouter } from './modules/notifications/router'
 import { subscriptionRouter } from './modules/subscription/router'
+import { termsRouter, publicTermsRouter } from './modules/terms/router'
 
 const app = new Hono<AppEnv>()
 
@@ -48,5 +49,7 @@ app.route('/hr', hrRouter)
 app.route('/cron', cronRouter)
 app.route('/notifications', notificationsRouter)
 app.route('/subscription', subscriptionRouter)
+app.route('/terms', termsRouter)
+app.route('/public', publicTermsRouter)
 
 export default app
