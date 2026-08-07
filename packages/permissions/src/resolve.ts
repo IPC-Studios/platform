@@ -82,3 +82,18 @@ export function resolveAccess(input: AccessInput) {
 }
 
 export type ResolvedAccess = ReturnType<typeof resolveAccess>
+
+/**
+ * Build the same hasModule/hasAction surface from an already-composed
+ * permission set (e.g. the client hydrating from `sessionState.permissions`,
+ * which the server resolved once). Owner still bypasses.
+ */
+export function accessFromSet(permissions: Iterable<string>, isOwner: boolean) {
+  const set = new Set(permissions)
+  return {
+    hasModule: (key: ModuleKey): boolean => isOwner || set.has(key),
+    hasAction: (key: ModuleKey, action: ModuleAction): boolean =>
+      isOwner || (action === 'view' ? set.has(key) : set.has(`${key}.${action}`)),
+    effective: set,
+  }
+}
