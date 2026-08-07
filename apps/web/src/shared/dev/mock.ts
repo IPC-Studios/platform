@@ -80,6 +80,9 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board'))) return boardTasks
   if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
+  if (method === 'GET' && (path === '/shoots' || path.startsWith('/shoots?'))) return shootsFx
+  if (method === 'POST' && path === '/shoots') return { id: uid(0x5c) }
+  if (method === 'PATCH' && path.startsWith('/shoots/')) return {}
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
   if (method === 'PATCH' && path.startsWith('/projects/')) return {}
   if (method === 'DELETE' && path.startsWith('/projects/')) return {}
@@ -191,6 +194,12 @@ const members = [
   { user_id: uid(0xe1), name: 'Rahul (Photographer)', role: 'employee' },
   { user_id: uid(0xe2), name: 'Anita (Cinematographer)', role: 'employee' },
   { user_id: uid(0xe3), name: 'Sana (Editor)', role: 'manager' },
+]
+
+const shootsFx = [
+  { id: uid(0x61), name: 'Engagement shoot', project_id: PROJ.p1, project_name: 'Sharma Wedding', shoot_date: '2026-08-10', location: 'Bandra, Mumbai', status: 'confirmed' },
+  { id: uid(0x62), name: 'Wedding day', project_id: PROJ.p1, project_name: 'Sharma Wedding', shoot_date: '2026-08-22', location: 'Taj Lands End', status: 'planned' },
+  { id: uid(0x63), name: 'Product set A', project_id: PROJ.p3, project_name: 'Nova Product Shoot', shoot_date: '2026-07-01', location: 'Studio', status: 'completed' },
 ]
 
 const companyFx = {

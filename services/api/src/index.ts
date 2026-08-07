@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/router'
 import { accessRouter } from './modules/access/router'
 import { clientsRouter } from './modules/clients/router'
 import { projectsRouter } from './modules/projects/router'
+import { shootsRouter } from './modules/shoots/router'
 import { tasksRouter } from './modules/tasks/router'
 import { teamRouter } from './modules/team/router'
 import { allocationRouter } from './modules/allocation/router'
@@ -59,6 +60,7 @@ app.route('/auth', authRouter)
 app.route('/access', accessRouter)
 app.route('/clients', clientsRouter)
 app.route('/projects', projectsRouter)
+app.route('/shoots', shootsRouter)
 app.route('/tasks', tasksRouter)
 app.route('/team', teamRouter)
 app.route('/allocation', allocationRouter)
