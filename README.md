@@ -146,6 +146,53 @@ dashboard. The `bun run` commands above are the reliable path.
 
 ---
 
+## Automated deploy (connect once, then push)
+
+Two ways to get "push to `main` → everything deploys". Pick one.
+
+### Option A — GitHub Actions (in this repo)
+
+`.github/workflows/deploy.yml` migrates the DB, then deploys the API + web on
+every push to `main`. **One-time setup:** add these repo secrets under
+*Settings → Secrets and variables → Actions*:
+
+| Secret | From |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | supabase.com → Account → Access Tokens |
+| `SUPABASE_PROJECT_REF` | Project Settings → General |
+| `SUPABASE_DB_PASSWORD` | your database password |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → API Tokens (Workers + Pages edit) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Workers overview |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase API settings |
+| `CRON_SECRET` | any long random string |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard |
+| `ALLOWED_ORIGINS` | your prod web origin(s) |
+| `API_BASE_URL` | the deployed worker URL |
+
+Then flip it on: add a repo **variable** `DEPLOY_ENABLED = true`
+(*Settings → Secrets and variables → Actions → Variables*). Until it's `true`
+the deploy workflow stays dormant (no failed runs). Create the Supabase project +
+a Cloudflare Pages project named `ipc-studios` once; after that every push ships
+DB + API + web. The workflow also **syncs the Worker's runtime secrets** from
+these on each run, so there's nothing to set in the Cloudflare dashboard.
+
+### Option B — Native Git integrations (no workflow)
+
+Connect the repo in each vendor's dashboard; they build on push:
+
+- **Supabase** → Dashboard → *Integrations → GitHub* → connect this repo →
+  auto-runs migrations on merge to your production branch.
+- **Cloudflare Workers** → *Workers → Create → Connect Git* → root directory
+  `services/api`, build `bunx wrangler deploy`. Add the runtime secrets in the
+  dashboard.
+- **Cloudflare Pages** → *Pages → Connect Git* → root directory `apps/web`,
+  build command `bun run build`, output `dist`, and set the `VITE_*` build vars.
+
+> Even here, create the Supabase project first — migrations can auto-run, but the
+> project itself must exist.
+
+---
+
 ## Deployment (detailed)
 
 Three independent deploys: **database → API → web**.
