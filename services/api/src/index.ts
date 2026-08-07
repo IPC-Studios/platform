@@ -27,14 +27,19 @@ const app = new Hono<AppEnv>()
 
 app.use('*', errorBoundary)
 app.use('*', securityHeaders)
-// CORS tightened to an env allowlist; empty ALLOWED_ORIGINS = allow all (dev).
+// CORS from an env allowlist. Forgiving of trailing slashes and a "*" entry;
+// empty ALLOWED_ORIGINS = allow all (dev).
 app.use('*', (c, next) => {
+  const stripSlash = (s: string) => s.replace(/\/+$/, '')
   const allow = (c.env.ALLOWED_ORIGINS ?? '')
     .split(',')
-    .map((o) => o.trim())
+    .map((o) => stripSlash(o.trim()))
     .filter(Boolean)
   return cors({
-    origin: (origin) => (allow.length === 0 ? origin || '*' : allow.includes(origin) ? origin : ''),
+    origin: (origin) => {
+      if (allow.length === 0 || allow.includes('*')) return origin || '*'
+      return allow.includes(stripSlash(origin ?? '')) ? origin : ''
+    },
     allowHeaders: ['Authorization', 'Content-Type'],
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   })(c, next)
