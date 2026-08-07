@@ -20,6 +20,7 @@ import { MyWorkPage } from '@/routes/my-work'
 import { BillingPage } from '@/routes/billing'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
+import { FollowUpsPage } from '@/routes/follow-ups'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -49,7 +50,7 @@ const routeTree = rootRoute.addChildren([
   route('/production-board', ProductionBoardPage),
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),
-  route('/follow-ups', comingSoon('Follow-ups', 'crm', 'Phase 11')),
+  route('/follow-ups', FollowUpsPage),
   route('/facebook', comingSoon('Lead sources', 'lead_sources', 'Phase 11')),
   route('/employees', comingSoon('Team directory', 'team_directory', 'Phase 12')),
   route('/attendance', comingSoon('Attendance', 'attendance', 'Phase 12')),

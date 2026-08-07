@@ -97,6 +97,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
+  if (method === 'GET' && path === '/crm/leads') return leads
+  if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -108,6 +110,14 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const leads = [
+  { id: uid(0xb1), name: 'Priya & Arjun', phone: '9876500001', email: 'priya@x.in', source: 'facebook', status: 'new', assigned_to: uid(0xe1), assignee_name: 'Rahul', created_at: '2026-07-05T08:00:00Z' },
+  { id: uid(0xb2), name: 'Meera', phone: '9876500002', email: null, source: 'webform', status: 'contacted', assigned_to: uid(0xe3), assignee_name: 'Sana', created_at: '2026-07-04T08:00:00Z' },
+  { id: uid(0xb3), name: 'Corporate Event', phone: '9876500003', email: 'events@co.in', source: 'referral', status: 'qualified', assigned_to: uid(0xe1), assignee_name: 'Rahul', created_at: '2026-07-03T08:00:00Z' },
+  { id: uid(0xb4), name: 'Kunal', phone: '9876500004', email: null, source: 'facebook', status: 'converted', assigned_to: uid(0xe3), assignee_name: 'Sana', created_at: '2026-07-01T08:00:00Z' },
+  { id: uid(0xb5), name: 'Old enquiry', phone: '9876500005', email: null, source: 'enquiry', status: 'lost', assigned_to: null, assignee_name: null, created_at: '2026-06-20T08:00:00Z' },
 ]
 
 const expensesFx = [

@@ -41,6 +41,7 @@ async function freshDb() {
   await db.exec(mig('0010_work_delivery.sql'))
   await db.exec(mig('0011_billing.sql'))
   await db.exec(mig('0012_expenses_financials.sql'))
+  await db.exec(mig('0013_crm.sql'))
   return db
 }
 
@@ -632,5 +633,70 @@ describe('financials — profit view (Phase 10)', () => {
       `select direct_team_cost from project_financials where project_id = '${projectId}';`,
     )
     expect(Number(f.rows[0]!.direct_team_cost)).toBe(0)
+  })
+})
+
+describe('CRM — capture, dedupe, auto-assign (Phase 11)', () => {
+  let db: PGlite
+  const a = '88888888-8888-8888-8888-888888888888'
+  const b = '99999999-9999-9999-9999-999999999999'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    for (const [id, name] of [
+      [a, 'Sales A'],
+      [b, 'Sales B'],
+    ]) {
+      await db.exec(`insert into auth.users (id,email) values ('${id}','${id}@s.test');`)
+      await db.exec(
+        `insert into users (user_id, company_id, role, name, email)
+         values ('${id}', get_current_company_id(), 'employee', '${name}', '${id}@s.test');`,
+      )
+      await db.exec(
+        `insert into crm_distribution_rules (company_id, user_id) values (get_current_company_id(), '${id}');`,
+      )
+    }
+    await db.exec(
+      `insert into crm_webhook_sources (company_id, source_key, kind)
+       values (get_current_company_id(), 'meta-page-1', 'meta');`,
+    )
+  })
+
+  it('a Meta lead flows to an assigned CRM lead, balanced across the team', async () => {
+    const l1 = await db.query<{ capture_lead: string }>(
+      `select capture_lead('meta-page-1', 'Lead One', '9876500001', 'one@x.in',
+        '{"ad":"summer"}'::jsonb);`,
+    )
+    const l2 = await db.query<{ capture_lead: string }>(
+      `select capture_lead('meta-page-1', 'Lead Two', '9876500002');`,
+    )
+    const rows = await db.query<{ source: string; assigned_to: string; status: string }>(
+      `select source, assigned_to, status from crm_leads order by created_at;`,
+    )
+    expect(rows.rows).toHaveLength(2)
+    expect(rows.rows[0]!.source).toBe('facebook')
+    expect(rows.rows[0]!.status).toBe('new')
+    // Balanced: the two leads go to two different assignees.
+    expect(rows.rows[0]!.assigned_to).not.toBe(rows.rows[1]!.assigned_to)
+    expect(l1.rows[0]!.capture_lead).not.toBe(l2.rows[0]!.capture_lead)
+  })
+
+  it('dedupes on normalized phone (10-digit vs +91 form)', async () => {
+    const first = await db.query<{ capture_lead: string }>(
+      `select capture_lead('meta-page-1', 'Dup', '9876511111');`,
+    )
+    const dup = await db.query<{ capture_lead: string }>(
+      `select capture_lead('meta-page-1', 'Dup Again', '+91 98765 11111');`,
+    )
+    expect(dup.rows[0]!.capture_lead).toBe(first.rows[0]!.capture_lead)
+  })
+
+  it('rejects an unknown source key', async () => {
+    await expect(db.query(`select capture_lead('nope', 'X', '9000000000');`)).rejects.toThrow(
+      /unknown or inactive source/i,
+    )
   })
 })
