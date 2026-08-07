@@ -82,12 +82,46 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
+  if (method === 'GET' && path === '/team/members') return members
+  if (method === 'GET' && path === '/allocation') return slots
+  if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
   if (method === 'PATCH' && path.includes('/status')) return {}
   return NOT_MOCKED
 }
+
+const members = [
+  { user_id: uid(0xe1), name: 'Rahul (Photographer)', role: 'employee' },
+  { user_id: uid(0xe2), name: 'Anita (Cinematographer)', role: 'employee' },
+  { user_id: uid(0xe3), name: 'Sana (Editor)', role: 'manager' },
+]
+
+const slots = [
+  {
+    id: uid(0x51),
+    user_id: uid(0xe1),
+    user_name: 'Rahul (Photographer)',
+    shoot_id: null,
+    service_name: 'Wedding day',
+    start_at: '2026-07-01T04:30:00Z',
+    end_at: '2026-07-01T16:30:00Z',
+    status: 'booked',
+    estimated_cost: 8000,
+  },
+  {
+    id: uid(0x52),
+    user_id: uid(0xe2),
+    user_name: 'Anita (Cinematographer)',
+    shoot_id: null,
+    service_name: 'Reception',
+    start_at: '2026-07-02T12:00:00Z',
+    end_at: '2026-07-02T18:00:00Z',
+    status: 'booked',
+    estimated_cost: 10000,
+  },
+]
 
 function boardTask(
   id: string,

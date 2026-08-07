@@ -36,6 +36,7 @@ async function freshDb() {
   await db.exec(mig('0005_company_theme.sql'))
   await db.exec(mig('0006_projects_core.sql'))
   await db.exec(mig('0007_tasks_production.sql'))
+  await db.exec(mig('0008_team_allocation.sql'))
   return db
 }
 
@@ -328,5 +329,56 @@ describe('tasks & production board (Phase 5)', () => {
     await expect(
       db.query(`select update_my_task_status('${other.rows[0]!.id}', 'completed');`),
     ).rejects.toThrow(/not your task/i)
+  })
+})
+
+describe('team allocation — no double booking (Phase 6)', () => {
+  let db: PGlite
+  const member = '66666666-6666-6666-6666-666666666666'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`insert into auth.users (id,email) values ('${member}','m@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Shooter', 'm@s.test');`,
+    )
+  })
+
+  it('books a slot, then rejects an overlapping booking for the same member', async () => {
+    await db.query(
+      `select book_team_slot('${member}', null, 'Photographer',
+        '2026-07-01T10:00:00Z', '2026-07-01T14:00:00Z', 5000);`,
+    )
+    await expect(
+      db.query(
+        `select book_team_slot('${member}', null, 'Photographer',
+          '2026-07-01T12:00:00Z', '2026-07-01T16:00:00Z', 5000);`,
+      ),
+    ).rejects.toThrow(/double_booking/i)
+  })
+
+  it('allows a back-to-back booking (touching edges)', async () => {
+    const r = await db.query<{ book_team_slot: string }>(
+      `select book_team_slot('${member}', null, 'Photographer',
+        '2026-07-01T14:00:00Z', '2026-07-01T16:00:00Z', 5000);`,
+    )
+    expect(r.rows[0]!.book_team_slot).toBeTruthy()
+  })
+
+  it('a released slot no longer blocks that window', async () => {
+    // Release the 10-14 booking, then the overlapping 12-16 becomes bookable.
+    await db.query(
+      `select set_team_slot_status(id, 'released') from team_assignment_slots
+       where start_at = '2026-07-01T10:00:00Z';`,
+    )
+    const r = await db.query<{ book_team_slot: string }>(
+      `select book_team_slot('${member}', null, 'Editor',
+        '2026-07-01T11:00:00Z', '2026-07-01T13:00:00Z', 3000);`,
+    )
+    expect(r.rows[0]!.book_team_slot).toBeTruthy()
   })
 })

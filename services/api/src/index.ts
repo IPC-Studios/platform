@@ -8,6 +8,8 @@ import { accessRouter } from './modules/access/router'
 import { clientsRouter } from './modules/clients/router'
 import { projectsRouter } from './modules/projects/router'
 import { tasksRouter } from './modules/tasks/router'
+import { teamRouter } from './modules/team/router'
+import { allocationRouter } from './modules/allocation/router'
 
 const app = new Hono<AppEnv>()
 
@@ -24,5 +26,7 @@ app.route('/access', accessRouter)
 app.route('/clients', clientsRouter)
 app.route('/projects', projectsRouter)
 app.route('/tasks', tasksRouter)
+app.route('/team', teamRouter)
+app.route('/allocation', allocationRouter)
 
 export default app
