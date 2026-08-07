@@ -1,0 +1,30 @@
+import type { Context, Next } from 'hono'
+import type { ModuleAction, ModuleKey } from '@ipc/permissions'
+import type { AppEnv } from '../context'
+import { fail } from './errors'
+
+const DENIED = 'You do not have access to this action.'
+
+/** Gate a router/route on module visibility. */
+export function requireModule(key: ModuleKey) {
+  return async (c: Context<AppEnv>, next: Next) => {
+    if (!c.get('auth').access.hasModule(key)) fail(403, DENIED)
+    await next()
+  }
+}
+
+/** Gate on a specific action (view/create/edit/delete). */
+export function requireAction(key: ModuleKey, action: ModuleAction) {
+  return async (c: Context<AppEnv>, next: Next) => {
+    if (!c.get('auth').access.hasAction(key, action)) fail(403, DENIED)
+    await next()
+  }
+}
+
+/** Owner-only gate (settings, salaries, platform ops). */
+export function requireOwner() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    if (!c.get('auth').isOwner) fail(403, DENIED)
+    await next()
+  }
+}

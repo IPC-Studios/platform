@@ -1,0 +1,24 @@
+{
+  "name": "@ipc/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ipc/contracts": "workspace:*",
+    "@ipc/permissions": "workspace:*",
+    "@ipc/domain": "workspace:*",
+    "@supabase/supabase-js": "^2.105.4",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "wrangler": "^3.78.0"
+  }
+}
