@@ -36,16 +36,27 @@ for logic, but pglite runs as superuser and cannot prove enforcement.** Before
 production, run the RLS suite against a real Postgres/Supabase with the
 `authenticated` role (see "DB verification" below).
 
-## DB verification (outstanding)
+## DB verification
 
-Migrations `0001`–`0017` are applied + logic-tested via `@electric-sql/pglite`
-in `supabase/tests/tenancy.test.ts`. To prove RLS enforcement + the GiST
-double-booking constraint (pglite lacks `btree_gist`):
+Migrations are logic-tested via `@electric-sql/pglite` in
+`supabase/tests/tenancy.test.ts` (36 tests).
 
-1. `supabase start` (Docker) or point at a hosted project.
-2. `supabase db reset` to apply all migrations.
-3. Run an RLS suite as `authenticated` with a JWT `sub` claim, asserting
-   cross-tenant reads return zero rows.
+**RLS enforcement is VERIFIED on the real hosted Postgres** by
+`supabase/tests/rls-live.mjs` — it registers two throwaway studios and asserts
+studio A cannot read studio B's company / clients / users (direct PostgREST
+with each JWT, and end-to-end through the API). Re-run anytime:
+
+```bash
+cd apps/web && \
+SUPABASE_URL=https://<ref>.supabase.co \
+SUPABASE_ANON_KEY=sb_publishable_... \
+API_URL=https://<worker>/ \
+bun ../../supabase/tests/rls-live.mjs
+```
+
+It creates two disposable tenants each run — clean them up periodically. The
+GiST double-booking constraint applies automatically on real Postgres (pglite
+lacks `btree_gist`, so its overlap trigger is the fallback there).
 
 ## Incident response
 
