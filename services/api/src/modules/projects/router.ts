@@ -1,5 +1,12 @@
 import { Hono } from 'hono'
-import { createProjectRequest, projectDetail, projectListItem } from '@ipc/contracts'
+import {
+  createProjectRequest,
+  deliverableInput,
+  paymentInput,
+  projectDetail,
+  projectListItem,
+  updateProjectRequest,
+} from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
@@ -50,4 +57,54 @@ export const projectsRouter = new Hono<AppEnv>()
     if (error || !data) fail(404, 'That project was not found.')
     const row = data as unknown as Record<string, unknown> & { received_payments: unknown }
     return c.json(projectDetail.parse({ ...row, payments: row.received_payments }))
+  })
+
+  .patch('/:id', requireAction('projects', 'edit'), async (c) => {
+    const parsed = updateProjectRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the project details.')
+    const { error } = await requestClient(c)
+      .from('projects')
+      .update(parsed.data)
+      .eq('id', c.req.param('id'))
+    if (error) fail(400, 'We could not update the project.')
+    return c.body(null, 204)
+  })
+
+  // Add a deliverable to an existing project; the DB trigger recomputes totals.
+  .post('/:id/deliverables', requireAction('projects', 'edit'), async (c) => {
+    const parsed = deliverableInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the deliverable details.')
+    const { error } = await requestClient(c)
+      .from('deliverables')
+      .insert({ ...parsed.data, project_id: c.req.param('id'), company_id: c.get('auth').companyId })
+    if (error) fail(400, 'We could not add the deliverable.')
+    return c.body(null, 201)
+  })
+
+  .delete('/:id/deliverables/:did', requireAction('projects', 'edit'), async (c) => {
+    const { error } = await requestClient(c)
+      .from('deliverables')
+      .delete()
+      .eq('id', c.req.param('did'))
+      .eq('project_id', c.req.param('id'))
+    if (error) fail(400, 'We could not remove the deliverable.')
+    return c.body(null, 204)
+  })
+
+  // Record a payment against a project.
+  .post('/:id/payments', requireAction('projects', 'edit'), async (c) => {
+    const parsed = paymentInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the payment details.')
+    const { error } = await requestClient(c).from('received_payments').insert({
+      project_id: c.req.param('id'),
+      company_id: c.get('auth').companyId,
+      amount: parsed.data.amount,
+      paid_on: parsed.data.paid_on ?? new Date().toISOString().slice(0, 10),
+      mode: parsed.data.mode ?? null,
+      reference: parsed.data.reference ?? null,
+      notes: parsed.data.notes ?? null,
+      recorded_by: c.get('auth').userId,
+    })
+    if (error) fail(400, 'We could not record the payment.')
+    return c.body(null, 201)
   })

@@ -49,6 +49,14 @@ export const createProjectRequest = z.object({
 })
 export type CreateProjectRequest = z.infer<typeof createProjectRequest>
 
+export const updateProjectRequest = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  status: projectStatus.optional(),
+  package_cost: money.optional(),
+  show_quotation: z.boolean().optional(),
+})
+export type UpdateProjectRequest = z.infer<typeof updateProjectRequest>
+
 /** Row shape in the project list. */
 export const projectListItem = z.object({
   id: uuid,

@@ -5,6 +5,9 @@ import {
   projectDetail,
   projectListItem,
   type CreateProjectRequest,
+  type DeliverableInput,
+  type PaymentInput,
+  type UpdateProjectRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -43,5 +46,55 @@ export function useCreateProject() {
         responseSchema: createResponse,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  })
+}
+
+const anySchema = z.any()
+
+/** Invalidate both the detail and the list after a project mutation. */
+function useProjectMutation(id: string) {
+  const qc = useQueryClient()
+  return () => {
+    void qc.invalidateQueries({ queryKey: ['projects', id] })
+    void qc.invalidateQueries({ queryKey: ['projects'] })
+  }
+}
+
+export function useUpdateProject(id: string) {
+  const onSuccess = useProjectMutation(id)
+  return useMutation({
+    mutationFn: (input: UpdateProjectRequest) =>
+      callApi(`/projects/${id}`, { method: 'PATCH', body: input, responseSchema: anySchema }),
+    onSuccess,
+  })
+}
+
+export function useAddDeliverable(id: string) {
+  const onSuccess = useProjectMutation(id)
+  return useMutation({
+    mutationFn: (input: DeliverableInput) =>
+      callApi(`/projects/${id}/deliverables`, { method: 'POST', body: input, responseSchema: anySchema }),
+    onSuccess,
+  })
+}
+
+export function useDeleteDeliverable(id: string) {
+  const onSuccess = useProjectMutation(id)
+  return useMutation({
+    mutationFn: (deliverableId: string) =>
+      callApi(`/projects/${id}/deliverables/${deliverableId}`, {
+        method: 'DELETE',
+        responseSchema: anySchema,
+      }),
+    onSuccess,
+  })
+}
+
+export function useAddPayment(id: string) {
+  const onSuccess = useProjectMutation(id)
+  return useMutation({
+    mutationFn: (input: PaymentInput) =>
+      callApi(`/projects/${id}/payments`, { method: 'POST', body: input, responseSchema: anySchema }),
+    onSuccess,
   })
 }

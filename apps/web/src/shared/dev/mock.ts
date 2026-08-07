@@ -81,6 +81,9 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board'))) return boardTasks
   if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
+  if (method === 'PATCH' && path.startsWith('/projects/')) return {}
+  if (method === 'DELETE' && path.startsWith('/projects/')) return {}
+  if (method === 'POST' && /^\/projects\/[^/]+\/(deliverables|payments)$/.test(path)) return {}
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return members
   if (method === 'GET' && path === '/team/directory') return directory
