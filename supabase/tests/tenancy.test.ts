@@ -35,6 +35,7 @@ async function freshDb() {
   await db.exec(mig('0004_access_control.sql'))
   await db.exec(mig('0005_company_theme.sql'))
   await db.exec(mig('0006_projects_core.sql'))
+  await db.exec(mig('0007_tasks_production.sql'))
   return db
 }
 
@@ -236,5 +237,96 @@ describe('projects core (Phase 4)', () => {
     await expect(
       db.query(`select create_project_with_details('${OWNER}', 'Bad', 1000);`),
     ).rejects.toThrow(/client not in this studio/i)
+  })
+})
+
+describe('tasks & production board (Phase 5)', () => {
+  let db: PGlite
+  let projectId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    const c = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'C') returning id;`,
+    )
+    const r = await db.query<{ id: string }>(
+      `select create_project_with_details('${c.rows[0]!.id}', 'Proj', 10000, 'active', false,
+        '[{"title":"Album"},{"title":"Film"},{"title":"Teaser"}]'::jsonb) as id;`,
+    )
+    projectId = r.rows[0]!.id
+  })
+
+  it('generate_tasks_for_project_deliverables makes one task per deliverable', async () => {
+    const ids = await db.query<{ id: string }>(
+      `select generate_tasks_for_project_deliverables('${projectId}') as id;`,
+    )
+    expect(ids.rows).toHaveLength(3)
+
+    // Idempotent-ish: re-running skips deliverables that already have a task.
+    const again = await db.query(
+      `select generate_tasks_for_project_deliverables('${projectId}') as id;`,
+    )
+    expect(again.rows).toHaveLength(0)
+
+    const count = await db.query<{ n: string }>(
+      `select count(*) as n from tasks where project_id = '${projectId}';`,
+    )
+    expect(Number(count.rows[0]!.n)).toBe(3)
+  })
+
+  it('board lane order persists and survives a re-read', async () => {
+    const tasks = await db.query<{ id: string }>(
+      `select id from tasks where project_id = '${projectId}' order by created_at;`,
+    )
+    const ids = tasks.rows.map((t) => t.id)
+    // Save a specific order (reverse), as a drag would.
+    const reversed = [...ids].reverse()
+    await db.query(
+      `select set_board_lane_order('default', 'to_do', array['${reversed.join("','")}']::uuid[]);`,
+    )
+
+    const order = await db.query<{ task_id: string; sort_order: number }>(
+      `select task_id, sort_order from production_board_card_order
+       where lane_key = 'to_do' order by sort_order;`,
+    )
+    expect(order.rows.map((o) => o.task_id)).toEqual(reversed)
+    expect(order.rows.map((o) => o.sort_order)).toEqual([0, 1, 2])
+  })
+
+  it('employee can update status of their own task, not others', async () => {
+    const emp = '55555555-5555-5555-5555-555555555555'
+    await db.exec(`insert into auth.users (id, email) values ('${emp}', 'emp@s.test');`)
+    await asUser(db, OWNER)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${emp}', get_current_company_id(), 'employee', 'Emp', 'emp@s.test');`,
+    )
+    const task = await db.query<{ id: string }>(
+      `select id from tasks where project_id = '${projectId}' limit 1;`,
+    )
+    const taskId = task.rows[0]!.id
+    await db.query(`select create_task_with_assignees(null, null, 'X') ;`) // unassigned control
+    await db.exec(
+      `insert into task_assignees (task_id, user_id, company_id)
+       values ('${taskId}', '${emp}', get_current_company_id());`,
+    )
+
+    await asUser(db, emp)
+    await db.query(`select update_my_task_status('${taskId}', 'completed');`)
+    const t = await db.query<{ status: string }>(`select status from tasks where id = '${taskId}';`)
+    expect(t.rows[0]!.status).toBe('completed')
+
+    // A task not assigned to the employee is rejected.
+    await asUser(db, OWNER)
+    const other = await db.query<{ id: string }>(
+      `select id from tasks where project_id = '${projectId}' and id <> '${taskId}' limit 1;`,
+    )
+    await asUser(db, emp)
+    await expect(
+      db.query(`select update_my_task_status('${other.rows[0]!.id}', 'completed');`),
+    ).rejects.toThrow(/not your task/i)
   })
 })
