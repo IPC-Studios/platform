@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
 import {
   gstState,
+  invoiceDetail,
   invoiceListItem,
   type CreateInvoiceRequest,
   type RecordPaymentRequest,
@@ -32,6 +33,16 @@ export function useStates() {
     queryFn: () => callApi('/billing/states', { responseSchema: states }),
     enabled: !!session,
     staleTime: 300_000,
+  })
+}
+
+export function useInvoice(id: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['invoices', id],
+    queryFn: () => callApi(`/billing/invoices/${id}`, { responseSchema: invoiceDetail }),
+    enabled: !!session && !!id && access.hasModule('billing'),
   })
 }
 

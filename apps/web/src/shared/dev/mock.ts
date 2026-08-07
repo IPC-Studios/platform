@@ -104,6 +104,7 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'POST' && path === '/work/submissions') return { id: uid(0x8a) }
   if (method === 'GET' && path === '/billing/states') return states
   if (method === 'GET' && path === '/billing/invoices') return invoices2
+  if (method === 'GET' && path.startsWith('/billing/invoices/')) return invoiceDetailFx
   if (method === 'POST' && path === '/billing/invoices') return { id: uid(0x9a), invoice_number: 'INV-0004' }
   if (method === 'POST' && path.includes('/payments')) return {}
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
@@ -170,6 +171,28 @@ const projectFin = [
   { project_id: PROJ.p1, name: 'Sharma Wedding', revenue: 227000, received: 150000, direct_team_cost: 40000, project_expenses: 15000, gross_profit: 172000, balance_pending: 77000 },
   { project_id: PROJ.p3, name: 'Nova Product Shoot', revenue: 72000, received: 72000, direct_team_cost: 18000, project_expenses: 8000, gross_profit: 46000, balance_pending: 0 },
 ]
+
+const invoiceDetailFx = {
+  id: uid(0x91),
+  invoice_number: 'INV-0001',
+  invoice_date: '2026-06-10',
+  status: 'partial',
+  place_of_supply: '27',
+  client_name: 'Sharma Family',
+  subtotal: 120000,
+  discount: 0,
+  taxable: 120000,
+  tax: 20400,
+  total: 140400,
+  amount_paid: 100000,
+  balance_due: 40400,
+  created_at: '2026-06-10T10:00:00Z',
+  items: [
+    { id: uid(0x9b1), description: 'Photography package', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, cgst: 9000, sgst: 9000, igst: 0 },
+    { id: uid(0x9b2), description: 'Wedding album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 12, cgst: 1200, sgst: 1200, igst: 0 },
+  ],
+  payments: [{ id: uid(0x9c1), amount: 100000, paid_on: '2026-06-12', mode: 'upi' }],
+}
 
 const states = [
   { code: '27', name: 'Maharashtra' },

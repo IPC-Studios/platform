@@ -19,6 +19,7 @@ import { TeamAllocationPage } from '@/routes/team-allocation'
 import { DataManagementPage } from '@/routes/data-management'
 import { MyWorkPage } from '@/routes/my-work'
 import { BillingPage } from '@/routes/billing'
+import { InvoiceDetailPage } from '@/routes/invoice-detail'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
 import { FollowUpsPage } from '@/routes/follow-ups'
@@ -63,6 +64,7 @@ const routeTree = rootRoute.addChildren([
   route('/employees', EmployeesPage),
   route('/attendance', AttendancePage),
   route('/billing', BillingPage),
+  route('/billing/invoices/$id', InvoiceDetailPage),
   route('/company-expenses', CompanyExpensesPage),
   route('/financials', FinancialsPage),
   route('/notifications', NotificationsPage),

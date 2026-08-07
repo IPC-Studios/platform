@@ -54,6 +54,7 @@ export const invoiceDetail = z.object({
   invoice_date: isoDate,
   status: invoiceStatus,
   place_of_supply: z.string().nullable(),
+  client_name: z.string().nullable(),
   subtotal: money,
   discount: money,
   taxable: money,

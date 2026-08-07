@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { Link } from '@tanstack/react-router'
 import { Plus, Trash2, IndianRupee } from 'lucide-react'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import type { CreateInvoiceRequest, InvoiceLineInput } from '@ipc/contracts'
@@ -52,7 +53,11 @@ function Billing() {
             <tbody>
               {data.map((inv) => (
                 <tr key={inv.id} className="border-t border-border">
-                  <td className="px-4 py-2 font-medium">{inv.invoice_number}</td>
+                  <td className="px-4 py-2 font-medium">
+                    <Link to="/billing/invoices/$id" params={{ id: inv.id }} className="hover:underline">
+                      {inv.invoice_number}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2 text-muted-foreground">{inv.client_name ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">{inv.invoice_date}</td>
                   <td className="px-4 py-2 text-right">{formatINR(inv.total)}</td>

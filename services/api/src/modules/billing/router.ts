@@ -86,6 +86,7 @@ export const billingRouter = new Hono<AppEnv>()
       .from('invoices')
       .select(
         'id,invoice_number,invoice_date,status,place_of_supply,subtotal,discount,taxable,tax,total,amount_paid,balance_due,created_at,' +
+          'clients(name),' +
           'invoice_items(id,description,quantity,rate,amount,gst_rate,cgst,sgst,igst),' +
           'invoice_payments(id,amount,paid_on,mode)',
       )
@@ -93,10 +94,18 @@ export const billingRouter = new Hono<AppEnv>()
       .single()
     if (error || !data) fail(404, 'That invoice was not found.')
     const row = data as unknown as Record<string, unknown> & {
+      clients: { name: string } | null
       invoice_items: unknown
       invoice_payments: unknown
     }
-    return c.json(invoiceDetail.parse({ ...row, items: row.invoice_items, payments: row.invoice_payments }))
+    return c.json(
+      invoiceDetail.parse({
+        ...row,
+        client_name: row.clients?.name ?? null,
+        items: row.invoice_items,
+        payments: row.invoice_payments,
+      }),
+    )
   })
 
   .post('/invoices/:id/payments', async (c) => {

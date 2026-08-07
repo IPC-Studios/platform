@@ -85,6 +85,22 @@
 * {
   border-color: var(--color-border);
 }
+
+/* Print: hide the app shell + anything marked no-print; show only the page. */
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
