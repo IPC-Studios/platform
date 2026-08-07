@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { Camera } from 'lucide-react'
 import { registerResponse } from '@ipc/contracts'
 import { supabase } from '@/shared/supabase'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Input, Label } from '@/shared/ui/input'
 
 type Mode = 'signin' | 'register'
 
@@ -29,7 +33,6 @@ export function LoginPage() {
       } else {
         const { error } = await supabase.auth.signUp({ email, password })
         if (error) throw new Error(error.message)
-        // Create the studio (company + owner) once the session exists.
         await callApi('/auth/register', {
           method: 'POST',
           body: { company_name: companyName, admin_name: adminName, email },
@@ -46,30 +49,91 @@ export function LoginPage() {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: '10vh auto', fontFamily: 'system-ui' }}>
-      <h1>IPC Studios</h1>
-      <p>{mode === 'signin' ? 'Sign in to your studio.' : 'Create your studio.'}</p>
-      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 8 }}>
-        {mode === 'register' && (
-          <>
-            <input placeholder="Studio name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required />
-            <input placeholder="Your name" value={adminName} onChange={(e) => setAdminName(e.target.value)} required />
-          </>
-        )}
-        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        {error && <p style={{ color: 'crimson', margin: 0 }}>{error}</p>}
-        <button type="submit" disabled={busy}>
-          {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create studio'}
-        </button>
-      </form>
-      <button
-        type="button"
-        onClick={() => setMode(mode === 'signin' ? 'register' : 'signin')}
-        style={{ marginTop: 12, background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 0 }}
-      >
-        {mode === 'signin' ? 'New studio? Register' : 'Have an account? Sign in'}
-      </button>
-    </main>
+    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Camera className="size-6" />
+          </span>
+          <h1 className="text-xl font-semibold tracking-tight">IPC Studios</h1>
+          <p className="text-sm text-muted-foreground">
+            {mode === 'signin' ? 'Sign in to your studio workspace.' : 'Create your studio workspace.'}
+          </p>
+        </div>
+
+        <Card>
+          <CardContent className="p-6">
+            <form onSubmit={onSubmit} className="flex flex-col gap-4">
+              {mode === 'register' && (
+                <>
+                  <Field label="Studio name">
+                    <Input
+                      placeholder="e.g. Aperture Studios"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      required
+                    />
+                  </Field>
+                  <Field label="Your name">
+                    <Input
+                      placeholder="e.g. Priya Sharma"
+                      value={adminName}
+                      onChange={(e) => setAdminName(e.target.value)}
+                      required
+                    />
+                  </Field>
+                </>
+              )}
+              <Field label="Email">
+                <Input
+                  type="email"
+                  placeholder="you@studio.in"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Password">
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </Field>
+
+              {error && (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+              )}
+
+              <Button type="submit" disabled={busy} className="mt-1 w-full">
+                {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create studio'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          {mode === 'signin' ? "New studio?" : 'Already have an account?'}{' '}
+          <button
+            type="button"
+            onClick={() => setMode(mode === 'signin' ? 'register' : 'signin')}
+            className="font-medium text-primary hover:underline"
+          >
+            {mode === 'signin' ? 'Register' : 'Sign in'}
+          </button>
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
   )
 }

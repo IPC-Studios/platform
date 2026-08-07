@@ -5,7 +5,7 @@
       "name": "web",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "--filter", "@ipc/web", "dev"],
-      "port": 3000
+      "port": 5173
     }
   ]
 }

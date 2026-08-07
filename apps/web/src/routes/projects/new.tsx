@@ -7,6 +7,7 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
 import { useClients, useCreateClient } from '@/features/clients/api'
 import { useCreateProject } from '@/features/projects/api'
@@ -94,43 +95,36 @@ function NewProject() {
               <CardTitle>Basics</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <label className="block text-sm font-medium">Client</label>
+              <Label>Client</Label>
               {clients && clients.length > 0 && (
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
+                <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
                   <option value="">— Select a client —</option>
                   {clients.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               )}
               {!clientId && (
-                <input
+                <Input
                   placeholder="…or type a new client name"
                   value={newClientName}
                   onChange={(e) => setNewClientName(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
               )}
-              <label className="block pt-2 text-sm font-medium">Project name</label>
-              <input
+              <Label className="block pt-2">Project name</Label>
+              <Input
                 placeholder="e.g. Sharma Wedding"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               />
-              <label className="block pt-2 text-sm font-medium">Package cost (₹)</label>
-              <input
+              <Label className="block pt-2">Package cost (₹)</Label>
+              <Input
                 type="number"
                 min={0}
                 value={packageCost}
                 onChange={(e) => setPackageCost(Number(e.target.value))}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               />
             </CardContent>
           </Card>
@@ -152,11 +146,11 @@ function NewProject() {
               )}
               {deliverables.map((d, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2">
-                  <input
+                  <Input
                     placeholder="Title"
                     value={d.title}
                     onChange={(e) => patchDeliverable(i, { title: e.target.value })}
-                    className="min-w-40 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                    className="min-w-40 flex-1"
                   />
                   <label className="flex items-center gap-1 text-sm">
                     <input
@@ -166,13 +160,13 @@ function NewProject() {
                     />
                     Charge
                   </label>
-                  <input
+                  <Input
                     type="number"
                     min={0}
                     disabled={!d.is_additional_charge}
                     value={d.additional_charge_amount}
                     onChange={(e) => patchDeliverable(i, { additional_charge_amount: Number(e.target.value) })}
-                    className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-50"
+                    className="w-28"
                   />
                   <Button
                     variant="ghost"
@@ -201,7 +195,7 @@ function NewProject() {
               {payments.length === 0 && <p className="text-sm text-muted-foreground">None recorded.</p>}
               {payments.map((p, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <input
+                  <Input
                     type="number"
                     min={0}
                     placeholder="Amount"
@@ -209,15 +203,15 @@ function NewProject() {
                     onChange={(e) =>
                       setPayments((ps) => ps.map((x, idx) => (idx === i ? { ...x, amount: Number(e.target.value) } : x)))
                     }
-                    className="w-40 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                    className="w-40"
                   />
-                  <input
+                  <Input
                     placeholder="Mode (upi/cash)"
                     value={p.mode ?? ''}
                     onChange={(e) =>
                       setPayments((ps) => ps.map((x, idx) => (idx === i ? { ...x, mode: e.target.value } : x)))
                     }
-                    className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                    className="flex-1"
                   />
                   <Button
                     variant="ghost"

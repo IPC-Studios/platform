@@ -2,6 +2,7 @@ import { createContext, use, useCallback, useEffect, useState, type ReactNode } 
 import { sessionState, type SessionState } from '@ipc/contracts'
 import { supabase } from '../supabase'
 import { callApi } from '../api/client'
+import { MOCK_ENABLED, mockSession } from '../dev/mock'
 
 interface AuthValue {
   session: SessionState | null
@@ -17,6 +18,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
+    if (MOCK_ENABLED) {
+      setSession(mockSession)
+      return
+    }
     const { data } = await supabase.auth.getSession()
     if (!data.session) {
       setSession(null)

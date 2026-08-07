@@ -1,6 +1,7 @@
 import type { z } from '@ipc/contracts'
 import { config } from '../config'
 import { supabase } from '../supabase'
+import { MOCK_ENABLED, mockResponse } from '../dev/mock'
 
 /**
  * THE api client. Every call to services/api goes through here — never a
@@ -29,11 +30,19 @@ export async function callApi<TOut extends z.ZodTypeAny>(
   path: string,
   opts: CallOptions<TOut>,
 ): Promise<z.infer<TOut>> {
+  const method = opts.method ?? 'GET'
+
+  // DEV UI-preview short-circuit — never reached in production.
+  if (MOCK_ENABLED) {
+    const canned = mockResponse(path, method)
+    if (canned !== null) return opts.responseSchema.parse(canned)
+  }
+
   const { data } = await supabase.auth.getSession()
   const token = data.session?.access_token
 
   const init: RequestInit = {
-    method: opts.method ?? 'GET',
+    method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

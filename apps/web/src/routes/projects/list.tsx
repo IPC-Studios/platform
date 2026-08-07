@@ -9,7 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { formatINR } from '@/shared/ui/format'
+import { formatINR, humanize } from '@/shared/ui/format'
 import { useProjects } from '@/features/projects/api'
 
 type Filter = ProjectStatus | 'all'
@@ -93,7 +93,7 @@ function ProjectsList() {
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium">{p.name}</span>
-                <StatusBadge tone={STATUS_TONE[p.status]}>{p.status}</StatusBadge>
+                <StatusBadge tone={STATUS_TONE[p.status]}>{humanize(p.status)}</StatusBadge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{p.client_name ?? '—'}</p>
               <p className="mt-2 font-semibold">{formatINR(p.total_cost)}</p>
@@ -121,7 +121,7 @@ function ProjectsList() {
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">{p.client_name ?? '—'}</td>
                   <td className="px-4 py-2">
-                    <StatusBadge tone={STATUS_TONE[p.status]}>{p.status}</StatusBadge>
+                    <StatusBadge tone={STATUS_TONE[p.status]}>{humanize(p.status)}</StatusBadge>
                   </td>
                   <td className="px-4 py-2 text-right font-medium">{formatINR(p.total_cost)}</td>
                 </tr>

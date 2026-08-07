@@ -7,7 +7,7 @@ import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { Button } from '@/shared/ui/button'
-import { formatINR } from '@/shared/ui/format'
+import { formatINR, humanize } from '@/shared/ui/format'
 import { useProject } from '@/features/projects/api'
 
 export function ProjectDetailPage() {
@@ -33,7 +33,7 @@ function ProjectDetail() {
       <Breadcrumbs items={[{ label: 'Projects', to: '/projects' }, { label: data.name }]} />
       <PageHeader
         title={data.name}
-        actions={<StatusBadge tone="info">{data.status}</StatusBadge>}
+        actions={<StatusBadge tone="info">{humanize(data.status)}</StatusBadge>}
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
