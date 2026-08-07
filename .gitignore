@@ -39,3 +39,8 @@ blob-report/
 
 # Large source archive (kept out of history)
 IPC Studios.zip
+
+# Reference material — kept local only, never pushed
+extracted/
+docs-reverse-engineered/
+blueprint/
