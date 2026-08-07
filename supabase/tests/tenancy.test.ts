@@ -34,6 +34,7 @@ async function freshDb() {
   await db.exec(mig('0003_tenancy_rls.sql'))
   await db.exec(mig('0004_access_control.sql'))
   await db.exec(mig('0005_company_theme.sql'))
+  await db.exec(mig('0006_projects_core.sql'))
   return db
 }
 
@@ -151,5 +152,89 @@ describe('access control (Phase 2)', () => {
     await asUser(db, member)
     const ctx = await db.query<{ profile_key: string | null }>(`select * from get_auth_context();`)
     expect(ctx.rows[0]?.profile_key).toBeNull()
+  })
+})
+
+describe('projects core (Phase 4)', () => {
+  let db: PGlite
+  let clientId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    const c = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'Wedding Co')
+       returning id;`,
+    )
+    clientId = c.rows[0]!.id
+  })
+
+  async function totals(projectId: string) {
+    const r = await db.query<{ additional_deliverables_cost: string; total_cost: string }>(
+      `select additional_deliverables_cost, total_cost from projects where id = '${projectId}';`,
+    )
+    return {
+      additional: Number(r.rows[0]!.additional_deliverables_cost),
+      total: Number(r.rows[0]!.total_cost),
+    }
+  }
+
+  it('create_project_with_details computes totals from qualifying deliverables only', async () => {
+    const r = await db.query<{ id: string }>(
+      `select create_project_with_details(
+         '${clientId}', 'Sharma Wedding', 50000, 'active', true,
+         '[
+           {"title":"Album","is_additional_charge":true,"additional_charge_amount":5000},
+           {"title":"Extra film","is_additional_charge":true,"additional_charge_amount":3000},
+           {"title":"Internal cut","visibility_scope":"internal","is_additional_charge":true,"additional_charge_amount":9999},
+           {"title":"Free teaser","is_additional_charge":false,"additional_charge_amount":9999}
+         ]'::jsonb,
+         '[{"amount":20000,"mode":"upi"}]'::jsonb
+       ) as id;`,
+    )
+    const projectId = r.rows[0]!.id
+    const t = await totals(projectId)
+    expect(t.additional).toBe(8000) // 5000 + 3000 only
+    expect(t.total).toBe(58000) // package 50000 + 8000
+
+    const pay = await db.query<{ n: string }>(
+      `select count(*) as n from received_payments where project_id = '${projectId}';`,
+    )
+    expect(Number(pay.rows[0]!.n)).toBe(1)
+  })
+
+  it('trigger keeps totals correct when a deliverable is added, edited, deleted', async () => {
+    const r = await db.query<{ id: string }>(
+      `select create_project_with_details('${clientId}','Edit Test', 10000) as id;`,
+    )
+    const p = r.rows[0]!.id
+    expect((await totals(p)).total).toBe(10000)
+
+    // add a qualifying deliverable
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, is_additional_charge, additional_charge_amount)
+       values (get_current_company_id(), '${p}', 'Drone', true, 4000);`,
+    )
+    expect(await totals(p)).toEqual({ additional: 4000, total: 14000 })
+
+    // demote it to non-charge -> drops out
+    await db.query(`update deliverables set is_additional_charge = false where project_id = '${p}';`)
+    expect(await totals(p)).toEqual({ additional: 0, total: 10000 })
+
+    // re-charge then delete -> back to base
+    await db.query(
+      `update deliverables set is_additional_charge = true, additional_charge_amount = 2500 where project_id = '${p}';`,
+    )
+    expect((await totals(p)).total).toBe(12500)
+    await db.query(`delete from deliverables where project_id = '${p}';`)
+    expect((await totals(p)).total).toBe(10000)
+  })
+
+  it('rejects a client from another studio', async () => {
+    await expect(
+      db.query(`select create_project_with_details('${OWNER}', 'Bad', 1000);`),
+    ).rejects.toThrow(/client not in this studio/i)
   })
 })
