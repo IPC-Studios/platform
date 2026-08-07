@@ -39,6 +39,7 @@ async function freshDb() {
   await db.exec(mig('0008_team_allocation.sql'))
   await db.exec(mig('0009_data_management.sql'))
   await db.exec(mig('0010_work_delivery.sql'))
+  await db.exec(mig('0011_billing.sql'))
   return db
 }
 
@@ -496,5 +497,75 @@ describe('work submission -> review -> tokenised delivery (Phase 8)', () => {
       `select consume_access_token('work_delivery', '${raw}');`,
     )
     expect(second.rows[0]!.consume_access_token).toBeNull()
+  })
+})
+
+describe('billing & invoicing (Phase 9)', () => {
+  let db: PGlite
+  let clientId: string
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days', state = 'Maharashtra'
+       where id = get_current_company_id();`,
+    )
+    const c = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'C') returning id;`,
+    )
+    clientId = c.rows[0]!.id
+  })
+
+  it('assigns sequential invoice numbers and persists totals', async () => {
+    const items = JSON.stringify([
+      { description: 'Photography', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    ])
+    const r1 = await db.query<{ id: string; invoice_number: string }>(
+      `select * from create_invoice('${clientId}', null, '27', current_date, null,
+        100000, 0, 100000, 18000, 118000, '${items}'::jsonb, null);`,
+    )
+    expect(r1.rows[0]!.invoice_number).toBe('INV-0001')
+
+    const r2 = await db.query<{ invoice_number: string }>(
+      `select * from create_invoice('${clientId}', null, '27', current_date, null,
+        100000, 0, 100000, 18000, 118000, '${items}'::jsonb, null);`,
+    )
+    expect(r2.rows[0]!.invoice_number).toBe('INV-0002')
+
+    const inv = await db.query<{ total: string; balance_due: string; status: string }>(
+      `select total, balance_due, status from invoices where id = '${r1.rows[0]!.id}';`,
+    )
+    expect(Number(inv.rows[0]!.total)).toBe(118000)
+    expect(Number(inv.rows[0]!.balance_due)).toBe(118000)
+
+    const it = await db.query<{ n: string }>(
+      `select count(*) as n from invoice_items where invoice_id = '${r1.rows[0]!.id}';`,
+    )
+    expect(Number(it.rows[0]!.n)).toBe(1)
+  })
+
+  it('records payments and moves status partial -> paid', async () => {
+    const items = JSON.stringify([
+      { description: 'Album', quantity: 1, rate: 10000, amount: 10000, gst_rate: 12, taxable: 10000, cgst: 600, sgst: 600, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(
+      `select id from create_invoice('${clientId}', null, '27', current_date, null,
+        10000, 0, 10000, 1200, 11200, '${items}'::jsonb, null);`,
+    )
+    const id = inv.rows[0]!.id
+
+    await db.query(`select record_invoice_payment('${id}', 5000, current_date, 'upi', 'A1');`)
+    let row = await db.query<{ status: string; balance_due: string }>(
+      `select status, balance_due from invoices where id = '${id}';`,
+    )
+    expect(row.rows[0]!.status).toBe('partial')
+    expect(Number(row.rows[0]!.balance_due)).toBe(6200)
+
+    await db.query(`select record_invoice_payment('${id}', 6200, current_date, 'cash', 'A2');`)
+    row = await db.query(`select status, balance_due from invoices where id = '${id}';`)
+    expect(row.rows[0]!.status).toBe('paid')
+    expect(Number(row.rows[0]!.balance_due)).toBe(0)
   })
 })

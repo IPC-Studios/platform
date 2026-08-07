@@ -17,6 +17,7 @@ import { ProductionBoardPage } from '@/routes/production-board'
 import { TeamAllocationPage } from '@/routes/team-allocation'
 import { DataManagementPage } from '@/routes/data-management'
 import { MyWorkPage } from '@/routes/my-work'
+import { BillingPage } from '@/routes/billing'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -50,7 +51,7 @@ const routeTree = rootRoute.addChildren([
   route('/facebook', comingSoon('Lead sources', 'lead_sources', 'Phase 11')),
   route('/employees', comingSoon('Team directory', 'team_directory', 'Phase 12')),
   route('/attendance', comingSoon('Attendance', 'attendance', 'Phase 12')),
-  route('/billing', comingSoon('Billing', 'billing', 'Phase 9')),
+  route('/billing', BillingPage),
   route('/company-expenses', comingSoon('Company expenses', 'company_expenses', 'Phase 10')),
   route('/financials', comingSoon('Financials', 'financials', 'Phase 10')),
   route('/notifications', comingSoon('Alerts', 'crm', 'Phase 13')),

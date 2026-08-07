@@ -90,6 +90,10 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'POST' && path === '/data') return dataRecords[0]
   if (method === 'GET' && path === '/work/submissions') return workSubs
   if (method === 'POST' && path === '/work/submissions') return { id: uid(0x8a) }
+  if (method === 'GET' && path === '/billing/states') return states
+  if (method === 'GET' && path === '/billing/invoices') return invoices2
+  if (method === 'POST' && path === '/billing/invoices') return { id: uid(0x9a), invoice_number: 'INV-0004' }
+  if (method === 'POST' && path.includes('/payments')) return {}
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -101,6 +105,19 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const states = [
+  { code: '27', name: 'Maharashtra' },
+  { code: '07', name: 'Delhi' },
+  { code: '29', name: 'Karnataka' },
+  { code: '33', name: 'Tamil Nadu' },
+]
+
+const invoices2 = [
+  { id: uid(0x91), invoice_number: 'INV-0001', client_name: 'Sharma Family', invoice_date: '2026-06-10', total: 140400, balance_due: 40400, status: 'partial' },
+  { id: uid(0x92), invoice_number: 'INV-0002', client_name: 'Verma Weddings', invoice_date: '2026-06-18', total: 90000, balance_due: 0, status: 'paid' },
+  { id: uid(0x93), invoice_number: 'INV-0003', client_name: 'Nova Events', invoice_date: '2026-07-01', total: 72000, balance_due: 72000, status: 'sent' },
 ]
 
 const workSubs = [
