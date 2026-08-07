@@ -94,6 +94,9 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/billing/invoices') return invoices2
   if (method === 'POST' && path === '/billing/invoices') return { id: uid(0x9a), invoice_number: 'INV-0004' }
   if (method === 'POST' && path.includes('/payments')) return {}
+  if (method === 'GET' && path === '/financials/expenses') return expensesFx
+  if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
+  if (method === 'GET' && path === '/financials/projects') return projectFin
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -105,6 +108,17 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const expensesFx = [
+  { id: uid(0xa1), project_id: PROJ.p1, category: 'Travel', description: 'Outstation shoot', amount: 15000, expense_date: '2026-06-20', gst_treatment: 'non_gst', is_fixed_overhead: false },
+  { id: uid(0xa2), project_id: null, category: 'Rent', description: 'Studio rent', amount: 40000, expense_date: '2026-06-01', gst_treatment: 'gst_applicable', is_fixed_overhead: true },
+  { id: uid(0xa3), project_id: PROJ.p3, category: 'Props', description: 'Product staging', amount: 8000, expense_date: '2026-06-28', gst_treatment: 'non_gst', is_fixed_overhead: false },
+]
+
+const projectFin = [
+  { project_id: PROJ.p1, name: 'Sharma Wedding', revenue: 227000, received: 150000, direct_team_cost: 40000, project_expenses: 15000, gross_profit: 172000, balance_pending: 77000 },
+  { project_id: PROJ.p3, name: 'Nova Product Shoot', revenue: 72000, received: 72000, direct_team_cost: 18000, project_expenses: 8000, gross_profit: 46000, balance_pending: 0 },
 ]
 
 const states = [

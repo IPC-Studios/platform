@@ -13,6 +13,7 @@ import { allocationRouter } from './modules/allocation/router'
 import { dataRouter } from './modules/data/router'
 import { workRouter } from './modules/work/router'
 import { billingRouter } from './modules/billing/router'
+import { financialsRouter } from './modules/financials/router'
 
 const app = new Hono<AppEnv>()
 
@@ -34,5 +35,6 @@ app.route('/allocation', allocationRouter)
 app.route('/data', dataRouter)
 app.route('/work', workRouter)
 app.route('/billing', billingRouter)
+app.route('/financials', financialsRouter)
 
 export default app

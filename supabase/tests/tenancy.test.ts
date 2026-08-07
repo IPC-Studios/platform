@@ -40,6 +40,7 @@ async function freshDb() {
   await db.exec(mig('0009_data_management.sql'))
   await db.exec(mig('0010_work_delivery.sql'))
   await db.exec(mig('0011_billing.sql'))
+  await db.exec(mig('0012_expenses_financials.sql'))
   return db
 }
 
@@ -567,5 +568,69 @@ describe('billing & invoicing (Phase 9)', () => {
     row = await db.query(`select status, balance_due from invoices where id = '${id}';`)
     expect(row.rows[0]!.status).toBe('paid')
     expect(Number(row.rows[0]!.balance_due)).toBe(0)
+  })
+})
+
+describe('financials — profit view (Phase 10)', () => {
+  let db: PGlite
+  let projectId: string
+  const member = '77777777-7777-7777-7777-777777777777'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+    await db.exec(`insert into auth.users (id,email) values ('${member}','m@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Shooter', 'm@s.test');`,
+    )
+    const c = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'C') returning id;`,
+    )
+    const r = await db.query<{ id: string }>(
+      `select create_project_with_details('${c.rows[0]!.id}', 'Proj', 200000) as id;`,
+    )
+    projectId = r.rows[0]!.id
+  })
+
+  it('reproduces Gross Profit = revenue - direct team cost - project expenses', async () => {
+    // A shoot + a booked slot (direct team cost) + a project expense.
+    const shoot = await db.query<{ id: string }>(
+      `insert into shoots (company_id, project_id, name) values (get_current_company_id(), '${projectId}', 'Day 1') returning id;`,
+    )
+    await db.query(
+      `select book_team_slot('${member}', '${shoot.rows[0]!.id}', 'Photographer',
+        '2026-08-01T04:00:00Z', '2026-08-01T12:00:00Z', 40000);`,
+    )
+    await db.exec(
+      `insert into expenses (company_id, project_id, category, amount)
+       values (get_current_company_id(), '${projectId}', 'Travel', 15000);`,
+    )
+
+    const f = await db.query<{ revenue: string; direct_team_cost: string; project_expenses: string }>(
+      `select revenue, direct_team_cost, project_expenses from project_financials where project_id = '${projectId}';`,
+    )
+    const row = f.rows[0]!
+    expect(Number(row.revenue)).toBe(200000)
+    expect(Number(row.direct_team_cost)).toBe(40000)
+    expect(Number(row.project_expenses)).toBe(15000)
+    // gross = 200000 - 40000 - 15000 = 145000
+    expect(Number(row.revenue) - Number(row.direct_team_cost) - Number(row.project_expenses)).toBe(145000)
+  })
+
+  it('a cancelled slot is excluded from direct team cost', async () => {
+    await db.query(
+      `select set_team_slot_status(id, 'cancelled') from team_assignment_slots
+       where company_id = get_current_company_id();`,
+    )
+    const f = await db.query<{ direct_team_cost: string }>(
+      `select direct_team_cost from project_financials where project_id = '${projectId}';`,
+    )
+    expect(Number(f.rows[0]!.direct_team_cost)).toBe(0)
   })
 })

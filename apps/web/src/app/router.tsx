@@ -18,6 +18,8 @@ import { TeamAllocationPage } from '@/routes/team-allocation'
 import { DataManagementPage } from '@/routes/data-management'
 import { MyWorkPage } from '@/routes/my-work'
 import { BillingPage } from '@/routes/billing'
+import { CompanyExpensesPage } from '@/routes/company-expenses'
+import { FinancialsPage } from '@/routes/financials'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -52,8 +54,8 @@ const routeTree = rootRoute.addChildren([
   route('/employees', comingSoon('Team directory', 'team_directory', 'Phase 12')),
   route('/attendance', comingSoon('Attendance', 'attendance', 'Phase 12')),
   route('/billing', BillingPage),
-  route('/company-expenses', comingSoon('Company expenses', 'company_expenses', 'Phase 10')),
-  route('/financials', comingSoon('Financials', 'financials', 'Phase 10')),
+  route('/company-expenses', CompanyExpensesPage),
+  route('/financials', FinancialsPage),
   route('/notifications', comingSoon('Alerts', 'crm', 'Phase 13')),
   route('/settings/company', comingSoon('Settings', 'settings', 'a later phase')),
   route('/platform/studios', comingSoon('Platform', 'studio_access', 'Phase 14')),
