@@ -85,6 +85,10 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/team/members') return members
   if (method === 'GET' && path === '/team/directory') return directory
   if (method === 'POST' && path === '/team/members') return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
+  if (method === 'GET' && path === '/settings/company') return companyFx
+  if (method === 'PATCH' && path === '/settings/company') return companyFx
+  if (method === 'GET' && path === '/settings/theme') return { preset_key: 'indigo', color_scheme: 'light' }
+  if (method === 'PATCH' && path === '/settings/theme') return { preset_key: 'indigo', color_scheme: 'light' }
   if (method === 'GET' && path === '/allocation') return slots
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
   if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords
@@ -185,6 +189,17 @@ const members = [
   { user_id: uid(0xe2), name: 'Anita (Cinematographer)', role: 'employee' },
   { user_id: uid(0xe3), name: 'Sana (Editor)', role: 'manager' },
 ]
+
+const companyFx = {
+  name: 'Demo Studio',
+  legal_name: 'Demo Studio Pvt Ltd',
+  display_name: 'Demo Studio',
+  city: 'Mumbai',
+  state: 'Maharashtra',
+  country: 'India',
+  website: 'https://demostudio.in',
+  invoice_gst_number: '27ABCDE1234F1Z5',
+}
 
 const directory = [
   { user_id: uid(0x1), name: 'Demo Owner', email: 'owner@demostudio.in', role: 'super_admin', phone: '9800000000', status: 'active' },

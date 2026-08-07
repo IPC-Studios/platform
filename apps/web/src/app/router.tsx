@@ -25,6 +25,7 @@ import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
 import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
+import { SettingsPage } from '@/routes/settings'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { comingSoon } from '@/routes/coming-soon'
 
@@ -64,7 +65,7 @@ const routeTree = rootRoute.addChildren([
   route('/company-expenses', CompanyExpensesPage),
   route('/financials', FinancialsPage),
   route('/notifications', NotificationsPage),
-  route('/settings/company', comingSoon('Settings', 'settings', 'a later phase')),
+  route('/settings/company', SettingsPage),
   route('/settings/subscription', SubscriptionPage),
   route('/platform/studios', comingSoon('Platform', 'studio_access', 'Phase 14')),
 ])
