@@ -7,6 +7,7 @@ import { authRouter } from './modules/auth/router'
 import { accessRouter } from './modules/access/router'
 import { clientsRouter } from './modules/clients/router'
 import { projectsRouter } from './modules/projects/router'
+import { tasksRouter } from './modules/tasks/router'
 
 const app = new Hono<AppEnv>()
 
@@ -22,5 +23,6 @@ app.route('/auth', authRouter)
 app.route('/access', accessRouter)
 app.route('/clients', clientsRouter)
 app.route('/projects', projectsRouter)
+app.route('/tasks', tasksRouter)
 
 export default app
