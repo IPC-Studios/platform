@@ -8,6 +8,9 @@ import type { Client } from '@ipc/contracts'
  */
 export const MOCK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_MOCK === '1'
 
+/** Sentinel: this path is not mocked → fall through to the real fetch. */
+export const NOT_MOCKED = Symbol('not-mocked')
+
 /** Deterministic uuid from a short seed so fixtures satisfy uuid contracts. */
 const uid = (n: number) => `${n.toString(16).padStart(8, '0')}-0000-4000-8000-000000000000`
 
@@ -60,15 +63,41 @@ const projectDetail: ProjectDetail = {
   ],
 }
 
-/** Returns a canned response for a path, or null if unmocked (falls through). */
+const boardTasks = [
+  boardTask(uid(0x1a), 'Cull & select — Sharma', 'to_do', 'high', 'Sharma Wedding', 0),
+  boardTask(uid(0x1b), 'Colour grade film', 'to_do', 'urgent', 'Sharma Wedding', 1),
+  boardTask(uid(0x1c), 'Album layout', 'in_progress', 'medium', 'Sharma Wedding', 0),
+  boardTask(uid(0x1d), 'Edit teaser', 'in_progress', 'high', 'Verma Reception', 1),
+  boardTask(uid(0x1e), 'Client review call', 'completed', 'low', 'Nova Product Shoot', 0),
+  boardTask(uid(0x1f), 'Retouch product set', 'completed', 'medium', 'Nova Product Shoot', 1),
+]
+
+/** Canned response for a path, or NOT_MOCKED to fall through to the network. */
 export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/auth/session') return mockSession
   if (method === 'GET' && path === '/clients') return clients
   if (method === 'GET' && path === '/projects') return projects
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
+  if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board'))) return boardTasks
+  if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
-  return null
+  if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
+  // 204-style writes: return an empty object so the schema (z.any) passes.
+  if (method === 'POST' && path === '/tasks/board/order') return {}
+  if (method === 'PATCH' && path.includes('/status')) return {}
+  return NOT_MOCKED
+}
+
+function boardTask(
+  id: string,
+  title: string,
+  status: string,
+  priority: string,
+  project_name: string,
+  sort_order: number,
+) {
+  return { id, title, status, priority, due_date: null, project_id: PROJ.p1, project_name, sort_order }
 }
 
 function fakeClient(id: string, name: string, phone: string | null): Client {

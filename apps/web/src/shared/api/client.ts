@@ -1,7 +1,7 @@
 import type { z } from '@ipc/contracts'
 import { config } from '../config'
 import { supabase } from '../supabase'
-import { MOCK_ENABLED, mockResponse } from '../dev/mock'
+import { MOCK_ENABLED, mockResponse, NOT_MOCKED } from '../dev/mock'
 
 /**
  * THE api client. Every call to services/api goes through here — never a
@@ -35,7 +35,7 @@ export async function callApi<TOut extends z.ZodTypeAny>(
   // DEV UI-preview short-circuit — never reached in production.
   if (MOCK_ENABLED) {
     const canned = mockResponse(path, method)
-    if (canned !== null) return opts.responseSchema.parse(canned)
+    if (canned !== NOT_MOCKED) return opts.responseSchema.parse(canned)
   }
 
   const { data } = await supabase.auth.getSession()

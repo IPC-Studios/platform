@@ -13,6 +13,7 @@ import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
 import { ProjectDetailPage } from '@/routes/projects/detail'
 import { ClientsListPage } from '@/routes/clients/list'
+import { ProductionBoardPage } from '@/routes/production-board'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -35,11 +36,11 @@ const routeTree = rootRoute.addChildren([
 
   // Nav destinations whose feature phase isn't built yet.
   route('/shoots', comingSoon('Shoots', 'projects', 'a later phase')),
-  route('/tasks', comingSoon('Tasks', 'tasks', 'Phase 5')),
-  route('/tasks/my', comingSoon('My tasks', 'tasks', 'Phase 5')),
+  route('/tasks', ProductionBoardPage),
+  route('/tasks/my', comingSoon('My tasks', 'tasks', 'Phase 12')),
   route('/shoots/my', comingSoon('My shoots', 'projects', 'a later phase')),
   route('/my-work', comingSoon('My work', 'projects', 'Phase 8')),
-  route('/production-board', comingSoon('Production board', 'projects', 'Phase 5')),
+  route('/production-board', ProductionBoardPage),
   route('/data-management', comingSoon('Data management', 'projects', 'Phase 7')),
   route('/team-allocation', comingSoon('Team allocation', 'projects', 'Phase 6')),
   route('/follow-ups', comingSoon('Follow-ups', 'crm', 'Phase 11')),
