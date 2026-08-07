@@ -23,6 +23,7 @@ import { FinancialsPage } from '@/routes/financials'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
+import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { comingSoon } from '@/routes/coming-soon'
@@ -57,7 +58,7 @@ const routeTree = rootRoute.addChildren([
   route('/team-allocation', TeamAllocationPage),
   route('/follow-ups', FollowUpsPage),
   route('/facebook', comingSoon('Lead sources', 'lead_sources', 'Phase 11')),
-  route('/employees', comingSoon('Team directory', 'team_directory', 'Phase 12')),
+  route('/employees', EmployeesPage),
   route('/attendance', AttendancePage),
   route('/billing', BillingPage),
   route('/company-expenses', CompanyExpensesPage),

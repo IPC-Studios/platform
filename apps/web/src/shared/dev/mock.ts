@@ -83,6 +83,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return members
+  if (method === 'GET' && path === '/team/directory') return directory
+  if (method === 'POST' && path === '/team/members') return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
   if (method === 'GET' && path === '/allocation') return slots
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
   if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords
@@ -182,6 +184,13 @@ const members = [
   { user_id: uid(0xe1), name: 'Rahul (Photographer)', role: 'employee' },
   { user_id: uid(0xe2), name: 'Anita (Cinematographer)', role: 'employee' },
   { user_id: uid(0xe3), name: 'Sana (Editor)', role: 'manager' },
+]
+
+const directory = [
+  { user_id: uid(0x1), name: 'Demo Owner', email: 'owner@demostudio.in', role: 'super_admin', phone: '9800000000', status: 'active' },
+  { user_id: uid(0xe1), name: 'Rahul Sharma', email: 'rahul@demostudio.in', role: 'employee', phone: '9811111111', status: 'active' },
+  { user_id: uid(0xe2), name: 'Anita Desai', email: 'anita@demostudio.in', role: 'employee', phone: null, status: 'active' },
+  { user_id: uid(0xe3), name: 'Sana Khan', email: 'sana@demostudio.in', role: 'manager', phone: '9833333333', status: 'active' },
 ]
 
 const slots = [
