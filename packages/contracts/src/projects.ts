@@ -70,9 +70,22 @@ export const projectListItem = z.object({
 })
 export type ProjectListItem = z.infer<typeof projectListItem>
 
-export const deliverable = deliverableInput.extend({
+/** Deliverable as returned by the API — DB nulls tolerated (not input's optionals). */
+export const deliverable = z.object({
   id: uuid,
   project_id: uuid,
+  title: z.string(),
+  description: z.string().nullish(),
+  list_key: z.string(),
+  is_additional_charge: z.boolean(),
+  additional_charge_amount: money,
+  visibility_scope: deliverableVisibility,
+  show_on_quotation: z.boolean(),
+  estimated_date: isoDate.nullish(),
+  start_rule: deliverableStartRule,
+  delivery_days_after_start: z.number().int().nullish(),
+  work_type: z.string().nullish(),
+  internal_notes: z.string().nullish(),
   status: z.string(),
 })
 
