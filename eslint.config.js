@@ -18,6 +18,17 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Standalone Node scripts (run manually via bun), not part of the app build.
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', fetch: 'readonly' },
+    },
+    rules: {
+      'no-undef': 'off',
+      '@typescript-eslint/no-unused-expressions': 'off',
+    },
+  },
+  {
     rules: {
       '@typescript-eslint/no-unused-vars': [
         'error',
