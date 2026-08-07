@@ -182,11 +182,20 @@ Connect the repo in each vendor's dashboard; they build on push:
 
 - **Supabase** → Dashboard → *Integrations → GitHub* → connect this repo →
   auto-runs migrations on merge to your production branch.
-- **Cloudflare Workers** → *Workers → Create → Connect Git* → root directory
-  `services/api`, build `bunx wrangler deploy`. Add the runtime secrets in the
-  dashboard.
-- **Cloudflare Pages** → *Pages → Connect Git* → root directory `apps/web`,
-  build command `bun run build`, output `dist`, and set the `VITE_*` build vars.
+- **Cloudflare Workers** (the API) → *Workers → Connect Git* → then in
+  **Settings → Build** set:
+  - **Root directory:** `services/api`  ← required (monorepo; the `wrangler.jsonc`
+    lives there, not at the repo root)
+  - **Deploy command:** `npx wrangler deploy`
+  - Add the runtime secrets in the dashboard (or let the Actions workflow sync them).
+  - *If your plan has no root-directory field:* keep root at the repo root and set
+    the deploy command to `npx wrangler deploy --config services/api/wrangler.jsonc`.
+- **Cloudflare Pages** (the web) → a **separate** connection: *Pages → Connect Git* →
+  - **Root directory:** `apps/web`
+  - **Build command:** `bun run build`
+  - **Output directory:** `dist`
+  - **Env vars:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL`
+    (the deployed worker URL). Do **not** set `VITE_MOCK`.
 
 > Even here, create the Supabase project first — migrations can auto-run, but the
 > project itself must exist.
