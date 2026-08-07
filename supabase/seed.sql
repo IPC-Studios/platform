@@ -1,0 +1,2 @@
+-- Local seed data. Populated per phase (plans, states, lookups, a demo studio).
+-- Kept empty at Phase 0.
