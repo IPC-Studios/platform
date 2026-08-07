@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { registerRequest, registerResponse } from '@ipc/contracts'
+import { registerRequest, registerResponse, sessionState } from '@ipc/contracts'
 import { serializeAccess } from '@ipc/permissions'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -46,11 +46,17 @@ export const authRouter = new Hono<AppEnv>()
   // Whole-session hydration for an established tenant.
   .get('/session', requireAuth, (c) => {
     const a = c.get('auth')
-    return c.json({
-      user_id: a.userId,
-      company_id: a.companyId,
-      role: a.role,
-      is_owner: a.isOwner,
-      permissions: serializeAccess(a.access),
-    })
+    return c.json(
+      sessionState.parse({
+        user_id: a.userId,
+        company_id: a.companyId,
+        role: a.role,
+        is_owner: a.isOwner,
+        display_name: a.displayName,
+        email: a.email,
+        plan_gate: a.planGate,
+        plan_expiry: a.planExpiry,
+        permissions: serializeAccess(a.access),
+      }),
+    )
   })

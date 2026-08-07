@@ -1,3 +1,4 @@
+import type { PlanGate } from '@ipc/contracts'
 import type { AppRole, ResolvedAccess } from '@ipc/permissions'
 
 /** Secrets + vars bound to the Worker. */
@@ -19,6 +20,10 @@ export interface AuthContext {
   companyId: string
   role: AppRole
   isOwner: boolean
+  displayName: string
+  email: string
+  planGate: PlanGate
+  planExpiry: string | null
   access: ResolvedAccess
 }
 

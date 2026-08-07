@@ -1,5 +1,6 @@
 import type { Context, Next } from 'hono'
 import { resolveAccess, type AppRole } from '@ipc/permissions'
+import type { PlanGate } from '@ipc/contracts'
 import type { AppEnv } from '../context'
 import { fail } from './errors'
 import { userClient } from '../lib/supabase'
@@ -32,6 +33,10 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
     company_id: string
     role: AppRole
     is_owner: boolean
+    display_name: string
+    email: string
+    plan_expiry: string | null
+    plan_gate: PlanGate
     profile_key: string | null
     overrides: { permission_key: string; enabled: boolean }[] | null
   }
@@ -48,6 +53,10 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
     companyId: row.company_id,
     role: row.role,
     isOwner: row.is_owner,
+    displayName: row.display_name,
+    email: row.email,
+    planGate: row.plan_gate,
+    planExpiry: row.plan_expiry,
     access,
   })
 

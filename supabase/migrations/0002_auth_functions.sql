@@ -78,11 +78,15 @@ $$;
 -- overrides stay null/[] until Phase 2 adds the access tables.
 create or replace function get_auth_context()
 returns table (
-  company_id  uuid,
-  role        app_role,
-  is_owner    boolean,
-  profile_key text,
-  overrides   jsonb
+  company_id   uuid,
+  role         app_role,
+  is_owner     boolean,
+  display_name text,
+  email        text,
+  plan_expiry  timestamptz,
+  plan_gate    text,
+  profile_key  text,
+  overrides    jsonb
 )
 language sql
 stable
@@ -93,6 +97,15 @@ as $$
     u.company_id,
     u.role,
     (c.owner_user_id = u.user_id) as is_owner,
+    u.name                        as display_name,
+    u.email,
+    c.plan_expiry,
+    case
+      when coalesce(c.plan_expiry,         'epoch'::timestamptz) > now() then 'active'
+      when coalesce(c.grandfathered_until, 'epoch'::timestamptz) > now() then 'grandfathered'
+      when coalesce(c.grace_until,         'epoch'::timestamptz) > now() then 'grace'
+      else 'expired'
+    end                           as plan_gate,
     null::text                    as profile_key,
     '[]'::jsonb                   as overrides
   from users u
