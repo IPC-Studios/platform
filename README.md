@@ -9,6 +9,13 @@ subscription.
 Rebuilt from scratch following the blueprint in `docs/`. Identity is **Supabase
 Auth + RLS** (no Firebase). All 16 build phases are complete.
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IPC-Studios/platform)
+
+> **Heads up:** the button deploys the **Cloudflare** pieces only. There is **no
+> one-click for the database** — you must create a Supabase project and push the
+> migrations first (see [Quick deploy](#quick-deploy)). The app boots broken
+> until the DB exists and secrets are set.
+
 ---
 
 ## Architecture
@@ -111,7 +118,35 @@ CI (`.github/workflows/ci.yml`) runs all three on every push/PR.
 
 ---
 
-## Deployment
+## Quick deploy
+
+The fastest path — order matters (**database first**):
+
+```bash
+# 1. Database — create a project at supabase.com, then:
+bun run db:link -- --project-ref <your-project-ref>
+bun run db:seed          # push migrations + seed (supabase db push --include-seed)
+
+# 2. API (Cloudflare Worker) — set secrets once (see list below), then:
+bun run deploy:api
+
+# 3. Web (Cloudflare Pages):
+VITE_SUPABASE_URL=<url> VITE_SUPABASE_ANON_KEY=<anon> VITE_API_BASE_URL=https://<worker>/ \
+  bun run deploy:web
+```
+
+The **Deploy to Cloudflare** button at the top provisions the Worker/Pages from
+this repo and wires push-to-deploy — but it's a private monorepo, so you'll pick
+the subdirectory (`services/api` / `apps/web`) and add secrets in the Cloudflare
+dashboard. The `bun run` commands above are the reliable path.
+
+> There is **no Supabase deploy button** — nothing can one-click apply 17
+> migrations + seed from a link. `bun run db:seed` is the closest, and it still
+> needs you to create the project first.
+
+---
+
+## Deployment (detailed)
 
 Three independent deploys: **database → API → web**.
 

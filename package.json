@@ -15,7 +15,13 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "bun run --filter '@ipc/web' test:e2e"
+    "test:e2e": "bun run --filter '@ipc/web' test:e2e",
+    "db:link": "supabase link",
+    "db:deploy": "supabase db push",
+    "db:seed": "supabase db push --include-seed",
+    "db:reset": "supabase db reset",
+    "deploy:api": "bun run --filter '@ipc/api' deploy",
+    "deploy:web": "bun run --filter '@ipc/web' deploy"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
