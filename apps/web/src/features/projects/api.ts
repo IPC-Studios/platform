@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { z } from '@ipc/contracts'
 import {
   createProjectRequest,
@@ -45,56 +46,56 @@ export function useCreateProject() {
         body: createProjectRequest.parse(input),
         responseSchema: createResponse,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+    onSuccess: () => {
+      toast.success('Project created')
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
   })
 }
 
 const anySchema = z.any()
 
 /** Invalidate both the detail and the list after a project mutation. */
-function useProjectMutation(id: string) {
+function useProjectMutation(id: string, message: string) {
   const qc = useQueryClient()
   return () => {
+    toast.success(message)
     void qc.invalidateQueries({ queryKey: ['projects', id] })
     void qc.invalidateQueries({ queryKey: ['projects'] })
   }
 }
 
 export function useUpdateProject(id: string) {
-  const onSuccess = useProjectMutation(id)
   return useMutation({
     mutationFn: (input: UpdateProjectRequest) =>
       callApi(`/projects/${id}`, { method: 'PATCH', body: input, responseSchema: anySchema }),
-    onSuccess,
+    onSuccess: useProjectMutation(id, 'Project updated'),
   })
 }
 
 export function useAddDeliverable(id: string) {
-  const onSuccess = useProjectMutation(id)
   return useMutation({
     mutationFn: (input: DeliverableInput) =>
       callApi(`/projects/${id}/deliverables`, { method: 'POST', body: input, responseSchema: anySchema }),
-    onSuccess,
+    onSuccess: useProjectMutation(id, 'Deliverable added'),
   })
 }
 
 export function useDeleteDeliverable(id: string) {
-  const onSuccess = useProjectMutation(id)
   return useMutation({
     mutationFn: (deliverableId: string) =>
       callApi(`/projects/${id}/deliverables/${deliverableId}`, {
         method: 'DELETE',
         responseSchema: anySchema,
       }),
-    onSuccess,
+    onSuccess: useProjectMutation(id, 'Deliverable removed'),
   })
 }
 
 export function useAddPayment(id: string) {
-  const onSuccess = useProjectMutation(id)
   return useMutation({
     mutationFn: (input: PaymentInput) =>
       callApi(`/projects/${id}/payments`, { method: 'POST', body: input, responseSchema: anySchema }),
-    onSuccess,
+    onSuccess: useProjectMutation(id, 'Payment recorded'),
   })
 }

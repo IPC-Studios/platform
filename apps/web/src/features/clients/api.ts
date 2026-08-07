@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { client, createClientRequest, type CreateClientRequest } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -26,6 +27,9 @@ export function useCreateClient() {
         body: createClientRequest.parse(input),
         responseSchema: client,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['clients'] }),
+    onSuccess: () => {
+      toast.success('Client added')
+      void qc.invalidateQueries({ queryKey: ['clients'] })
+    },
   })
 }

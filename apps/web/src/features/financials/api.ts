@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { expense, projectFinancials, type CreateExpenseRequest } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -23,7 +24,10 @@ export function useCreateExpense() {
   return useMutation({
     mutationFn: (input: CreateExpenseRequest) =>
       callApi('/financials/expenses', { method: 'POST', body: input, responseSchema: expense }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+    onSuccess: () => {
+      toast.success('Expense added')
+      void qc.invalidateQueries({ queryKey: ['expenses'] })
+    },
   })
 }
 

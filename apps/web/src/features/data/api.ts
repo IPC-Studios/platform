@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
 import { dataRecord, type CreateDataRecordRequest } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -24,7 +25,10 @@ export function useVerifyData() {
   return useMutation({
     mutationFn: ({ id, track }: { id: string; track: 'primary' | 'backup' }) =>
       callApi(`/data/${id}/verify`, { method: 'POST', body: { track }, responseSchema: anySchema }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['data'] }),
+    onSuccess: () => {
+      toast.success('Verified')
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
   })
 }
 
@@ -33,6 +37,9 @@ export function useCreateDataRecord() {
   return useMutation({
     mutationFn: (input: CreateDataRecordRequest) =>
       callApi('/data', { method: 'POST', body: input, responseSchema: dataRecord }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['data'] }),
+    onSuccess: () => {
+      toast.success('Card logged')
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
   })
 }

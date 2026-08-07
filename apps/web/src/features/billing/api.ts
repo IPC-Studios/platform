@@ -7,6 +7,7 @@ import {
   type CreateInvoiceRequest,
   type RecordPaymentRequest,
 } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -55,7 +56,10 @@ export function useCreateInvoice() {
         body: input,
         responseSchema: z.object({ id: z.string(), invoice_number: z.string() }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: () => {
+      toast.success('Invoice created')
+      void qc.invalidateQueries({ queryKey: ['invoices'] })
+    },
   })
 }
 
@@ -68,6 +72,9 @@ export function useRecordPayment(invoiceId: string) {
         body: input,
         responseSchema: anySchema,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: () => {
+      toast.success('Payment recorded')
+      void qc.invalidateQueries({ queryKey: ['invoices'] })
+    },
   })
 }

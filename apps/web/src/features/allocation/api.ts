@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
 import { teamSlot, teamMember, type BookSlotRequest } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi, ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 
@@ -36,7 +37,10 @@ export function useBookSlot() {
         body: input,
         responseSchema: z.object({ id: z.string() }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['allocation'] }),
+    onSuccess: () => {
+      toast.success('Crew booked')
+      void qc.invalidateQueries({ queryKey: ['allocation'] })
+    },
   })
 }
 
