@@ -85,12 +85,21 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/team/members') return members
   if (method === 'GET' && path === '/allocation') return slots
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
+  if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords
+  if (method === 'POST' && path.includes('/verify')) return {}
+  if (method === 'POST' && path === '/data') return dataRecords[0]
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
   if (method === 'PATCH' && path.includes('/status')) return {}
   return NOT_MOCKED
 }
+
+const dataRecords = [
+  { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
+  { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
+  { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
 
 const members = [
   { user_id: uid(0xe1), name: 'Rahul (Photographer)', role: 'employee' },

@@ -37,6 +37,7 @@ async function freshDb() {
   await db.exec(mig('0006_projects_core.sql'))
   await db.exec(mig('0007_tasks_production.sql'))
   await db.exec(mig('0008_team_allocation.sql'))
+  await db.exec(mig('0009_data_management.sql'))
   return db
 }
 
@@ -380,5 +381,47 @@ describe('team allocation — no double booking (Phase 6)', () => {
         '2026-07-01T11:00:00Z', '2026-07-01T13:00:00Z', 3000);`,
     )
     expect(r.rows[0]!.book_team_slot).toBeTruthy()
+  })
+})
+
+describe('data custody (Phase 7)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('tracks a card through primary + backup to verified with attribution', async () => {
+    const loc = await db.query<{ id: string }>(
+      `insert into storage_locations (company_id, name, kind)
+       values (get_current_company_id(), 'RAID-1', 'nas') returning id;`,
+    )
+    const rec = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, card_count, size_gb,
+         primary_status, primary_location_id, copied_by_uid)
+       values (get_current_company_id(), 'CF Card A', 2, 64.5, 'copied', '${loc.rows[0]!.id}', auth.uid())
+       returning id;`,
+    )
+    const id = rec.rows[0]!.id
+
+    // Verify primary only — record is not fully verified yet.
+    await db.query(`select verify_data_record('${id}', 'primary');`)
+    let row = await db.query<{ primary_status: string; verified_at: string | null }>(
+      `select primary_status, verified_at from shoot_data_records where id = '${id}';`,
+    )
+    expect(row.rows[0]!.primary_status).toBe('verified')
+    expect(row.rows[0]!.verified_at).toBeNull()
+
+    // Copy + verify backup — now verified_at stamps.
+    await db.query(`update shoot_data_records set backup_status = 'copied' where id = '${id}';`)
+    await db.query(`select verify_data_record('${id}', 'backup');`)
+    row = await db.query(
+      `select primary_status, backup_status, verified_at, copied_by_uid from shoot_data_records where id = '${id}';`,
+    )
+    expect((row.rows[0] as { backup_status: string }).backup_status).toBe('verified')
+    expect((row.rows[0] as { verified_at: string | null }).verified_at).not.toBeNull()
+    expect((row.rows[0] as { copied_by_uid: string }).copied_by_uid).toBe(OWNER)
   })
 })
