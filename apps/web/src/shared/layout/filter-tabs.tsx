@@ -3,7 +3,7 @@ import { cn } from '../ui/cn'
 export interface FilterTab<T extends string> {
   value: T
   label: string
-  count?: number
+  count?: number | undefined
 }
 
 /** Locked primitive — segmented filter control used on list pages. */
