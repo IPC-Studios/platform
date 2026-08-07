@@ -44,6 +44,7 @@ async function freshDb() {
   await db.exec(mig('0012_expenses_financials.sql'))
   await db.exec(mig('0013_crm.sql'))
   await db.exec(mig('0014_hr_attendance.sql'))
+  await db.exec(mig('0015_notifications_jobs.sql'))
   return db
 }
 
@@ -765,5 +766,58 @@ describe('HR — geo-fenced attendance + payout ledger (Phase 12)', () => {
     await expect(db.query(`select settle_payout('${emp}', 1000, 'credit');`)).rejects.toThrow(
       /not allowed/i,
     )
+  })
+})
+
+describe('notifications & idempotent cron (Phase 13)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+    // A due reminder + a future one.
+    await db.exec(
+      `insert into reminders (company_id, user_id, title, remind_at)
+       values (get_current_company_id(), '${OWNER}', 'Call client', now() - interval '1 hour'),
+              (get_current_company_id(), '${OWNER}', 'Later task', now() + interval '2 days');`,
+    )
+  })
+
+  it('cron is idempotent on re-run and its result is queryable', async () => {
+    const first = await db.query<{ run_reminder_cron: { reminders_due: number; notifications_created: number } }>(
+      `select run_reminder_cron(false);`,
+    )
+    expect(first.rows[0]!.run_reminder_cron.reminders_due).toBe(1)
+    expect(first.rows[0]!.run_reminder_cron.notifications_created).toBe(1)
+
+    // Re-run: same due reminder, but the notification de-dupes -> 0 created.
+    const second = await db.query<{ run_reminder_cron: { notifications_created: number } }>(
+      `select run_reminder_cron(false);`,
+    )
+    expect(second.rows[0]!.run_reminder_cron.notifications_created).toBe(0)
+
+    // Exactly one notification exists for the owner.
+    const n = await db.query<{ n: string }>(
+      `select count(*) as n from notifications where recipient_uid = '${OWNER}';`,
+    )
+    expect(Number(n.rows[0]!.n)).toBe(1)
+
+    // Both runs are recorded and queryable.
+    const runs = await db.query<{ n: string }>(
+      `select count(*) as n from cron_runs where job_name = 'reminder_cron';`,
+    )
+    expect(Number(runs.rows[0]!.n)).toBe(2)
+  })
+
+  it('dry_run reports due work without creating notifications', async () => {
+    const dry = await db.query<{ run_reminder_cron: { reminders_due: number; notifications_created: number; dry_run: boolean } }>(
+      `select run_reminder_cron(true);`,
+    )
+    expect(dry.rows[0]!.run_reminder_cron.dry_run).toBe(true)
+    expect(dry.rows[0]!.run_reminder_cron.notifications_created).toBe(0)
   })
 })

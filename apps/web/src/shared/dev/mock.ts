@@ -102,6 +102,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
   if (method === 'GET' && path === '/hr/location') return { lat: 19.076, lng: 72.8777, radius_m: 150 }
   if (method === 'POST' && path === '/hr/check-in') return { id: uid(0xc0) }
+  if (method === 'GET' && path === '/notifications') return notifs
+  if (method === 'POST' && path.includes('/notifications/')) return {}
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -113,6 +115,12 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const notifs = [
+  { id: uid(0xf1), type: 'reminder', title: 'Call Priya about wedding date', body: null, read_at: null, created_at: '2026-07-06T06:00:00Z' },
+  { id: uid(0xf2), type: 'work', title: 'Album v1 was approved', body: 'Great work', read_at: null, created_at: '2026-07-05T10:00:00Z' },
+  { id: uid(0xf3), type: 'billing', title: 'INV-0001 is overdue', body: null, read_at: '2026-07-04T10:00:00Z', created_at: '2026-07-03T10:00:00Z' },
 ]
 
 const attendanceFx = [
