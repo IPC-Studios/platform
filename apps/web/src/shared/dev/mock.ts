@@ -99,6 +99,9 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/financials/projects') return projectFin
   if (method === 'GET' && path === '/crm/leads') return leads
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
+  if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
+  if (method === 'GET' && path === '/hr/location') return { lat: 19.076, lng: 72.8777, radius_m: 150 }
+  if (method === 'POST' && path === '/hr/check-in') return { id: uid(0xc0) }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
@@ -110,6 +113,12 @@ const dataRecords = [
   { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
   { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
   { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+]
+
+const attendanceFx = [
+  { id: uid(0xd1), a_date: '2026-07-06', check_in_at: '2026-07-06T04:05:00Z', check_out_at: null, status: 'present' },
+  { id: uid(0xd2), a_date: '2026-07-05', check_in_at: '2026-07-05T04:35:00Z', check_out_at: '2026-07-05T13:00:00Z', status: 'late' },
+  { id: uid(0xd3), a_date: '2026-07-04', check_in_at: null, check_out_at: null, status: 'absent' },
 ]
 
 const leads = [

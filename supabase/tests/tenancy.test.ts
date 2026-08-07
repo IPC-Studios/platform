@@ -28,6 +28,7 @@ async function freshDb() {
   )
   await db.exec(`create role authenticated;`)
   await db.exec(`create role anon;`)
+  await db.exec(`create role service_role;`)
   // Real migrations (0000 extensions are Supabase-only; core covers what we need here).
   await db.exec(mig('0001_tenancy_core.sql'))
   await db.exec(mig('0002_auth_functions.sql'))
@@ -42,6 +43,7 @@ async function freshDb() {
   await db.exec(mig('0011_billing.sql'))
   await db.exec(mig('0012_expenses_financials.sql'))
   await db.exec(mig('0013_crm.sql'))
+  await db.exec(mig('0014_hr_attendance.sql'))
   return db
 }
 
@@ -697,6 +699,71 @@ describe('CRM — capture, dedupe, auto-assign (Phase 11)', () => {
   it('rejects an unknown source key', async () => {
     await expect(db.query(`select capture_lead('nope', 'X', '9000000000');`)).rejects.toThrow(
       /unknown or inactive source/i,
+    )
+  })
+})
+
+describe('HR — geo-fenced attendance + payout ledger (Phase 12)', () => {
+  let db: PGlite
+  const emp = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+  // Studio at Mumbai; a point ~50m away and one ~15km away.
+  const STUDIO = { lat: 19.076, lng: 72.8777 }
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+    await db.exec(
+      `insert into company_location (company_id, lat, lng, radius_m)
+       values (get_current_company_id(), ${STUDIO.lat}, ${STUDIO.lng}, 150);`,
+    )
+    await db.exec(`insert into auth.users (id,email) values ('${emp}','emp@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${emp}', get_current_company_id(), 'employee', 'Emp', 'emp@s.test');`,
+    )
+  })
+
+  it('checks in inside the fence and is blocked outside it', async () => {
+    await asUser(db, emp)
+    const ok = await db.query<{ check_in: string }>(`select check_in(19.0764, 72.8777);`) // ~44m
+    expect(ok.rows[0]!.check_in).toBeTruthy()
+
+    // Reset the day would need a new date; instead a far point on a fresh member.
+    await expect(db.query(`select check_in(19.2, 72.9);`)).rejects.toThrow(/outside_fence/i)
+  })
+
+  it('absent backstop marks the un-checked-in owner absent', async () => {
+    // The owner never checked in today → backstop marks them absent.
+    await db.query(`select mark_absent_backstop();`)
+    await asUser(db, OWNER)
+    const rows = await db.query<{ status: string }>(
+      `select status from attendance where user_id = '${OWNER}';`,
+    )
+    expect(rows.rows[0]?.status).toBe('absent')
+    // The employee who checked in is NOT overwritten to absent.
+    const e = await db.query<{ status: string }>(
+      `select status from attendance where user_id = '${emp}';`,
+    )
+    expect(e.rows[0]?.status).toBe('present')
+  })
+
+  it('payout ledger balance = sum of credits and debits', async () => {
+    await asUser(db, OWNER)
+    await db.query(`select settle_payout('${emp}', 8000, 'credit', 'shoot-1');`)
+    await db.query(`select settle_payout('${emp}', -3000, 'debit', 'advance');`)
+    const bal = await db.query<{ payout_balance: string }>(`select payout_balance('${emp}');`)
+    expect(Number(bal.rows[0]!.payout_balance)).toBe(5000)
+  })
+
+  it('a non-owner cannot settle payouts', async () => {
+    await asUser(db, emp)
+    await expect(db.query(`select settle_payout('${emp}', 1000, 'credit');`)).rejects.toThrow(
+      /not allowed/i,
     )
   })
 })

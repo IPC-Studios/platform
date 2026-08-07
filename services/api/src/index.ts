@@ -16,6 +16,7 @@ import { billingRouter } from './modules/billing/router'
 import { financialsRouter } from './modules/financials/router'
 import { crmRouter } from './modules/crm/router'
 import { webhooksRouter } from './modules/webhooks/router'
+import { hrRouter } from './modules/hr/router'
 
 const app = new Hono<AppEnv>()
 
@@ -40,5 +41,6 @@ app.route('/billing', billingRouter)
 app.route('/financials', financialsRouter)
 app.route('/crm', crmRouter)
 app.route('/webhooks', webhooksRouter)
+app.route('/hr', hrRouter)
 
 export default app
