@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveAccess } from './resolve'
+import { accessFromSet, resolveAccess, serializeAccess } from './resolve'
 
 describe('resolveAccess — three-question resolution', () => {
   it('Q1: owner sees and does everything, sensitive included', () => {
@@ -55,5 +55,25 @@ describe('resolveAccess — three-question resolution', () => {
     const a = resolveAccess({ role: 'manager', isOwner: false, profileKey: 'does_not_exist' })
     expect(a.effective).toBeNull()
     expect(a.hasModule('crm')).toBe(true)
+  })
+})
+
+describe('serializeAccess round-trips through accessFromSet', () => {
+  it('admin role defaults survive a serialize -> accessFromSet round trip', () => {
+    const server = resolveAccess({ role: 'admin', isOwner: false })
+    const wire = serializeAccess(server)
+    const client = accessFromSet(wire, false)
+
+    expect(client.hasModule('projects')).toBe(true)
+    expect(client.hasAction('projects', 'edit')).toBe(true)
+    expect(client.hasModule('money')).toBe(false)
+    expect(client.hasAction('money', 'view')).toBe(false)
+  })
+
+  it('employee view-only round-trips', () => {
+    const server = resolveAccess({ role: 'employee', isOwner: false })
+    const client = accessFromSet(serializeAccess(server), false)
+    expect(client.hasAction('projects', 'view')).toBe(true)
+    expect(client.hasAction('projects', 'edit')).toBe(false)
   })
 })

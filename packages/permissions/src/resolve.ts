@@ -1,4 +1,4 @@
-import { MODULES, type ModuleAction, type ModuleKey } from './modules'
+import { MODULES, MODULE_KEYS, type ModuleAction, type ModuleKey } from './modules'
 import { getProfile } from './profiles'
 import type { AppRole, StaffRole } from './roles'
 
@@ -82,6 +82,25 @@ export function resolveAccess(input: AccessInput) {
 }
 
 export type ResolvedAccess = ReturnType<typeof resolveAccess>
+
+const WRITE_ACTIONS: ReadonlyArray<ModuleAction> = ['create', 'edit', 'delete']
+
+/**
+ * Flatten a resolved access into the wire set the client hydrates from:
+ * a bare module key = View; "{module}.{action}" = that write action.
+ * (Owner is sent as a flag, not expanded — the client bypasses on it.)
+ */
+export function serializeAccess(access: Pick<ResolvedAccess, 'hasModule' | 'hasAction'>): string[] {
+  const out: string[] = []
+  for (const key of MODULE_KEYS) {
+    if (!access.hasModule(key)) continue
+    out.push(key)
+    for (const action of WRITE_ACTIONS) {
+      if (access.hasAction(key, action)) out.push(`${key}.${action}`)
+    }
+  }
+  return out
+}
 
 /**
  * Build the same hasModule/hasAction surface from an already-composed
