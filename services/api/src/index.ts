@@ -5,6 +5,8 @@ import { errorBoundary } from './middleware/errors'
 import { healthRouter } from './modules/health/router'
 import { authRouter } from './modules/auth/router'
 import { accessRouter } from './modules/access/router'
+import { clientsRouter } from './modules/clients/router'
+import { projectsRouter } from './modules/projects/router'
 
 const app = new Hono<AppEnv>()
 
@@ -18,5 +20,7 @@ app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type']
 app.route('/health', healthRouter)
 app.route('/auth', authRouter)
 app.route('/access', accessRouter)
+app.route('/clients', clientsRouter)
+app.route('/projects', projectsRouter)
 
 export default app
