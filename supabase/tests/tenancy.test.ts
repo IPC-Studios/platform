@@ -33,6 +33,7 @@ async function freshDb() {
   await db.exec(mig('0002_auth_functions.sql'))
   await db.exec(mig('0003_tenancy_rls.sql'))
   await db.exec(mig('0004_access_control.sql'))
+  await db.exec(mig('0005_company_theme.sql'))
   return db
 }
 

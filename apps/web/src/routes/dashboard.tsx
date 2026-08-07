@@ -1,29 +1,41 @@
+import { FolderKanban, Users, Receipt, Camera } from 'lucide-react'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { RequireAuth } from '@/shared/auth/guards'
+import { AppShell } from '@/shared/layout/AppShell'
+import { PageHeader } from '@/shared/layout/page-header'
+import { StatCard } from '@/shared/ui/stat-card'
+import { EmptyState } from '@/shared/ui/states'
 
 export function DashboardPage() {
   return (
     <RequireAuth>
-      <DashboardInner />
+      <AppShell>
+        <DashboardInner />
+      </AppShell>
     </RequireAuth>
   )
 }
 
 function DashboardInner() {
-  const { session, signOut } = useAuth()
+  const { session } = useAuth()
   return (
-    <main style={{ fontFamily: 'system-ui', padding: 24 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Dashboard</h1>
-        <button type="button" onClick={() => void signOut()}>
-          Sign out
-        </button>
-      </header>
-      <p>Signed in as {session?.display_name}.</p>
-      <p style={{ color: '#666' }}>
-        Plan: {session?.plan_gate} · Role: {session?.role}
-      </p>
-      {/* Phase 3 replaces this with the AppShell + role-filtered nav. */}
-    </main>
+    <>
+      <PageHeader
+        title={`Welcome, ${session?.display_name ?? ''}`}
+        description="Your studio at a glance."
+      />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Active projects" value="0" icon={FolderKanban} />
+        <StatCard label="Upcoming shoots" value="0" icon={Camera} />
+        <StatCard label="Team members" value="1" icon={Users} />
+        <StatCard label="Outstanding" value="₹0" icon={Receipt} />
+      </div>
+      <div className="mt-6 rounded-lg border border-border">
+        <EmptyState
+          title="Nothing here yet"
+          description="Create your first project to start tracking shoots, tasks, and payments."
+        />
+      </div>
+    </>
   )
 }
