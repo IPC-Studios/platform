@@ -11,21 +11,28 @@ import { NAV, type NavEntry, type NavLeaf } from './nav'
 
 type Access = ReturnType<typeof useAccess>
 
-function leafVisible(leaf: NavLeaf, role: string, access: Access): boolean {
+function leafVisible(leaf: NavLeaf, role: string, access: Access, isPlatformAdmin: boolean): boolean {
+  if (leaf.platformOnly) return isPlatformAdmin
   if (leaf.roles && !leaf.roles.includes(role as never)) return false
   if (leaf.module && !access.hasModule(leaf.module as ModuleKey)) return false
   return true
 }
 
-/** Drop entries failing role/module checks; drop groups left empty. */
-function filterNav(entries: NavEntry[], role: string, access: Access): NavEntry[] {
+/** Drop entries failing role/module/platform checks; drop groups left empty. */
+function filterNav(
+  entries: NavEntry[],
+  role: string,
+  access: Access,
+  isPlatformAdmin: boolean,
+): NavEntry[] {
   const out: NavEntry[] = []
   for (const e of entries) {
     if (e.kind === 'leaf') {
-      if (leafVisible(e, role, access)) out.push(e)
+      if (leafVisible(e, role, access, isPlatformAdmin)) out.push(e)
     } else {
+      if (e.platformOnly && !isPlatformAdmin) continue
       if (e.roles && !e.roles.includes(role as never)) continue
-      const children = e.children.filter((c) => leafVisible(c, role, access))
+      const children = e.children.filter((c) => leafVisible(c, role, access, isPlatformAdmin))
       if (children.length) out.push({ ...e, children })
     }
   }
@@ -38,7 +45,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { scheme, toggleScheme } = useTheme()
   const [mobileOpen, setMobileOpen] = useState(false)
   const role = session?.role ?? 'none'
-  const entries = filterNav(NAV, role, access)
+  const entries = filterNav(NAV, role, access, session?.is_platform_admin ?? false)
 
   return (
     <div className="flex min-h-screen bg-background">

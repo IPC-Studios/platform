@@ -29,6 +29,8 @@ import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
 import { SettingsPage } from '@/routes/settings'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
+import { PlatformStudiosPage } from '@/routes/platform/studios'
+import { PlatformUsagePage } from '@/routes/platform/usage'
 import { comingSoon } from '@/routes/coming-soon'
 
 const rootRoute = createRootRoute({
@@ -70,7 +72,8 @@ const routeTree = rootRoute.addChildren([
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/subscription', SubscriptionPage),
-  route('/platform/studios', comingSoon('Platform', 'studio_access', 'Phase 14')),
+  route('/platform/studios', PlatformStudiosPage),
+  route('/platform/usage', PlatformUsagePage),
 ])
 
 export const router = createRouter({ routeTree })

@@ -25,6 +25,8 @@ export interface AuthContext {
   companyId: string
   role: AppRole
   isOwner: boolean
+  /** Member of the cross-tenant platform_admins allowlist (vendor console). */
+  isPlatformAdmin: boolean
   displayName: string
   email: string
   planGate: PlanGate

@@ -28,6 +28,8 @@ export interface NavLeaf {
   icon?: LucideIcon
   module?: ModuleKey
   roles?: AppRole[]
+  /** Cross-tenant vendor console — gated on platform_admins, NOT a module. */
+  platformOnly?: boolean
 }
 
 export interface NavGroup {
@@ -38,6 +40,8 @@ export interface NavGroup {
   match: string
   children: NavLeaf[]
   roles?: AppRole[]
+  /** Cross-tenant vendor console — gated on platform_admins, NOT a module. */
+  platformOnly?: boolean
 }
 
 export type NavEntry = NavLeaf | NavGroup
@@ -119,5 +123,16 @@ export const NAV: NavEntry[] = [
 
   leaf('Alerts', '/notifications', Bell, { module: 'crm' }),
   leaf('Settings', '/settings/company', Settings, { module: 'settings' }),
-  leaf('Platform', '/platform/studios', Building2, { module: 'studio_access' }),
+
+  {
+    kind: 'group',
+    label: 'Platform',
+    icon: Building2,
+    match: '/platform',
+    platformOnly: true,
+    children: [
+      leaf('Studios', '/platform/studios', Building2, { platformOnly: true }),
+      leaf('Usage', '/platform/usage', TrendingUp, { platformOnly: true }),
+    ],
+  },
 ]

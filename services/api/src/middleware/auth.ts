@@ -33,6 +33,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
     company_id: string
     role: AppRole
     is_owner: boolean
+    is_platform_admin: boolean
     display_name: string
     email: string
     plan_expiry: string | null
@@ -53,6 +54,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
     companyId: row.company_id,
     role: row.role,
     isOwner: row.is_owner,
+    isPlatformAdmin: row.is_platform_admin ?? false,
     displayName: row.display_name,
     email: row.email,
     planGate: row.plan_gate,

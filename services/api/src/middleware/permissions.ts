@@ -28,3 +28,11 @@ export function requireOwner() {
     await next()
   }
 }
+
+/** Cross-tenant vendor console gate — the platform_admins allowlist only. */
+export function requirePlatformAdmin() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    if (!c.get('auth').isPlatformAdmin) fail(403, DENIED)
+    await next()
+  }
+}

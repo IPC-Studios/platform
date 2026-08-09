@@ -33,6 +33,8 @@ export const sessionState = z.object({
   company_id: uuid,
   role: z.enum(['platform_admin', 'super_admin', 'admin', 'manager', 'employee', 'none']),
   is_owner: z.boolean(),
+  /** Member of the cross-tenant platform_admins allowlist (vendor console). */
+  is_platform_admin: z.boolean().default(false),
   display_name: z.string(),
   email,
   plan_gate: planGate,

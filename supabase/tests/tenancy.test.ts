@@ -48,6 +48,8 @@ async function freshDb() {
   await db.exec(mig('0016_subscription_platform.sql'))
   await db.exec(mig('0017_terms_templates.sql'))
   await db.exec(mig('0018_open_trial_by_default.sql'))
+  await db.exec(mig('0019_platform_console.sql'))
+  await db.exec(mig('0020_platform_ops.sql'))
   return db
 }
 
@@ -933,5 +935,119 @@ describe('terms acknowledgement via public link (Phase 15)', () => {
       `select acknowledge_terms('${token}', 'Someone Else');`,
     )
     expect(again.rows[0]!.acknowledge_terms).toBe(false)
+  })
+})
+
+describe('platform console (Phase 14 follow-up)', () => {
+  let db: PGlite
+  const owner = OWNER
+  const vendor = '44444444-4444-4444-4444-444444444444'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@s.test'),('${vendor}','vendor@ipc.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Studio A','Owner');`)
+    // A second tenant, so the cross-tenant list has more than one row.
+    await asUser(db, vendor)
+    await db.query(`select register_company_and_admin('Studio B','Vendor');`)
+  })
+
+  it('a studio owner is NOT a platform admin and is refused', async () => {
+    await asUser(db, owner)
+    const flag = await db.query<{ is_platform_admin: boolean }>(`select * from get_auth_context();`)
+    expect(flag.rows[0]?.is_platform_admin).toBe(false)
+    await expect(db.query(`select * from platform_list_studios();`)).rejects.toThrow(/platform access/i)
+    await expect(db.query(`select * from platform_usage_summary();`)).rejects.toThrow(/platform access/i)
+  })
+
+  it('an allowlisted platform admin sees every tenant, cross-tenant', async () => {
+    await db.exec(`insert into platform_admins (user_id) values ('${vendor}');`)
+    await asUser(db, vendor)
+
+    const flag = await db.query<{ is_platform_admin: boolean }>(`select * from get_auth_context();`)
+    expect(flag.rows[0]?.is_platform_admin).toBe(true)
+
+    const studios = await db.query<{ name: string; owner_email: string; user_count: number }>(
+      `select name, owner_email, user_count from platform_list_studios() order by name;`,
+    )
+    expect(studios.rows.map((r) => r.name)).toEqual(['Studio A', 'Studio B'])
+    expect(studios.rows[0]?.owner_email).toBe('owner@s.test')
+
+    const usage = await db.query<{ studio_count: number; active_studio_count: number; total_users: number }>(
+      `select * from platform_usage_summary();`,
+    )
+    expect(Number(usage.rows[0]?.studio_count)).toBe(2)
+    // Both new studios get an open-ended grandfathered trial (0018) → active.
+    expect(Number(usage.rows[0]?.active_studio_count)).toBe(2)
+    expect(Number(usage.rows[0]?.total_users)).toBe(2)
+  })
+})
+
+describe('platform ops — plan mutations (Phase 14 follow-up)', () => {
+  let db: PGlite
+  const vendor = '44444444-4444-4444-4444-444444444444'
+  const owner = OWNER
+  let studioB: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@s.test'),('${vendor}','vendor@ipc.test');`,
+    )
+    await asUser(db, vendor)
+    const b = await db.query<{ company_id: string }>(
+      `select company_id from register_company_and_admin('Studio B','Vendor');`,
+    )
+    studioB = b.rows[0]!.company_id
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Studio A','Owner');`)
+  })
+
+  async function gate(companyId: string) {
+    const r = await db.query<{ gate: string }>(
+      `select platform_plan_gate(plan_expiry, grandfathered_until, grace_until) as gate
+       from companies where id = '${companyId}';`,
+    )
+    return r.rows[0]?.gate
+  }
+
+  it('a non-platform-admin owner is refused every op', async () => {
+    await asUser(db, owner)
+    await expect(db.query(`select platform_extend_plan('${studioB}', 12);`)).rejects.toThrow(/platform access/i)
+    await expect(db.query(`select platform_expire_plan('${studioB}');`)).rejects.toThrow(/platform access/i)
+    await expect(db.query(`select platform_grant_trial('${studioB}');`)).rejects.toThrow(/platform access/i)
+  })
+
+  it('platform admin extends, expires, and re-grants a trial', async () => {
+    await db.exec(`insert into platform_admins (user_id) values ('${vendor}');`)
+    await asUser(db, vendor)
+
+    // Extend → plan_expiry in the future → active.
+    const ext = await db.query<{ platform_extend_plan: string }>(`select platform_extend_plan('${studioB}', 12);`)
+    expect(new Date(ext.rows[0]!.platform_extend_plan).getTime()).toBeGreaterThan(Date.now())
+    expect(await gate(studioB)).toBe('active')
+
+    // Expire → all gates cleared/past → expired.
+    await db.query(`select platform_expire_plan('${studioB}');`)
+    expect(await gate(studioB)).toBe('expired')
+
+    // Grant trial → grandfathered.
+    await db.query(`select platform_grant_trial('${studioB}');`)
+    expect(await gate(studioB)).toBe('grandfathered')
+
+    // Each mutation logged a billing_event.
+    const ev = await db.query<{ n: number }>(
+      `select count(*)::int as n from billing_events
+       where company_id = '${studioB}' and kind like 'platform_%';`,
+    )
+    expect(ev.rows[0]!.n).toBe(3)
+  })
+
+  it('extend rejects an out-of-range month count', async () => {
+    await asUser(db, vendor)
+    await expect(db.query(`select platform_extend_plan('${studioB}', 0);`)).rejects.toThrow(/between 1 and 60/i)
   })
 })

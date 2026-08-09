@@ -22,6 +22,7 @@ export const mockSession: SessionState = {
   company_id: uid(0xaa),
   role: 'super_admin',
   is_owner: true,
+  is_platform_admin: true,
   display_name: 'Demo Owner',
   email: 'owner@demostudio.in',
   plan_gate: 'active',
@@ -123,10 +124,27 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path.startsWith('/public/terms/')) return { body: 'These are the terms of service for your photography package. By clicking "I agree" you accept the scope, payment schedule, and delivery timelines outlined in your quotation.' }
   if (method === 'POST' && path.includes('/terms/') && path.endsWith('/ack')) return { ok: true }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
+  if (method === 'GET' && path === '/platform/studios') return platformStudiosFx
+  if (method === 'GET' && path === '/platform/usage') return platformUsageFx
+  if (method === 'POST' && /^\/platform\/studios\/[^/]+\/plan$/.test(path)) return { ok: true }
   // 204-style writes: return an empty object so the schema (z.any) passes.
   if (method === 'POST' && path === '/tasks/board/order') return {}
   if (method === 'PATCH' && path.includes('/status')) return {}
   return NOT_MOCKED
+}
+
+const platformStudiosFx = [
+  { id: uid(0xaa), name: 'Demo Studio', owner_email: 'owner@demostudio.in', plan_gate: 'active', plan_expiry: '2027-01-01T00:00:00Z', user_count: 4, project_count: 4, created_at: '2026-05-01T10:00:00Z' },
+  { id: uid(0xab), name: 'Lens & Light', owner_email: 'hi@lenslight.in', plan_gate: 'grandfathered', plan_expiry: null, user_count: 2, project_count: 7, created_at: '2026-06-12T10:00:00Z' },
+  { id: uid(0xac), name: 'Frame Story', owner_email: 'team@framestory.in', plan_gate: 'grace', plan_expiry: '2026-08-01T00:00:00Z', user_count: 6, project_count: 12, created_at: '2026-03-20T10:00:00Z' },
+  { id: uid(0xad), name: 'Old Studio', owner_email: 'x@old.in', plan_gate: 'expired', plan_expiry: '2026-04-01T00:00:00Z', user_count: 1, project_count: 2, created_at: '2025-11-02T10:00:00Z' },
+]
+
+const platformUsageFx = {
+  studio_count: 4,
+  active_studio_count: 2,
+  total_users: 13,
+  revenue_last_30d: 17700,
 }
 
 const dataRecords = [

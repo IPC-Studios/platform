@@ -52,6 +52,7 @@ export const authRouter = new Hono<AppEnv>()
         company_id: a.companyId,
         role: a.role,
         is_owner: a.isOwner,
+        is_platform_admin: a.isPlatformAdmin,
         display_name: a.displayName,
         email: a.email,
         plan_gate: a.planGate,
