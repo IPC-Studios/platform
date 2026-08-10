@@ -7,21 +7,29 @@ import { email, phone, uuid, isoDateTime } from './shared/primitives'
  * company + role from it. These contracts cover only the app-level payloads.
  */
 
-/** Register a brand-new studio: creates company + owner admin atomically. */
+/** Register a brand-new studio: creates the auth user + company + owner admin. */
 export const registerRequest = z.object({
   company_name: z.string().trim().min(2).max(120),
   admin_name: z.string().trim().min(2).max(120),
   email,
+  password: z.string().min(8).max(200),
   phone: phone.optional(),
 })
 export type RegisterRequest = z.infer<typeof registerRequest>
 
-export const registerResponse = z.object({
-  company_id: uuid,
-  admin_id: uuid,
-  role: z.literal('super_admin'),
+/** Email + password sign-in. */
+export const loginRequest = z.object({
+  email,
+  password: z.string().min(1).max(200),
 })
-export type RegisterResponse = z.infer<typeof registerResponse>
+export type LoginRequest = z.infer<typeof loginRequest>
+
+/** What /auth/register and /auth/login return — a bearer access token. */
+export const authToken = z.object({
+  access_token: z.string(),
+  token_type: z.literal('bearer'),
+})
+export type AuthToken = z.infer<typeof authToken>
 
 /** Plan-gate state resolved for the current company. */
 export const planGate = z.enum(['active', 'grace', 'grandfathered', 'expired'])

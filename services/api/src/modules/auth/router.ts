@@ -1,46 +1,69 @@
 import { Hono } from 'hono'
-import { registerRequest, registerResponse, sessionState } from '@ipc/contracts'
+import { registerRequest, loginRequest, authToken, sessionState } from '@ipc/contracts'
 import { serializeAccess } from '@ipc/permissions'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
-import { userClient } from '../../lib/supabase'
+import { withService } from '../../lib/db'
+import { issueToken, hashPassword, verifyPassword } from '../../lib/auth-token'
 
 /**
- * Auth router. The user signs up through Supabase Auth on the client, then hits
- * POST /auth/register once to create their studio (company + owner user) via the
- * atomic register_company_and_admin RPC. GET /auth/session hydrates the app.
+ * Auth router (self-issued, no GoTrue). /register creates the auth user + studio
+ * atomically and returns a bearer token; /login verifies a password and returns
+ * one; /session hydrates the app from the JWT.
  */
 export const authRouter = new Hono<AppEnv>()
-  // Register needs a valid Supabase session but NOT an existing tenant, so it
-  // does its own token check rather than the tenant-resolving requireAuth.
   .post('/register', async (c) => {
-    const auth = c.req.header('Authorization') ?? ''
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-    if (!token) fail(401, 'Please sign in to continue.')
-
     const parsed = registerRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the form and try again.')
+    const { email, password, company_name, admin_name, phone } = parsed.data
 
-    const supabase = userClient(c.env, token)
-    const { data, error } = await supabase
-      .rpc('register_company_and_admin', {
-        p_company_name: parsed.data.company_name,
-        p_admin_name: parsed.data.admin_name,
-        p_phone: parsed.data.phone ?? null,
+    const pwHash = await hashPassword(password)
+
+    let uid: string
+    try {
+      // One transaction: create the auth user, bind auth.uid() to it, then run
+      // the atomic studio bootstrap. Rolls back together on any failure.
+      uid = await withService(c.env, async (sql) => {
+        const rows = await sql<{ id: string }[]>`
+          insert into auth.users (email, encrypted_password)
+          values (${email}, ${pwHash})
+          returning id`
+        const id = rows[0]!.id
+        await sql`select set_config('request.jwt.claim.sub', ${id}, true)`
+        await sql`select register_company_and_admin(${company_name}, ${admin_name}, ${phone ?? null})`
+        return id
       })
-      .single()
+    } catch (e) {
+      // Unique-violation on email (23505) or any bootstrap error.
+      if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
+        fail(409, 'An account with this email already exists.')
+      }
+      fail(409, 'We could not create your studio. Please try again.')
+    }
 
-    if (error || !data) fail(409, 'We could not create your studio. Please try again.')
+    const token = await issueToken(c.env, uid!)
+    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+  })
 
-    const row = data as { company_id: string; user_id: string; role: 'super_admin' }
-    return c.json(
-      registerResponse.parse({
-        company_id: row.company_id,
-        admin_id: row.user_id,
-        role: 'super_admin',
-      }),
+  .post('/login', async (c) => {
+    const parsed = loginRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please enter your email and password.')
+    const { email, password } = parsed.data
+
+    const [row] = await withService(
+      c.env,
+      (sql) =>
+        sql<{ id: string; encrypted_password: string | null }[]>`
+          select id, encrypted_password from auth.users where email = ${email}`,
     )
+    // Verify even when the user is missing? Not needed — constant-ish; keep simple.
+    if (!row?.encrypted_password || !(await verifyPassword(password, row.encrypted_password))) {
+      fail(401, 'Invalid email or password.')
+    }
+
+    const token = await issueToken(c.env, row.id)
+    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
   })
 
   // Whole-session hydration for an established tenant.
