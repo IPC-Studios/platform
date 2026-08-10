@@ -1,0 +1,8 @@
+# Auto-HTTPS reverse proxy for the IPC API. API_DOMAIN comes from .env
+# (e.g. api.yourstudio.in). Caddy obtains + renews the Let's Encrypt cert and
+# forwards to the api service on the compose network. reverse_proxy sets
+# X-Forwarded-For, which the app's rate limiter reads for the client IP.
+{$API_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy api:8787
+}

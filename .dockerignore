@@ -1,0 +1,20 @@
+# Keep the build context small + secret-free. node_modules is reinstalled in
+# the image; everything below is local-only reference or output.
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+.claude
+.env
+.env.*
+**/.env
+**/.env.*
+*.zip
+extracted
+blueprint
+docs
+docs-reverse-engineered
+apps/web/dist
+apps/web/test-results
+**/*.log
