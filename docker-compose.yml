@@ -1,24 +1,50 @@
-# VPS deployment for the IPC API (alternative to Cloudflare Workers).
+# Self-hosted VPS deployment: Postgres + Bun API + Caddy (TLS) + cron ticker.
+# No Supabase, no Cloudflare.
 #
 #   cp deploy/.env.example .env   # fill in secrets + domains
 #   docker compose up -d --build
 #
-# Caddy terminates TLS (auto Let's Encrypt) and reverse-proxies to the Bun API;
-# the cron service ticks the reminder job hourly. Supabase stays external.
+# On first boot the db container runs deploy/db/init.sh: the bootstrap, then the
+# migrations (0001..) in order. The API connects as the `authenticator` role and
+# SET ROLEs per request, so RLS is enforced exactly as it was on Supabase.
 
 services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ipc}
+      DB_AUTHENTICATOR_PASSWORD: ${DB_AUTHENTICATOR_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./deploy/db/00_bootstrap.sql:/db/00_bootstrap.sql:ro
+      - ./supabase/migrations:/db/migrations:ro
+      - ./deploy/db/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ipc}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   api:
     build:
       context: .
       dockerfile: services/api/Dockerfile
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file: [.env]
     environment:
       PORT: 8787
+      # Built from the db credentials — the API is the `authenticator` role.
+      DATABASE_URL: postgres://authenticator:${DB_AUTHENTICATOR_PASSWORD}@db:5432/${POSTGRES_DB:-ipc}
     expose:
       - "8787"
     healthcheck:
-      # Bun is in the image; hit the app's own /health.
       test:
         [
           "CMD",
@@ -63,5 +89,6 @@ services:
         done
 
 volumes:
+  db_data:
   caddy_data:
   caddy_config:

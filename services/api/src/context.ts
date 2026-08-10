@@ -9,10 +9,6 @@ export interface Env {
   /** HS256 secret for signing/verifying app JWTs (replaces GoTrue). */
   JWT_SECRET: string
   CRON_SECRET: string
-  // TEMP: still read by lib/supabase.ts until all routers move to lib/db.ts.
-  SUPABASE_URL: string
-  SUPABASE_ANON_KEY: string
-  SUPABASE_SERVICE_ROLE_KEY: string
   RAZORPAY_KEY_ID: string
   RAZORPAY_KEY_SECRET: string
   RAZORPAY_WEBHOOK_SECRET: string

@@ -20,7 +20,7 @@
     "db:deploy": "supabase db push",
     "db:seed": "supabase db push --include-seed",
     "db:reset": "supabase db reset",
-    "deploy:api": "bun run --filter '@ipc/api' deploy",
+    "deploy:api": "echo 'API deploys via Docker Compose — see docs/vps-deploy.md'",
     "deploy:web": "bun run --filter '@ipc/web' deploy"
   },
   "devDependencies": {

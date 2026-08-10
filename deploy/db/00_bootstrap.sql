@@ -32,6 +32,17 @@ end $$;
 
 grant anon, authenticated, service_role to authenticator;
 
+-- Table/sequence privileges. Supabase auto-grants these to its roles; a plain
+-- cluster does not, so without this every query fails permission-denied BEFORE
+-- RLS runs. Set as DEFAULT privileges here (before the migrations create any
+-- table) so every migration table is covered. RLS still gates `authenticated`;
+-- `service_role` bypasses RLS but still needs the grant.
+grant usage on schema public to anon, authenticated, service_role;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to authenticated, service_role;
+alter default privileges in schema public
+  grant usage, select on sequences to authenticated, service_role;
+
 -- ── auth schema: identity store + the uid() RLS primitive ───────
 create schema if not exists auth;
 
@@ -56,4 +67,6 @@ as $$
 $$;
 
 grant usage on schema auth to authenticated, anon, service_role;
-grant select on auth.users to authenticated, service_role;
+grant select on auth.users to authenticated;
+-- service_role manages accounts (register / add-member insert the auth user).
+grant select, insert, update on auth.users to service_role;

@@ -1,16 +1,13 @@
-// Live cross-tenant RLS verification against a REAL Supabase project.
-// Proves that a user in studio A cannot read studio B's data — the enforcement
-// pglite can't test (it runs as superuser). Creates two throwaway studios.
+// Live end-to-end verification against a REAL self-hosted stack (Postgres + API).
+// Exercises the whole path pglite can't: self-issued JWT auth + the withUser
+// SET-ROLE/GUC transaction model enforcing RLS on plain Postgres. Proves a user
+// in studio A cannot read studio B's data. Creates two throwaway studios.
 //
-// Usage:
-//   SUPABASE_URL=... SUPABASE_ANON_KEY=sb_publishable_... API_URL=... bun supabase/tests/rls-live.mjs
-import { createClient } from '@supabase/supabase-js'
-
-const URL = process.env.SUPABASE_URL
-const ANON = process.env.SUPABASE_ANON_KEY
+// Run it AFTER `docker compose up` on the VPS (or any host with the API up):
+//   API_URL=https://api.yourstudio.in bun supabase/tests/rls-live.mjs
 const API = (process.env.API_URL ?? '').replace(/\/+$/, '')
-if (!URL || !ANON || !API) {
-  console.error('Set SUPABASE_URL, SUPABASE_ANON_KEY, API_URL')
+if (!API) {
+  console.error('Set API_URL (e.g. https://api.yourstudio.in)')
   process.exit(2)
 }
 
@@ -22,63 +19,69 @@ const check = (name, ok) => {
   ok ? pass++ : fail++
 }
 
-async function makeStudio(label) {
-  const client = createClient(URL, ANON, { auth: { persistSession: false } })
-  const email = `rls-${label}-${rand()}@example.com`
-  const { data: signUp, error: suErr } = await client.auth.signUp({
-    email,
-    password: 'Testpass12345!',
+async function api(path, { token, method = 'GET', body } = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? null : JSON.stringify(body),
   })
-  if (suErr) throw new Error(`signup ${label}: ${suErr.message}`)
-  const token = signUp.session?.access_token
-  if (!token) throw new Error(`no session for ${label} (email confirmation on?)`)
-
-  const reg = await fetch(`${API}/auth/register`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company_name: `RLS ${label} ${rand()}`, admin_name: `Owner ${label}`, email }),
-  })
-  const body = await reg.json()
-  if (!reg.ok) throw new Error(`register ${label}: ${JSON.stringify(body)}`)
-
-  // A client row for the tenant, created through the API (RLS-scoped insert).
-  const cr = await fetch(`${API}/clients`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `Client-${label}-${rand()}` }),
-  })
-  const clientRow = await cr.json()
-
-  return { client, token, companyId: body.company_id, clientId: clientRow.id, clientName: clientRow.name }
+  const json = await res.json().catch(() => ({}))
+  return { status: res.status, json }
 }
 
-const A = await makeStudio('A')
-const B = await makeStudio('B')
-console.log(`\nStudio A company=${A.companyId}\nStudio B company=${B.companyId}\n`)
+async function makeStudio(label) {
+  const email = `rls-${label}-${rand()}@example.com`
+  const reg = await api('/auth/register', {
+    method: 'POST',
+    body: {
+      company_name: `RLS ${label} ${rand()}`,
+      admin_name: `Owner ${label}`,
+      email,
+      password: 'Testpass12345!',
+    },
+  })
+  if (reg.status !== 200 || !reg.json.access_token) {
+    throw new Error(`register ${label}: ${reg.status} ${JSON.stringify(reg.json)}`)
+  }
+  // Re-login to confirm the password path works too.
+  const login = await api('/auth/login', { method: 'POST', body: { email, password: 'Testpass12345!' } })
+  check(`${label}: login returns a token`, login.status === 200 && !!login.json.access_token)
+  return { token: reg.json.access_token, email }
+}
 
-// 1. Direct PostgREST with A's JWT: companies returns ONLY A's.
-const aCompanies = await A.client.from('companies').select('id')
-const aSeesOwn = aCompanies.data?.some((r) => r.id === A.companyId)
-const aSeesB = aCompanies.data?.some((r) => r.id === B.companyId)
-check('A can read its own company', !!aSeesOwn)
-check('A CANNOT read company B (RLS)', !aSeesB)
+const a = await makeStudio('A')
+const b = await makeStudio('B')
 
-// 2. clients table: A must not see B's client rows.
-const aClients = await A.client.from('clients').select('id,name,company_id')
-const leak = (aClients.data ?? []).filter((r) => r.company_id === B.companyId)
-check('A CANNOT read B clients (RLS)', leak.length === 0)
-check('A can read its own client', (aClients.data ?? []).some((r) => r.id === A.clientId))
+// Studio A creates a client.
+const created = await api('/clients', {
+  token: a.token,
+  method: 'POST',
+  body: { name: `A Client ${rand()}` },
+})
+check('A: can create a client', created.status === 201 && !!created.json.id)
+const aClientId = created.json.id
 
-// 3. users table: A must not see B's owner user.
-const aUsers = await A.client.from('users').select('user_id,company_id')
-const userLeak = (aUsers.data ?? []).some((r) => r.company_id === B.companyId)
-check('A CANNOT read B users (RLS)', !userLeak)
+// Studio A sees its own client.
+const aList = await api('/clients', { token: a.token })
+check('A: sees its own client', Array.isArray(aList.json) && aList.json.some((c) => c.id === aClientId))
 
-// 4. Through the API list endpoint: A's /clients excludes B's client.
-const aApi = await fetch(`${API}/clients`, { headers: { Authorization: `Bearer ${A.token}` } })
-const aApiClients = await aApi.json()
-const apiLeak = Array.isArray(aApiClients) && aApiClients.some((c) => c.name === B.clientName)
-check('API /clients for A excludes B (RLS end-to-end)', !apiLeak)
+// Studio B must NOT see A's client (RLS).
+const bList = await api('/clients', { token: b.token })
+check(
+  "B: list excludes A's client (cross-tenant RLS)",
+  Array.isArray(bList.json) && !bList.json.some((c) => c.id === aClientId),
+)
+
+// Studio B cannot fetch A's client by id.
+const bGet = await api(`/clients/${aClientId}`, { token: b.token })
+check("B: cannot fetch A's client by id (404)", bGet.status === 404)
+
+// No token → unauthorized.
+const anon = await api('/clients')
+check('anon: rejected without a token', anon.status === 401)
 
 console.log(`\n${pass} passed, ${fail} failed`)
-process.exit(fail === 0 ? 0 : 1)
+process.exit(fail ? 1 : 0)
