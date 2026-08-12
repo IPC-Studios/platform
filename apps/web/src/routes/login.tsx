@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Camera } from 'lucide-react'
-import { authToken } from '@ipc/contracts'
-import { callApi } from '@/shared/api/client'
+import { Camera, MailCheck } from 'lucide-react'
+import { z, authToken, registerResult } from '@ipc/contracts'
+import { callApi, ApiError } from '@/shared/api/client'
 import { setToken } from '@/shared/auth/token'
 import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 
 type Mode = 'signin' | 'register'
+const ok = z.object({ ok: z.boolean() })
 
 export function LoginPage() {
   const { refresh } = useAuth()
@@ -22,6 +23,9 @@ export function LoginPage() {
   const [adminName, setAdminName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Set once the user needs to verify their email (after register, or a 403 login).
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
+  const [resent, setResent] = useState(false)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -29,28 +33,49 @@ export function LoginPage() {
     setBusy(true)
     try {
       if (MOCK_ENABLED) {
-        // Preview mode: no backend — the mock session is injected on refresh.
         await refresh()
         await navigate({ to: '/dashboard' })
         return
       }
-      const { access_token } =
-        mode === 'signin'
-          ? await callApi('/auth/login', {
-              method: 'POST',
-              body: { email, password },
-              responseSchema: authToken,
-            })
-          : await callApi('/auth/register', {
-              method: 'POST',
-              body: { company_name: companyName, admin_name: adminName, email, password },
-              responseSchema: authToken,
-            })
+      if (mode === 'register') {
+        await callApi('/auth/register', {
+          method: 'POST',
+          body: { company_name: companyName, admin_name: adminName, email, password },
+          responseSchema: registerResult,
+        })
+        setPendingEmail(email) // show the "check your inbox" screen
+        return
+      }
+      const { access_token } = await callApi('/auth/login', {
+        method: 'POST',
+        body: { email, password },
+        responseSchema: authToken,
+      })
       setToken(access_token)
       await refresh()
       await navigate({ to: '/dashboard' })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      // A 403 on sign-in means the email isn't verified yet.
+      if (err instanceof ApiError && err.status === 403) {
+        setPendingEmail(email)
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong.')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resend() {
+    if (!pendingEmail) return
+    setBusy(true)
+    try {
+      await callApi('/auth/resend-verification', {
+        method: 'POST',
+        body: { email: pendingEmail },
+        responseSchema: ok,
+      })
+      setResent(true)
     } finally {
       setBusy(false)
     }
@@ -65,73 +90,114 @@ export function LoginPage() {
           </span>
           <h1 className="text-xl font-semibold tracking-tight">IPC Studios</h1>
           <p className="text-sm text-muted-foreground">
-            {mode === 'signin' ? 'Sign in to your studio workspace.' : 'Create your studio workspace.'}
+            {pendingEmail
+              ? 'Verify your email to continue.'
+              : mode === 'signin'
+                ? 'Sign in to your studio workspace.'
+                : 'Create your studio workspace.'}
           </p>
         </div>
 
-        <Card>
-          <CardContent className="p-6">
-            <form onSubmit={onSubmit} className="flex flex-col gap-4">
-              {mode === 'register' && (
-                <>
-                  <Field label="Studio name">
+        {pendingEmail ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MailCheck className="size-6" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Check your inbox</p>
+                <p className="text-sm text-muted-foreground">
+                  We sent a verification link to <span className="font-medium">{pendingEmail}</span>. Click it
+                  to activate your studio, then sign in.
+                </p>
+              </div>
+              {resent ? (
+                <p className="text-sm text-success">Verification email sent again.</p>
+              ) : (
+                <Button variant="outline" className="w-full" disabled={busy} onClick={() => void resend()}>
+                  {busy ? 'Sending…' : 'Resend email'}
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingEmail(null)
+                  setResent(false)
+                  setMode('signin')
+                }}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Back to sign in
+              </button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <CardContent className="p-6">
+                <form onSubmit={onSubmit} className="flex flex-col gap-4">
+                  {mode === 'register' && (
+                    <>
+                      <Field label="Studio name">
+                        <Input
+                          placeholder="e.g. Aperture Studios"
+                          value={companyName}
+                          onChange={(e) => setCompanyName(e.target.value)}
+                          required
+                        />
+                      </Field>
+                      <Field label="Your name">
+                        <Input
+                          placeholder="e.g. Priya Sharma"
+                          value={adminName}
+                          onChange={(e) => setAdminName(e.target.value)}
+                          required
+                        />
+                      </Field>
+                    </>
+                  )}
+                  <Field label="Email">
                     <Input
-                      placeholder="e.g. Aperture Studios"
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
+                      type="email"
+                      placeholder="you@studio.in"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       required
                     />
                   </Field>
-                  <Field label="Your name">
+                  <Field label="Password">
                     <Input
-                      placeholder="e.g. Priya Sharma"
-                      value={adminName}
-                      onChange={(e) => setAdminName(e.target.value)}
+                      type="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
                     />
                   </Field>
-                </>
-              )}
-              <Field label="Email">
-                <Input
-                  type="email"
-                  placeholder="you@studio.in"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </Field>
-              <Field label="Password">
-                <Input
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </Field>
 
-              {error && (
-                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-              )}
+                  {error && (
+                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+                  )}
 
-              <Button type="submit" disabled={busy} className="mt-1 w-full">
-                {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create studio'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+                  <Button type="submit" disabled={busy} className="mt-1 w-full">
+                    {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create studio'}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
 
-        <p className="mt-4 text-center text-sm text-muted-foreground">
-          {mode === 'signin' ? "New studio?" : 'Already have an account?'}{' '}
-          <button
-            type="button"
-            onClick={() => setMode(mode === 'signin' ? 'register' : 'signin')}
-            className="font-medium text-primary hover:underline"
-          >
-            {mode === 'signin' ? 'Register' : 'Sign in'}
-          </button>
-        </p>
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              {mode === 'signin' ? 'New studio?' : 'Already have an account?'}{' '}
+              <button
+                type="button"
+                onClick={() => setMode(mode === 'signin' ? 'register' : 'signin')}
+                className="font-medium text-primary hover:underline"
+              >
+                {mode === 'signin' ? 'Register' : 'Sign in'}
+              </button>
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

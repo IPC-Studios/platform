@@ -50,6 +50,7 @@ async function freshDb() {
   await db.exec(mig('0018_open_trial_by_default.sql'))
   await db.exec(mig('0019_platform_console.sql'))
   await db.exec(mig('0020_platform_ops.sql'))
+  await db.exec(mig('0021_email_verification.sql'))
   return db
 }
 
@@ -1083,5 +1084,52 @@ describe('platform ops — plan mutations (Phase 14 follow-up)', () => {
   it('extend rejects an out-of-range month count', async () => {
     await asUser(db, vendor)
     await expect(db.query(`select platform_extend_plan('${studioB}', 0);`)).rejects.toThrow(/between 1 and 60/i)
+  })
+})
+
+describe('email verification (0021)', () => {
+  let db: PGlite
+  const uid = '55555555-5555-5555-5555-555555555555'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${uid}', 'verify@s.test');`)
+  })
+
+  it('issue -> consume flips the user to verified, one-time', async () => {
+    // Newly inserted (post-migration) user starts unverified.
+    const before = await db.query<{ v: boolean }>(
+      `select email_verified as v from auth.users where id = '${uid}';`,
+    )
+    expect(before.rows[0]!.v).toBe(false)
+
+    const issued = await db.query<{ token: string }>(
+      `select issue_email_verification('${uid}') as token;`,
+    )
+    const token = issued.rows[0]!.token
+    expect(token.length).toBeGreaterThan(20)
+
+    const consumed = await db.query<{ uid: string | null }>(
+      `select consume_email_verification('${token}') as uid;`,
+    )
+    expect(consumed.rows[0]!.uid).toBe(uid)
+
+    const after = await db.query<{ v: boolean }>(
+      `select email_verified as v from auth.users where id = '${uid}';`,
+    )
+    expect(after.rows[0]!.v).toBe(true)
+
+    // Second use is rejected.
+    const replay = await db.query<{ uid: string | null }>(
+      `select consume_email_verification('${token}') as uid;`,
+    )
+    expect(replay.rows[0]!.uid).toBeNull()
+  })
+
+  it('a bad token returns null', async () => {
+    const r = await db.query<{ uid: string | null }>(
+      `select consume_email_verification('not-a-real-token') as uid;`,
+    )
+    expect(r.rows[0]!.uid).toBeNull()
   })
 })

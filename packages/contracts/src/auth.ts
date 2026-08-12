@@ -24,12 +24,29 @@ export const loginRequest = z.object({
 })
 export type LoginRequest = z.infer<typeof loginRequest>
 
-/** What /auth/register and /auth/login return — a bearer access token. */
+/** What /auth/login and /auth/verify return — a bearer access token. */
 export const authToken = z.object({
   access_token: z.string(),
   token_type: z.literal('bearer'),
 })
 export type AuthToken = z.infer<typeof authToken>
+
+/** /auth/register response — email verification is required before sign-in. */
+export const registerResult = z.object({
+  verification_required: z.literal(true),
+  email,
+  /** Present only outside production (ENVIRONMENT !== 'production') for tests. */
+  verification_token: z.string().optional(),
+})
+export type RegisterResult = z.infer<typeof registerResult>
+
+/** Confirm an email via the token from the verification link. */
+export const verifyEmailRequest = z.object({ token: z.string().min(1) })
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequest>
+
+/** Re-send the verification email. */
+export const resendVerificationRequest = z.object({ email })
+export type ResendVerificationRequest = z.infer<typeof resendVerificationRequest>
 
 /** Plan-gate state resolved for the current company. */
 export const planGate = z.enum(['active', 'grace', 'grandfathered', 'expired'])

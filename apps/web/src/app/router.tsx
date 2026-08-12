@@ -8,6 +8,7 @@ import {
   type AnyRoute,
 } from '@tanstack/react-router'
 import { LoginPage } from '@/routes/login'
+import { VerifyEmailPage } from '@/routes/verify'
 import { DashboardPage } from '@/routes/dashboard'
 import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
@@ -44,6 +45,7 @@ const route = (path: string, component: () => ReactNode): AnyRoute =>
 const routeTree = rootRoute.addChildren([
   route('/', DashboardPage),
   route('/login', LoginPage),
+  route('/verify', VerifyEmailPage),
   route('/terms/acknowledge', TermsAcknowledgePage),
   route('/dashboard', DashboardPage),
 

@@ -9,6 +9,11 @@ export interface Env {
   /** HS256 secret for signing/verifying app JWTs (replaces GoTrue). */
   JWT_SECRET: string
   CRON_SECRET: string
+  /** Email (Resend) for verification mail. */
+  RESEND_API_KEY: string
+  EMAIL_FROM: string
+  /** Public web app origin, used to build the verification link. */
+  APP_URL: string
   RAZORPAY_KEY_ID: string
   RAZORPAY_KEY_SECRET: string
   RAZORPAY_WEBHOOK_SECRET: string

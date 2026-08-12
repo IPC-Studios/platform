@@ -1,0 +1,75 @@
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { Camera, Loader2, XCircle } from 'lucide-react'
+import { authToken } from '@ipc/contracts'
+import { callApi } from '@/shared/api/client'
+import { setToken } from '@/shared/auth/token'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { Card, CardContent } from '@/shared/ui/card'
+
+/** Landing page for the email verification link (/verify?token=…). */
+export function VerifyEmailPage() {
+  const { refresh } = useAuth()
+  const navigate = useNavigate()
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (!token) {
+      setFailed(true)
+      return
+    }
+    let active = true
+    void (async () => {
+      try {
+        const { access_token } = await callApi('/auth/verify', {
+          method: 'POST',
+          body: { token },
+          responseSchema: authToken,
+        })
+        setToken(access_token)
+        await refresh()
+        if (active) await navigate({ to: '/dashboard' })
+      } catch {
+        if (active) setFailed(true)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [navigate, refresh])
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Camera className="size-6" />
+          </span>
+          <h1 className="text-xl font-semibold tracking-tight">IPC Studios</h1>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
+            {failed ? (
+              <>
+                <XCircle className="size-8 text-destructive" />
+                <p className="text-sm font-medium">Verification failed</p>
+                <p className="text-sm text-muted-foreground">
+                  This link is invalid or has expired. Sign in and request a new one.
+                </p>
+                <Link to="/login" className="text-sm font-medium text-primary hover:underline">
+                  Go to sign in
+                </Link>
+              </>
+            ) : (
+              <>
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Verifying your email…</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
