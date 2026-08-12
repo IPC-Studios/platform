@@ -1,5 +1,5 @@
-# Self-hosted VPS deployment: Postgres + Bun API + Caddy (TLS) + cron ticker.
-# No Supabase, no Cloudflare.
+# Self-hosted VPS BACKEND: Postgres + Bun API + Caddy (TLS) + cron ticker.
+# No Supabase. The web frontend deploys separately to Cloudflare Pages.
 #
 #   cp deploy/.env.example .env   # fill in secrets + domains
 #   docker compose up -d --build
@@ -57,33 +57,17 @@ services:
       retries: 3
       start_period: 10s
 
-  # Builds the web SPA into the web_dist volume, then exits. Reruns on each
-  # `up --build` deploy so the frontend ships with the API.
-  web-build:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        VITE_API_BASE_URL: ${WEB_API_BASE_URL}
-    restart: "no"
-    volumes:
-      - web_dist:/out
-
   caddy:
     image: caddy:2
     restart: unless-stopped
     depends_on:
-      api:
-        condition: service_started
-      web-build:
-        condition: service_completed_successfully
+      - api
     ports:
       - "80:80"
       - "443:443"
     env_file: [.env]
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - web_dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
 
@@ -106,6 +90,5 @@ services:
 
 volumes:
   db_data:
-  web_dist:
   caddy_data:
   caddy_config:
