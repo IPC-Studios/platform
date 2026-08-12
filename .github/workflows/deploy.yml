@@ -42,5 +42,5 @@ jobs:
             # use the coolify overlay and omit our own caddy. --wait blocks on the
             # db/api healthchecks.
             docker compose -f docker-compose.yml -f docker-compose.coolify.yml \
-              up -d --build --wait --remove-orphans db api cron
+              up -d --build --wait --remove-orphans db migrate api cron
             docker compose ps

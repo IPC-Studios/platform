@@ -12,7 +12,7 @@ claim, so every existing RLS policy / RPC / trigger works unchanged.
 | File | Role |
 |---|---|
 | `deploy/db/00_bootstrap.sql` | Recreates the Supabase surface on plain PG: `auth` schema + `auth.users`, `auth.uid()`, the role model, extensions, table grants. |
-| `deploy/db/init.sh` | First-boot: runs the bootstrap, sets the authenticator password, applies migrations `0001..` in order. |
+| `deploy/db/migrate.sh` | `migrate` service: idempotent bootstrap + applies any pending migrations (tracked in `schema_migrations`) on every deploy. |
 | `docker-compose.yml` | `db` (postgres:16) + `api` (Bun) + `caddy` (TLS/proxy) + `cron`. |
 | `services/api/src/server.ts` | Bun entrypoint — `Bun.serve` passing `process.env` as Hono's `env`. |
 | `deploy/Caddyfile` / `deploy/.env.example` | API reverse-proxy config / all secrets. |
@@ -31,7 +31,7 @@ claim, so every existing RLS policy / RPC / trigger works unchanged.
    #             JWT_SECRET, ALLOWED_ORIGINS, RAZORPAY_*, CRON_SECRET
    ```
    `ALLOWED_ORIGINS` must include the Cloudflare Pages origin or the browser is CORS-blocked.
-4. **Launch** (db initialises + migrates on first boot):
+4. **Launch** (the `migrate` service bootstraps + applies migrations):
    ```bash
    docker compose up -d --build
    ```
@@ -71,8 +71,9 @@ Arm it once (repo **variable** `DEPLOY_ENABLED=true`) with these **secrets**:
 - Backend: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PATH` (+ `VPS_PORT` if not 22).
 - Frontend: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `API_BASE_URL`.
 
-The VPS repo needs a **deploy key** (private repo) and a `.env`. Migrations run only
-on the db's first boot, so ordinary deploys just rebuild the API.
+The VPS repo needs a **deploy key** (private repo) and a `.env`. The `migrate`
+service applies bootstrap + any new migrations on every deploy (tracked in
+`schema_migrations`), so schema changes ship automatically.
 
 ## Webhooks
 
@@ -83,7 +84,9 @@ HMAC verification is runtime-agnostic; `RAZORPAY_WEBHOOK_SECRET` must match.
 
 - **Logs**: `docker compose logs -f api` / `... db`
 - **Backups**: `docker compose exec db pg_dump -U postgres ipc > backup.sql`
-- **Migrations**: `init.sh` runs them on the db's FIRST boot only (empty volume).
+- **Migrations**: the `migrate` service runs bootstrap + pending migrations on every
+  deploy (idempotent, tracked in `schema_migrations`); an already-migrated DB is
+  baselined on first run so nothing re-applies.
   To apply new migrations to a live DB, `psql` them in manually or run them via a
   one-off, then restart the API. (A dedicated migrate step can be added later.)
 - **Cron**: the `cron` service POSTs `/cron/reminders` hourly with `x-cron-secret`

@@ -4,9 +4,10 @@
 #   cp deploy/.env.example .env   # fill in secrets + domains
 #   docker compose up -d --build
 #
-# On first boot the db container runs deploy/db/init.sh: the bootstrap, then the
-# migrations (0001..) in order. The API connects as the `authenticator` role and
-# SET ROLEs per request, so RLS is enforced exactly as it was on Supabase.
+# The `migrate` service runs on every `up`: idempotent bootstrap + any pending
+# migrations (tracked in schema_migrations). The API connects as the
+# `authenticator` role and SET ROLEs per request, so RLS is enforced exactly as
+# it was on Supabase.
 
 services:
   db:
@@ -16,18 +17,31 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-ipc}
-      DB_AUTHENTICATOR_PASSWORD: ${DB_AUTHENTICATOR_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./deploy/db/00_bootstrap.sql:/db/00_bootstrap.sql:ro
-      - ./supabase/migrations:/db/migrations:ro
-      - ./deploy/db/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ipc}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  # One-shot: applies bootstrap + pending migrations, then exits. Runs on every
+  # deploy; api waits for it to finish successfully.
+  migrate:
+    image: postgres:16
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: [.env]
+    environment:
+      PGHOST: db
+    volumes:
+      - ./deploy/db/00_bootstrap.sql:/db/00_bootstrap.sql:ro
+      - ./supabase/migrations:/db/migrations:ro
+      - ./deploy/db/migrate.sh:/db/migrate.sh:ro
+    entrypoint: ["sh", "/db/migrate.sh"]
 
   api:
     build:
@@ -37,6 +51,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file: [.env]
     environment:
       PORT: 8787
