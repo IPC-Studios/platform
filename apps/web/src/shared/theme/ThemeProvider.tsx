@@ -17,10 +17,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [scheme, setScheme] = useState<Scheme>('light')
 
   useEffect(() => {
+    // Default to light; only honour an explicit saved choice (ignore OS scheme).
     const saved = localStorage.getItem(STORAGE_KEY) as Scheme | null
-    const initial: Scheme =
-      saved ?? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    setScheme(initial)
+    setScheme(saved ?? 'light')
   }, [])
 
   useEffect(() => {
