@@ -38,8 +38,7 @@ jobs:
             cd "${{ secrets.VPS_PATH }}"
             git fetch origin main
             git checkout -B main origin/main
-            # Testing (no domain yet): bring up db + api only. Once a domain/TLS
-            # is set, switch to `docker compose up -d --build --wait` for the full
-            # stack (adds caddy + cron).
-            docker compose up -d --build --wait db api
+            # Full stack: db + api + caddy (TLS) + cron. --wait blocks on the
+            # db/api healthchecks.
+            docker compose up -d --build --wait --remove-orphans
             docker compose ps
