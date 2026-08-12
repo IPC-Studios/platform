@@ -1,16 +1,26 @@
 import { Hono } from 'hono'
-import { registerRequest, loginRequest, authToken, sessionState } from '@ipc/contracts'
+import {
+  registerRequest,
+  registerResult,
+  loginRequest,
+  verifyEmailRequest,
+  resendVerificationRequest,
+  authToken,
+  sessionState,
+} from '@ipc/contracts'
 import { serializeAccess } from '@ipc/permissions'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
 import { withService } from '../../lib/db'
 import { issueToken, hashPassword, verifyPassword } from '../../lib/auth-token'
+import { sendVerificationEmail } from '../../lib/email'
+
+const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
 
 /**
- * Auth router (self-issued, no GoTrue). /register creates the auth user + studio
- * atomically and returns a bearer token; /login verifies a password and returns
- * one; /session hydrates the app from the JWT.
+ * Auth router (self-issued, no GoTrue). Register creates the auth user + studio
+ * and emails a verification link; sign-in is refused until the email is verified.
  */
 export const authRouter = new Hono<AppEnv>()
   .post('/register', async (c) => {
@@ -20,30 +30,69 @@ export const authRouter = new Hono<AppEnv>()
 
     const pwHash = await hashPassword(password)
 
-    let uid: string
+    let token: string
     try {
-      // One transaction: create the auth user, bind auth.uid() to it, then run
-      // the atomic studio bootstrap. Rolls back together on any failure.
-      uid = await withService(c.env, async (sql) => {
-        const rows = await sql<{ id: string }[]>`
+      // One transaction: create the auth user, bootstrap the studio, mint a
+      // verification token. Rolls back together on any failure.
+      token = await withService(c.env, async (sql) => {
+        const [u] = await sql<{ id: string }[]>`
           insert into auth.users (email, encrypted_password)
           values (${email}, ${pwHash})
           returning id`
-        const id = rows[0]!.id
-        await sql`select set_config('request.jwt.claim.sub', ${id}, true)`
+        await sql`select set_config('request.jwt.claim.sub', ${u!.id}, true)`
         await sql`select register_company_and_admin(${company_name}, ${admin_name}, ${phone ?? null})`
-        return id
+        const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u!.id}) as token`
+        return t!.token
       })
     } catch (e) {
-      // Unique-violation on email (23505) or any bootstrap error.
       if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
         fail(409, 'An account with this email already exists.')
       }
       fail(409, 'We could not create your studio. Please try again.')
     }
 
-    const token = await issueToken(c.env, uid!)
+    await sendVerificationEmail(c.env, email, verifyLink(c.env, token!))
+
+    return c.json(
+      registerResult.parse({
+        verification_required: true,
+        email,
+        // Expose the token off-production so automated tests can verify.
+        ...(c.env.ENVIRONMENT !== 'production' ? { verification_token: token! } : {}),
+      }),
+    )
+  })
+
+  .post('/verify', async (c) => {
+    const parsed = verifyEmailRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Invalid verification link.')
+
+    const uid = await withService(c.env, async (sql) => {
+      const [r] = await sql<{ uid: string | null }[]>`
+        select consume_email_verification(${parsed.data.token}) as uid`
+      return r?.uid ?? null
+    })
+    if (!uid) fail(400, 'This verification link is invalid or has expired.')
+
+    // Verified → sign them straight in.
+    const token = await issueToken(c.env, uid)
     return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+  })
+
+  .post('/resend-verification', async (c) => {
+    const parsed = resendVerificationRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please enter your email.')
+
+    const raw = await withService(c.env, async (sql) => {
+      const [u] = await sql<{ id: string; email_verified: boolean }[]>`
+        select id, email_verified from auth.users where email = ${parsed.data.email}`
+      if (!u || u.email_verified) return null
+      const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u.id}) as token`
+      return t!.token
+    })
+    if (raw) await sendVerificationEmail(c.env, parsed.data.email, verifyLink(c.env, raw))
+    // Always 200 — never leak whether an account exists.
+    return c.json({ ok: true })
   })
 
   .post('/login', async (c) => {
@@ -54,12 +103,14 @@ export const authRouter = new Hono<AppEnv>()
     const [row] = await withService(
       c.env,
       (sql) =>
-        sql<{ id: string; encrypted_password: string | null }[]>`
-          select id, encrypted_password from auth.users where email = ${email}`,
+        sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
+          select id, encrypted_password, email_verified from auth.users where email = ${email}`,
     )
-    // Verify even when the user is missing? Not needed — constant-ish; keep simple.
     if (!row?.encrypted_password || !(await verifyPassword(password, row.encrypted_password))) {
       fail(401, 'Invalid email or password.')
+    }
+    if (!row.email_verified) {
+      fail(403, 'Please verify your email before signing in. Check your inbox for the link.')
     }
 
     const token = await issueToken(c.env, row.id)

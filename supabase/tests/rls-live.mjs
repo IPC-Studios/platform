@@ -43,13 +43,22 @@ async function makeStudio(label) {
       password: 'Testpass12345!',
     },
   })
-  if (reg.status !== 200 || !reg.json.access_token) {
+  // Register requires email verification; off-production it returns the token.
+  if (reg.status !== 200 || !reg.json.verification_token) {
     throw new Error(`register ${label}: ${reg.status} ${JSON.stringify(reg.json)}`)
   }
-  // Re-login to confirm the password path works too.
+
+  // Login is refused until verified.
+  const blocked = await api('/auth/login', { method: 'POST', body: { email, password: 'Testpass12345!' } })
+  check(`${label}: login blocked before verification (403)`, blocked.status === 403)
+
+  const verified = await api('/auth/verify', { method: 'POST', body: { token: reg.json.verification_token } })
+  check(`${label}: verify returns a token`, verified.status === 200 && !!verified.json.access_token)
+
+  // Password login now works.
   const login = await api('/auth/login', { method: 'POST', body: { email, password: 'Testpass12345!' } })
-  check(`${label}: login returns a token`, login.status === 200 && !!login.json.access_token)
-  return { token: reg.json.access_token, email }
+  check(`${label}: login works after verification`, login.status === 200 && !!login.json.access_token)
+  return { token: login.json.access_token, email }
 }
 
 const a = await makeStudio('A')
