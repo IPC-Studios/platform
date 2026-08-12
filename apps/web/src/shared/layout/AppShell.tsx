@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(true)}>
             <Menu />
           </Button>
-          <span className="font-semibold">
+          <span className="text-xl font-bold tracking-tight">
             <span className="text-brand">IPC</span> Studios
           </span>
           <div className="ml-auto flex items-center gap-1">
@@ -112,7 +112,7 @@ function Sidebar({
         className,
       )}
     >
-      <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <p className="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         Menu
       </p>
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
