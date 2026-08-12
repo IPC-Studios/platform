@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Camera } from 'lucide-react'
-import { registerResponse } from '@ipc/contracts'
-import { supabase } from '@/shared/supabase'
+import { authToken } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
+import { setToken } from '@/shared/auth/token'
+import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -27,18 +28,25 @@ export function LoginPage() {
     setError(null)
     setBusy(true)
     try {
-      if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw new Error(error.message)
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password })
-        if (error) throw new Error(error.message)
-        await callApi('/auth/register', {
-          method: 'POST',
-          body: { company_name: companyName, admin_name: adminName, email },
-          responseSchema: registerResponse,
-        })
+      if (MOCK_ENABLED) {
+        // Preview mode: no backend — the mock session is injected on refresh.
+        await refresh()
+        await navigate({ to: '/dashboard' })
+        return
       }
+      const { access_token } =
+        mode === 'signin'
+          ? await callApi('/auth/login', {
+              method: 'POST',
+              body: { email, password },
+              responseSchema: authToken,
+            })
+          : await callApi('/auth/register', {
+              method: 'POST',
+              body: { company_name: companyName, admin_name: adminName, email, password },
+              responseSchema: authToken,
+            })
+      setToken(access_token)
       await refresh()
       await navigate({ to: '/dashboard' })
     } catch (err) {

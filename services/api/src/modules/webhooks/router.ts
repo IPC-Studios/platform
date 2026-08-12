@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { captureLeadRequest } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { fail } from '../../middleware/errors'
-import { serviceClient } from '../../lib/supabase'
+import { withService } from '../../lib/db'
 import { verifyRazorpaySignature } from '../../lib/razorpay'
 
 /**
@@ -14,15 +14,19 @@ export const webhooksRouter = new Hono<AppEnv>()
   .post('/lead/:sourceKey', async (c) => {
     const parsed = captureLeadRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid lead payload.')
-    const { data, error } = await serviceClient(c.env).rpc('capture_lead', {
-      p_source_key: c.req.param('sourceKey'),
-      p_name: parsed.data.name ?? null,
-      p_phone: parsed.data.phone,
-      p_email: parsed.data.email ?? null,
-      p_meta: parsed.data.meta ?? {},
-    })
-    if (error || !data) fail(400, 'We could not capture this lead.')
-    return c.json({ id: data as string }, 201)
+    const id = await withService(c.env, async (sql) => {
+      const rows = await sql`
+        select capture_lead(
+          p_source_key => ${c.req.param('sourceKey')},
+          p_name => ${parsed.data.name ?? null},
+          p_phone => ${parsed.data.phone},
+          p_email => ${parsed.data.email ?? null},
+          p_meta => ${sql.json((parsed.data.meta ?? {}) as Parameters<typeof sql.json>[0])}
+        ) as id`
+      return rows[0]?.id as string | undefined
+    }).catch(() => null)
+    if (!id) fail(400, 'We could not capture this lead.')
+    return c.json({ id: id as string }, 201)
   })
 
   // Meta subscription verification handshake (GET with hub.challenge).
@@ -47,14 +51,25 @@ export const webhooksRouter = new Hono<AppEnv>()
     const eventId = body.id ?? ''
     if (!eventId) fail(422, 'Missing event id.')
 
-    const svc = serviceClient(c.env)
-    const { data: fresh } = await svc.rpc('record_webhook_event', { p_event_id: eventId, p_payload: body })
+    const fresh = await withService(c.env, async (sql) => {
+      const rows = await sql`
+        select record_webhook_event(p_event_id => ${eventId}, p_payload => ${sql.json(body)}) as fresh`
+      return rows[0]?.fresh as boolean | undefined
+    }).catch(() => undefined)
     if (fresh === false) return c.json({ ok: true, duplicate: true }) // already processed
 
     const pay = body.payload?.payment?.entity
     if (pay?.order_id && pay.id) {
       // Best-effort activation; RPC is idempotent regardless.
-      await svc.rpc('activate_subscription', { p_order_id: pay.order_id, p_payment_id: pay.id })
+      const orderId = pay.order_id
+      const paymentId = pay.id
+      await withService(c.env, async (sql) => {
+        await sql`
+          select * from activate_subscription(
+            p_order_id => ${orderId},
+            p_payment_id => ${paymentId}
+          )`
+      }).catch(() => undefined)
     }
     return c.json({ ok: true })
   })

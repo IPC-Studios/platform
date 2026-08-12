@@ -3,7 +3,8 @@ import { resolveAccess, type AppRole } from '@ipc/permissions'
 import type { PlanGate } from '@ipc/contracts'
 import type { AppEnv } from '../context'
 import { fail } from './errors'
-import { userClient } from '../lib/supabase'
+import { verifyToken } from '../lib/auth-token'
+import { withUser } from '../lib/db'
 
 function bearer(c: Context<AppEnv>): string {
   const h = c.req.header('Authorization') ?? ''
@@ -12,35 +13,36 @@ function bearer(c: Context<AppEnv>): string {
   return token
 }
 
+interface AuthContextRow {
+  company_id: string
+  role: AppRole
+  is_owner: boolean
+  is_platform_admin: boolean
+  display_name: string
+  email: string
+  plan_expiry: string | null
+  plan_gate: PlanGate
+  profile_key: string | null
+  overrides: { permission_key: string; enabled: boolean }[] | null
+}
+
 /**
  * Resolve identity + tenant + effective access, once per request.
- *   1. verify the Supabase JWT (real user)
- *   2. resolve company_id + role + profile via the `get_auth_context` RPC
- *      (Phase 1 creates it; it reads auth.uid() and returns the tenant row)
+ *   1. verify the app JWT locally (no auth server round-trip)
+ *   2. run get_auth_context() as the caller inside an RLS-scoped transaction
+ *      (withUser sets auth.uid() via the request.jwt.claim.sub GUC)
  *   3. compose effective permissions with the shared resolver
  */
 export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const token = bearer(c)
-  const supabase = userClient(c.env, token)
+  const uid = await verifyToken(c.env, token)
+  if (!uid) fail(401, 'Your session has expired. Please sign in again.')
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser()
-  if (userErr || !userData.user) fail(401, 'Your session has expired. Please sign in again.')
-
-  const { data: ctx, error: ctxErr } = await supabase.rpc('get_auth_context').single()
-  if (ctxErr || !ctx) fail(403, 'No studio is linked to this account.')
-
-  const row = ctx as {
-    company_id: string
-    role: AppRole
-    is_owner: boolean
-    is_platform_admin: boolean
-    display_name: string
-    email: string
-    plan_expiry: string | null
-    plan_gate: PlanGate
-    profile_key: string | null
-    overrides: { permission_key: string; enabled: boolean }[] | null
-  }
+  const row = await withUser(c.env, uid, async (sql) => {
+    const rows = await sql<AuthContextRow[]>`select * from get_auth_context()`
+    return rows[0]
+  })
+  if (!row) fail(403, 'No studio is linked to this account.')
 
   const access = resolveAccess({
     role: row.role,
@@ -50,7 +52,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   })
 
   c.set('auth', {
-    userId: userData.user.id,
+    userId: uid,
     companyId: row.company_id,
     role: row.role,
     isOwner: row.is_owner,

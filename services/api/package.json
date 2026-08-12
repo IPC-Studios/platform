@@ -4,22 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "deploy": "wrangler deploy",
+    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@ipc/contracts": "workspace:*",
-    "@ipc/permissions": "workspace:*",
     "@ipc/domain": "workspace:*",
-    "@supabase/supabase-js": "^2.105.4",
-    "hono": "^4.6.0"
+    "@ipc/permissions": "workspace:*",
+    "hono": "^4.6.0",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240909.0",
-    "wrangler": "^3.78.0"
+    "bun-types": "^1.3.14"
   }
 }

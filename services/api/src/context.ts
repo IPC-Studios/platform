@@ -1,12 +1,13 @@
 import type { PlanGate } from '@ipc/contracts'
 import type { AppRole, ResolvedAccess } from '@ipc/permissions'
 
-/** Secrets + vars bound to the Worker. */
+/** Secrets + vars from the runtime env (process.env under Bun). */
 export interface Env {
   ENVIRONMENT: string
-  SUPABASE_URL: string
-  SUPABASE_ANON_KEY: string
-  SUPABASE_SERVICE_ROLE_KEY: string
+  /** Postgres connection string the API connects as (the `authenticator` role). */
+  DATABASE_URL: string
+  /** HS256 secret for signing/verifying app JWTs (replaces GoTrue). */
+  JWT_SECRET: string
   CRON_SECRET: string
   RAZORPAY_KEY_ID: string
   RAZORPAY_KEY_SECRET: string

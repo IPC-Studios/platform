@@ -226,6 +226,40 @@ describe('projects core (Phase 4)', () => {
     expect(Number(pay.rows[0]!.n)).toBe(1)
   })
 
+  // Smoke-tests the hand-written router SQL (list JOIN + detail double jsonb_agg)
+  // that replaced PostgREST embeds — catches column/shape typos without a live PG.
+  it('router SQL: list joins client_name; detail nests deliverables + payments', async () => {
+    const r = await db.query<{ id: string }>(
+      `select create_project_with_details(
+         '${clientId}', 'Smoke Wedding', 40000, 'active', true,
+         '[{"title":"Album","is_additional_charge":true,"additional_charge_amount":6000}]'::jsonb,
+         '[{"amount":15000,"mode":"upi","reference":"TXN1"}]'::jsonb
+       ) as id;`,
+    )
+    const projectId = r.rows[0]!.id
+
+    const listRow = await db.query<{ client_name: string; total_cost: string }>(
+      `select p.id, p.name, cl.name as client_name, p.total_cost
+       from projects p left join clients cl on cl.id = p.client_id
+       where p.id = '${projectId}';`,
+    )
+    expect(listRow.rows[0]!.client_name).toBe('Wedding Co')
+
+    const detail = await db.query<{ deliverables: unknown[]; payments: { amount: number }[] }>(
+      `select p.id,
+         coalesce((select jsonb_agg(to_jsonb(d) order by d.created_at)
+                   from deliverables d where d.project_id = p.id), '[]'::jsonb) as deliverables,
+         coalesce((select jsonb_agg(jsonb_build_object(
+                     'id', rp.id, 'amount', rp.amount, 'paid_on', rp.paid_on,
+                     'mode', rp.mode, 'reference', rp.reference) order by rp.paid_on)
+                   from received_payments rp where rp.project_id = p.id), '[]'::jsonb) as payments
+       from projects p where p.id = '${projectId}';`,
+    )
+    expect(detail.rows[0]!.deliverables).toHaveLength(1)
+    expect(detail.rows[0]!.payments).toHaveLength(1)
+    expect(Number(detail.rows[0]!.payments[0]!.amount)).toBe(15000)
+  })
+
   it('trigger keeps totals correct when a deliverable is added, edited, deleted', async () => {
     const r = await db.query<{ id: string }>(
       `select create_project_with_details('${clientId}','Edit Test', 10000) as id;`,

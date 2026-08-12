@@ -1,7 +1,7 @@
 import { createContext, use, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { sessionState, type SessionState } from '@ipc/contracts'
-import { supabase } from '../supabase'
 import { callApi } from '../api/client'
+import { getToken, clearToken } from './token'
 import { MOCK_ENABLED, mockSession } from '../dev/mock'
 
 interface AuthValue {
@@ -22,13 +22,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(mockSession)
       return
     }
-    const { data } = await supabase.auth.getSession()
-    if (!data.session) {
+    if (!getToken()) {
       setSession(null)
       return
     }
     try {
-      // A signed-in user without a studio yet (pre-register) 403s — treat as null.
+      // Token present but no studio yet, or expired → API 401/403 → treat as null.
       setSession(await callApi('/auth/session', { responseSchema: sessionState }))
     } catch {
       setSession(null)
@@ -42,17 +41,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setLoading(false)
     }
     void boot()
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      void refresh()
-    })
     return () => {
       active = false
-      sub.subscription.unsubscribe()
     }
   }, [refresh])
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut()
+    clearToken()
     setSession(null)
   }, [])
 

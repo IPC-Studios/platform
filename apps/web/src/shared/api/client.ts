@@ -1,12 +1,12 @@
 import type { z } from '@ipc/contracts'
 import { config } from '../config'
-import { supabase } from '../supabase'
+import { getToken } from '../auth/token'
 import { MOCK_ENABLED, mockResponse, NOT_MOCKED } from '../dev/mock'
 
 /**
  * THE api client. Every call to services/api goes through here — never a
- * per-module copy. Injects the Supabase access token, validates the response
- * against its zod contract, and surfaces the server's error string as-is.
+ * per-module copy. Injects the bearer token, validates the response against its
+ * zod contract, and surfaces the server's error string as-is.
  */
 export class ApiError extends Error {
   constructor(
@@ -38,8 +38,7 @@ export async function callApi<TOut extends z.ZodTypeAny>(
     if (canned !== NOT_MOCKED) return opts.responseSchema.parse(canned)
   }
 
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
+  const token = getToken()
 
   const init: RequestInit = {
     method,

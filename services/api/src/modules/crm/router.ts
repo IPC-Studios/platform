@@ -4,47 +4,36 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { requestClient } from '../../lib/supabase'
-
-interface RawLead {
-  id: string
-  name: string | null
-  phone: string | null
-  email: string | null
-  source: string
-  status: string
-  assigned_to: string | null
-  created_at: string
-  users: { name: string } | null
-}
+import { withUser } from '../../lib/db'
 
 const list = crmLead.array()
-const SELECT = 'id,name,phone,email,source,status,assigned_to,created_at,users:assigned_to(name)'
 
 export const crmRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
   .use('*', requireModule('crm'))
 
   .get('/leads', async (c) => {
-    const { data, error } = await requestClient(c)
-      .from('crm_leads')
-      .select(SELECT)
-      .order('created_at', { ascending: false })
-    if (error) fail(400, 'We could not load leads.')
-    const rows = ((data ?? []) as unknown as RawLead[]).map((r) => ({
-      ...r,
-      assignee_name: r.users?.name ?? null,
-    }))
+    const rows = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql`
+        select l.id, l.name, l.phone, l.email, l.source, l.status, l.assigned_to, l.created_at,
+               u.name as assignee_name
+        from crm_leads l
+        left join users u on u.user_id = l.assigned_to
+        order by l.created_at desc`,
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not load leads.')
     return c.json(list.parse(rows))
   })
 
   .patch('/leads/:id', async (c) => {
     const parsed = updateLeadRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid update.')
-    const { error } = await requestClient(c)
-      .from('crm_leads')
-      .update(parsed.data)
-      .eq('id', c.req.param('id'))
-    if (error) fail(400, 'We could not update the lead.')
+    const ok = await withUser(c.env, c.get('auth').userId, async (sql) => {
+      await sql`update crm_leads set ${sql(parsed.data)} where id = ${c.req.param('id')!}`
+      return true
+    }).catch(() => false)
+    if (!ok) fail(400, 'We could not update the lead.')
     return c.body(null, 204)
   })

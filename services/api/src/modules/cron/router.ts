@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { AppEnv } from '../../context'
 import { fail } from '../../middleware/errors'
-import { serviceClient } from '../../lib/supabase'
+import { withService } from '../../lib/db'
 
 /** Constant-time string comparison — avoids leaking the secret via timing. */
 function timingSafeEqual(a: string, b: string): boolean {
@@ -21,7 +21,10 @@ export const cronRouter = new Hono<AppEnv>().post('/reminders', async (c) => {
   if (!expected || !timingSafeEqual(provided, expected)) fail(401, 'Unauthorized.')
 
   const dryRun = c.req.query('dry') === '1'
-  const { data, error } = await serviceClient(c.env).rpc('run_reminder_cron', { p_dry_run: dryRun })
-  if (error) fail(400, 'The job could not run.')
-  return c.json({ ok: true, summary: data })
+  const result = await withService(c.env, async (sql) => {
+    const rows = await sql`select run_reminder_cron(p_dry_run => ${dryRun}) as summary`
+    return { summary: rows[0]?.summary as unknown }
+  }).catch(() => null)
+  if (!result) fail(400, 'The job could not run.')
+  return c.json({ ok: true, summary: result!.summary })
 })
