@@ -38,7 +38,9 @@ jobs:
             cd "${{ secrets.VPS_PATH }}"
             git fetch origin main
             git checkout -B main origin/main
-            # Full stack: db + api + caddy (TLS) + cron. --wait blocks on the
+            # This VPS runs Coolify (its Traefik terminates TLS on 80/443), so we
+            # use the coolify overlay and omit our own caddy. --wait blocks on the
             # db/api healthchecks.
-            docker compose up -d --build --wait --remove-orphans
+            docker compose -f docker-compose.yml -f docker-compose.coolify.yml \
+              up -d --build --wait --remove-orphans db api cron
             docker compose ps

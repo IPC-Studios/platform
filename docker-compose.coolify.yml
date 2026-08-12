@@ -1,0 +1,32 @@
+# Overlay for a VPS that runs Coolify. Coolify's Traefik ("coolify-proxy") owns
+# 80/443 and issues Let's Encrypt certs, so we DON'T run our own Caddy or publish
+# host ports — the API is attached to Coolify's proxy network and routed by
+# Traefik labels instead.
+#
+# Bring up (caddy intentionally omitted):
+#   docker compose -f docker-compose.yml -f docker-compose.coolify.yml up -d --build --wait db api cron
+#
+# Requires API_DOMAIN in .env (your DuckDNS host) pointing at this VPS.
+services:
+  api:
+    networks:
+      - default
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.services.ipcapi.loadbalancer.server.port=8787
+      # https router (TLS via Coolify's letsencrypt resolver)
+      - "traefik.http.routers.ipcapi.rule=Host(`${API_DOMAIN}`)"
+      - traefik.http.routers.ipcapi.entrypoints=https
+      - traefik.http.routers.ipcapi.tls=true
+      - traefik.http.routers.ipcapi.tls.certresolver=letsencrypt
+      # http router -> redirect to https (also serves the ACME http-01 challenge)
+      - "traefik.http.routers.ipcapi-http.rule=Host(`${API_DOMAIN}`)"
+      - traefik.http.routers.ipcapi-http.entrypoints=http
+      - traefik.http.routers.ipcapi-http.middlewares=ipcapi-redirect
+      - traefik.http.middlewares.ipcapi-redirect.redirectscheme.scheme=https
+
+networks:
+  coolify:
+    external: true
