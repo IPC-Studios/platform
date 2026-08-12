@@ -94,8 +94,8 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'POST' && path === '/team/members') return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
   if (method === 'GET' && path === '/settings/company') return companyFx
   if (method === 'PATCH' && path === '/settings/company') return companyFx
-  if (method === 'GET' && path === '/settings/theme') return { preset_key: 'indigo', color_scheme: 'light' }
-  if (method === 'PATCH' && path === '/settings/theme') return { preset_key: 'indigo', color_scheme: 'light' }
+  if (method === 'GET' && path === '/settings/theme') return { preset_key: 'brand', color_scheme: 'light' }
+  if (method === 'PATCH' && path === '/settings/theme') return { preset_key: 'brand', color_scheme: 'light' }
   if (method === 'GET' && path === '/allocation') return slots
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
   if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords

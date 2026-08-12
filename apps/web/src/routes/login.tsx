@@ -88,7 +88,9 @@ export function LoginPage() {
           <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Camera className="size-6" />
           </span>
-          <h1 className="text-xl font-semibold tracking-tight">IPC Studios</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            IPC <span className="text-brand">Studios</span>
+          </h1>
           <p className="text-sm text-muted-foreground">
             {pendingEmail
               ? 'Verify your email to continue.'

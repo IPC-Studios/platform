@@ -42,7 +42,7 @@ export const settingsRouter = new Hono<AppEnv>()
         select preset_key, color_scheme from company_theme_settings where company_id = ${auth.companyId}`
       return rows[0] ?? null
     }).catch(() => null)
-    return c.json(companyTheme.parse(row ?? { preset_key: 'indigo', color_scheme: 'light' }))
+    return c.json(companyTheme.parse(row ?? { preset_key: 'brand', color_scheme: 'light' }))
   })
 
   .patch('/theme', requireOwner(), async (c) => {

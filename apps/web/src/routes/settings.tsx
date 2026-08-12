@@ -123,7 +123,7 @@ function ThemeCard({ readOnly }: { readOnly: boolean }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'theme'] }),
   })
 
-  const [selected, setSelected] = useState('indigo')
+  const [selected, setSelected] = useState('brand')
   useEffect(() => {
     if (data) {
       setSelected(data.preset_key)

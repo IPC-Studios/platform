@@ -11,6 +11,11 @@ export interface ThemePreset {
 }
 
 export const THEME_PRESETS: Readonly<Record<string, ThemePreset>> = {
+  brand: {
+    key: 'brand',
+    label: 'IPC Navy',
+    tokens: { '--primary': 'oklch(0.3 0.06 264)', '--ring': 'oklch(0.3 0.06 264)' },
+  },
   indigo: {
     key: 'indigo',
     label: 'Indigo',
