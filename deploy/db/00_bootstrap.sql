@@ -42,6 +42,13 @@ alter default privileges in schema public
   grant select, insert, update, delete on tables to authenticated, service_role;
 alter default privileges in schema public
   grant usage, select on sequences to authenticated, service_role;
+-- Execute on every migration function. service_role is the trusted bypass role
+-- and runs SECURITY DEFINER RPCs (register, webhooks, cron) that the migrations
+-- only grant to `authenticated`; without this those fail permission-denied under
+-- service_role. Migrations that `revoke ... from public, anon` still win for
+-- anon (this doesn't grant anon).
+alter default privileges in schema public
+  grant execute on functions to authenticated, service_role;
 
 -- ── auth schema: identity store + the uid() RLS primitive ───────
 create schema if not exists auth;
