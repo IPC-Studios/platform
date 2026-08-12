@@ -89,7 +89,7 @@ export function LoginPage() {
             <Camera className="size-6" />
           </span>
           <h1 className="text-xl font-semibold tracking-tight">
-            IPC <span className="text-brand">Studios</span>
+            <span className="text-brand">IPC</span> Studios
           </h1>
           <p className="text-sm text-muted-foreground">
             {pendingEmail

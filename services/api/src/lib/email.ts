@@ -33,8 +33,8 @@ export function sendVerificationEmail(env: Env, to: string, link: string): Promi
 
 /** Branded, email-client-safe HTML (table layout + inline styles). */
 function verificationHtml(link: string): string {
-  const brand = '#1b2a4a' // navy
-  const accent = '#e4002b' // red
+  const brand = '#1b2a4a' // navy (badge + button)
+  const accent = '#f2a618' // gold (wordmark "IPC")
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -61,7 +61,7 @@ function verificationHtml(link: string): string {
                     <td style="width:44px;height:44px;background:${brand};border-radius:12px;text-align:center;vertical-align:middle;font-size:22px;line-height:44px;">📷</td>
                   </tr>
                 </table>
-                <div style="margin-top:12px;font-size:18px;font-weight:600;letter-spacing:-0.01em;color:${brand};">IPC <span style="color:${accent};">Studios</span></div>
+                <div style="margin-top:12px;font-size:18px;font-weight:600;letter-spacing:-0.01em;color:#111827;"><span style="color:${accent};">IPC</span> Studios</div>
               </td>
             </tr>
             <!-- body -->

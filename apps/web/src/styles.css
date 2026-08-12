@@ -43,7 +43,7 @@
   /* IPC brand: navy primary (#1B2A4A), red accent (#E4002B). */
   --primary: oklch(0.3 0.06 264);
   --primary-foreground: oklch(0.98 0 0);
-  --brand: oklch(0.56 0.24 27);
+  --brand: #f2a618;
   --secondary: oklch(0.97 0.001 286);
   --secondary-foreground: oklch(0.21 0.006 285);
   --muted: oklch(0.97 0.001 286);
@@ -69,7 +69,7 @@
   --card-foreground: oklch(0.98 0 0);
   --primary: oklch(0.5 0.1 264);
   --primary-foreground: oklch(0.98 0 0);
-  --brand: oklch(0.64 0.22 27);
+  --brand: #f2a618;
   --secondary: oklch(0.27 0.006 286);
   --secondary-foreground: oklch(0.98 0 0);
   --muted: oklch(0.27 0.006 286);

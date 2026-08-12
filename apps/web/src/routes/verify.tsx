@@ -47,7 +47,7 @@ export function VerifyEmailPage() {
             <Camera className="size-6" />
           </span>
           <h1 className="text-xl font-semibold tracking-tight">
-            IPC <span className="text-brand">Studios</span>
+            <span className="text-brand">IPC</span> Studios
           </h1>
         </div>
         <Card>
