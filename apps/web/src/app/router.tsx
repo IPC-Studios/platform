@@ -52,6 +52,7 @@ const routeTree = rootRoute.addChildren([
   route('/projects', ProjectsListPage),
   route('/projects/new', NewProjectPage),
   route('/projects/$id', ProjectDetailPage),
+  route('/project-tracking', comingSoon('Project tracking', 'projects', 'a later phase')),
   route('/clients', ClientsListPage),
 
   // Nav destinations whose feature phase isn't built yet.
