@@ -1,0 +1,14 @@
+{
+  // Cloudflare static-assets Worker for the web SPA. Its presence stops wrangler
+  // from auto-configuring (which runs `npm install` and fails on the monorepo's
+  // workspace:* deps). Deploy: `wrangler deploy` after `bun run build`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ipc-web",
+  "compatibility_date": "2026-08-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist",
+    // SPA history fallback — serve index.html for unknown routes (e.g. /verify).
+    "not_found_handling": "single-page-application"
+  }
+}
