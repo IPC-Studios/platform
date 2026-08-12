@@ -27,3 +27,63 @@ jobs:
 
       - name: Unit tests
         run: bun run test
+
+  # Real-Postgres end-to-end: apply the bootstrap + migrations, boot the API,
+  # and run the cross-tenant auth/RLS check. Proves the runtime bits pglite
+  # can't (RPC arg/return shapes, uuid[]/jsonb encoding, timestamp parsing, and
+  # that the bootstrap grants are sufficient).
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ipc
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: ipc
+      AUTHPW: authpw_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Apply bootstrap + migrations
+        run: |
+          set -e
+          psql -v ON_ERROR_STOP=1 -f deploy/db/00_bootstrap.sql
+          psql -v ON_ERROR_STOP=1 -c "alter role authenticator with login password '${AUTHPW}'"
+          for f in $(ls supabase/migrations/*.sql | grep -v '/0000_' | sort); do
+            echo "-- $f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Boot API + run e2e RLS check
+        env:
+          DATABASE_URL: postgres://authenticator:authpw_ci@localhost:5432/ipc
+          JWT_SECRET: ci-test-secret
+          CRON_SECRET: ci-cron
+          ALLOWED_ORIGINS: ''
+          ENVIRONMENT: ci
+          PORT: '8787'
+        run: |
+          set -e
+          bun run services/api/src/server.ts &
+          API_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8787/health && break
+            sleep 1
+          done
+          API_URL=http://localhost:8787 bun supabase/tests/rls-live.mjs
+          kill $API_PID
