@@ -25,6 +25,7 @@ interface AuthContextRow {
   profile_key: string | null
   overrides: { permission_key: string; enabled: boolean }[] | null
   password_changed_at: string | null
+  password_version: number
 }
 
 /**
@@ -39,7 +40,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const token = bearer(c)
   const claims = await verifyToken(c.env, token)
   if (!claims) fail(401, 'Your session has expired. Please sign in again.')
-  const { uid, iat } = claims
+  const { uid, pwv } = claims
 
   const row = await withUser(c.env, uid, async (sql) => {
     const rows = await sql<AuthContextRow[]>`select * from get_auth_context()`
@@ -48,11 +49,9 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   if (!row) fail(403, 'No studio is linked to this account.')
 
   // Tokens are stateless, so a password reset can't revoke them directly:
-  // anything minted before the change is refused here instead. Second
-  // granularity, so a token issued in the same second as the reset survives.
-  if (row.password_changed_at) {
-    const changedAt = Math.floor(new Date(row.password_changed_at).getTime() / 1000)
-    if (iat < changedAt) fail(401, 'Your password was changed. Please sign in again.')
+  // anything carrying a stale password_version is refused here instead.
+  if (pwv !== row.password_version) {
+    fail(401, 'Your password was changed. Please sign in again.')
   }
 
   const access = resolveAccess({

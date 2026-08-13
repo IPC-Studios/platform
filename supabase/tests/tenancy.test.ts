@@ -54,6 +54,7 @@ async function freshDb() {
   await db.exec(mig('0020_platform_ops.sql'))
   await db.exec(mig('0021_email_verification.sql'))
   await db.exec(mig('0022_password_reset.sql'))
+  await db.exec(mig('0023_password_version.sql'))
   return db
 }
 
@@ -1209,24 +1210,38 @@ describe('password reset (0022)', () => {
     expect(await consume('not-a-real-token')).toBeNull()
   })
 
-  it('get_auth_context exposes password_changed_at for session invalidation', async () => {
+  it('each reset bumps password_version, stranding older tokens', async () => {
+    const before = await db.query<{ v: number }>(
+      `select password_version as v from auth.users where id = '${uid}';`,
+    )
+    expect(await consume(await issue())).toBe(uid)
+    const after = await db.query<{ v: number }>(
+      `select password_version as v from auth.users where id = '${uid}';`,
+    )
+    expect(after.rows[0]!.v).toBe(before.rows[0]!.v + 1)
+  })
+
+  it('get_auth_context exposes the reset stamp + version for session invalidation', async () => {
     const owner = '77777777-7777-7777-7777-777777777777'
     await db.exec(`insert into auth.users (id, email) values ('${owner}', 'ctx@s.test');`)
     await asUser(db, owner)
     await db.query(`select register_company_and_admin('Ctx Studio', 'Ctx Owner', null);`)
 
-    const before = await db.query<{ password_changed_at: string | null }>(
-      `select password_changed_at from get_auth_context();`,
+    const before = await db.query<{ password_changed_at: string | null; password_version: number }>(
+      `select password_changed_at, password_version from get_auth_context();`,
     )
     expect(before.rows[0]!.password_changed_at).toBeNull()
+    // A fresh account matches the default the API reads for claim-less tokens.
+    expect(before.rows[0]!.password_version).toBe(0)
 
     const t = (await db.query<{ token: string }>(`select issue_password_reset('${owner}') as token;`))
       .rows[0]!.token
     await db.query(`select consume_password_reset('${t}', 'hash-ctx') as uid;`)
 
-    const after = await db.query<{ password_changed_at: string | null }>(
-      `select password_changed_at from get_auth_context();`,
+    const after = await db.query<{ password_changed_at: string | null; password_version: number }>(
+      `select password_changed_at, password_version from get_auth_context();`,
     )
     expect(after.rows[0]!.password_changed_at).not.toBeNull()
+    expect(after.rows[0]!.password_version).toBe(1)
   })
 })

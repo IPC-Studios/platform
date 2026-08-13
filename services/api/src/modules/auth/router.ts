@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { TransactionSql } from 'postgres'
 import {
   registerRequest,
   registerResult,
@@ -18,6 +19,13 @@ import { fail } from '../../middleware/errors'
 import { withService } from '../../lib/db'
 import { issueToken, hashPassword, verifyPassword } from '../../lib/auth-token'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
+
+/** The version stamped into a freshly minted token (see issueToken). */
+async function passwordVersion(sql: TransactionSql, uid: string): Promise<number> {
+  const [r] = await sql<{ password_version: number }[]>`
+    select password_version from auth.users where id = ${uid}`
+  return r?.password_version ?? 0
+}
 
 const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
 const resetLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/reset-password?token=${raw}`
@@ -71,15 +79,16 @@ export const authRouter = new Hono<AppEnv>()
     const parsed = verifyEmailRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid verification link.')
 
-    const uid = await withService(c.env, async (sql) => {
+    const user = await withService(c.env, async (sql) => {
       const [r] = await sql<{ uid: string | null }[]>`
         select consume_email_verification(${parsed.data.token}) as uid`
-      return r?.uid ?? null
+      if (!r?.uid) return null
+      return { uid: r.uid, pwv: await passwordVersion(sql, r.uid) }
     })
-    if (!uid) fail(400, 'This verification link is invalid or has expired.')
+    if (!user) fail(400, 'This verification link is invalid or has expired.')
 
     // Verified → sign them straight in.
-    const token = await issueToken(c.env, uid)
+    const token = await issueToken(c.env, user.uid, user.pwv)
     return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
   })
 
@@ -107,8 +116,15 @@ export const authRouter = new Hono<AppEnv>()
     const [row] = await withService(
       c.env,
       (sql) =>
-        sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
-          select id, encrypted_password, email_verified from auth.users where email = ${email}`,
+        sql<
+          {
+            id: string
+            encrypted_password: string | null
+            email_verified: boolean
+            password_version: number
+          }[]
+        >`select id, encrypted_password, email_verified, password_version
+            from auth.users where email = ${email}`,
     )
     if (!row?.encrypted_password || !(await verifyPassword(password, row.encrypted_password))) {
       fail(401, 'Invalid email or password.')
@@ -117,7 +133,7 @@ export const authRouter = new Hono<AppEnv>()
       fail(403, 'Please verify your email before signing in. Check your inbox for the link.')
     }
 
-    const token = await issueToken(c.env, row.id)
+    const token = await issueToken(c.env, row.id, row.password_version)
     return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
   })
 
@@ -151,16 +167,17 @@ export const authRouter = new Hono<AppEnv>()
     // Hash first (Bun-side argon2id), then swap it in as the token is consumed —
     // one transaction, so a half-done reset can't leave the account unusable.
     const pwHash = await hashPassword(parsed.data.password)
-    const uid = await withService(c.env, async (sql) => {
+    const user = await withService(c.env, async (sql) => {
       const [r] = await sql<{ uid: string | null }[]>`
         select consume_password_reset(${parsed.data.token}, ${pwHash}) as uid`
-      return r?.uid ?? null
+      if (!r?.uid) return null
+      return { uid: r.uid, pwv: await passwordVersion(sql, r.uid) }
     })
-    if (!uid) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
+    if (!user) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
 
-    // Reset proves mailbox control → sign them straight in. Sessions issued
-    // before this moment are refused by requireAuth (password_changed_at).
-    const token = await issueToken(c.env, uid)
+    // Reset proves mailbox control → sign them straight in. Every session issued
+    // before it now carries a stale password_version and is refused.
+    const token = await issueToken(c.env, user.uid, user.pwv)
     return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
   })
 
