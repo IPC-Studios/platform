@@ -1,6 +1,6 @@
-import type { z } from '@ipc/contracts'
+import { authToken, type z } from '@ipc/contracts'
 import { config } from '../config'
-import { getToken } from '../auth/token'
+import { getToken, getRefreshToken, setTokens, clearToken } from '../auth/token'
 import { MOCK_ENABLED, mockResponse, NOT_MOCKED } from '../dev/mock'
 
 /**
@@ -16,6 +16,44 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
   }
+}
+
+/**
+ * In-flight rotation, shared by every caller that hits a 401 at once — a
+ * refresh token is single-use, so a burst of parallel refreshes would spend
+ * each other's tokens and look like theft to the server.
+ */
+let rotating: Promise<boolean> | null = null
+
+async function rotateTokens(): Promise<boolean> {
+  const before = getRefreshToken()
+  if (!before) return false
+
+  rotating ??= (async () => {
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: before }),
+      })
+      if (!res.ok) {
+        clearToken() // refresh rejected → the session is genuinely over
+        return false
+      }
+      const parsed = authToken.safeParse(await res.json().catch(() => null))
+      if (!parsed.success) return false
+      setTokens(parsed.data)
+      return true
+    } catch {
+      return false // network blip: keep the tokens, let the caller fail
+    } finally {
+      rotating = null
+    }
+  })()
+
+  const ok = await rotating
+  // Another tab may have rotated while we waited; its token is good to use.
+  return ok || getRefreshToken() !== before
 }
 
 interface CallOptions<TOut extends z.ZodTypeAny> {
@@ -38,19 +76,29 @@ export async function callApi<TOut extends z.ZodTypeAny>(
     if (canned !== NOT_MOCKED) return opts.responseSchema.parse(canned)
   }
 
-  const token = getToken()
-
-  const init: RequestInit = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: opts.body === undefined ? null : JSON.stringify(opts.body),
+  const send = () => {
+    const token = getToken()
+    const init: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: opts.body === undefined ? null : JSON.stringify(opts.body),
+    }
+    if (opts.signal) init.signal = opts.signal
+    return fetch(`${config.apiBaseUrl}${path}`, init)
   }
-  if (opts.signal) init.signal = opts.signal
 
-  const res = await fetch(`${config.apiBaseUrl}${path}`, init)
+  let res = await send()
+
+  // Access tokens are short-lived by design, so a 401 is the normal way we
+  // learn one has aged out: rotate and replay, once. The auth endpoints are
+  // exempt — /auth/refresh answering 401 must not recurse.
+  const canRotate = !path.startsWith('/auth/') || path === '/auth/session'
+  if (res.status === 401 && canRotate && (await rotateTokens())) {
+    res = await send()
+  }
 
   const json: unknown = await res.json().catch(() => ({}))
 

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
 import {
@@ -16,6 +17,7 @@ import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { LoadingState } from '@/shared/ui/states'
+import { useConfirm } from '@/shared/ui/confirm'
 import { cn } from '@/shared/ui/cn'
 
 export function SettingsPage() {
@@ -35,8 +37,47 @@ function Settings() {
       <div className="grid gap-4 lg:grid-cols-2">
         <CompanyCard readOnly={!isOwner} />
         <ThemeCard readOnly={!isOwner} />
+        <SecurityCard />
       </div>
     </>
+  )
+}
+
+function SecurityCard() {
+  const { signOutEverywhere } = useAuth()
+  const confirm = useConfirm()
+  const navigate = useNavigate()
+  const [busy, setBusy] = useState(false)
+
+  async function signOutAll() {
+    const yes = await confirm({
+      title: 'Sign out everywhere?',
+      description:
+        'Every device signs out, including this one. Use this if you think someone else has access.',
+      confirmLabel: 'Sign out everywhere',
+      destructive: true,
+    })
+    if (!yes) return
+    setBusy(true)
+    await signOutEverywhere()
+    await navigate({ to: '/login' })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Security</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Signs out every browser and device this account is open on. Anyone holding an old session
+          loses it immediately.
+        </p>
+        <Button variant="outline" disabled={busy} onClick={() => void signOutAll()}>
+          {busy ? 'Signing out…' : 'Sign out everywhere'}
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 

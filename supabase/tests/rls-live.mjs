@@ -57,8 +57,11 @@ async function makeStudio(label) {
 
   // Password login now works.
   const login = await api('/auth/login', { method: 'POST', body: { email, password: 'Testpass12345!' } })
-  check(`${label}: login works after verification`, login.status === 200 && !!login.json.access_token)
-  return { token: login.json.access_token, email }
+  check(
+    `${label}: login returns an access + refresh pair`,
+    login.status === 200 && !!login.json.access_token && !!login.json.refresh_token,
+  )
+  return { token: login.json.access_token, refresh: login.json.refresh_token, email }
 }
 
 const a = await makeStudio('A')
@@ -91,6 +94,42 @@ check("B: cannot fetch A's client by id (404)", bGet.status === 404)
 // No token → unauthorized.
 const anon = await api('/clients')
 check('anon: rejected without a token', anon.status === 401)
+
+// ── refresh + sign-out ────────────────────────────────────────
+const rotated = await api('/auth/refresh', { method: 'POST', body: { refresh_token: a.refresh } })
+check(
+  'refresh: exchanges for a new pair',
+  rotated.status === 200 && !!rotated.json.access_token && rotated.json.refresh_token !== a.refresh,
+)
+
+const refreshedCall = await api('/clients', { token: rotated.json.access_token })
+check('refresh: the new access token works', refreshedCall.status === 200)
+
+const spent = await api('/auth/refresh', { method: 'POST', body: { refresh_token: a.refresh } })
+check('refresh: the spent token is refused (401)', spent.status === 401)
+
+// Reuse revoked A's family, so its successor is dead too.
+const afterReuse = await api('/auth/refresh', {
+  method: 'POST',
+  body: { refresh_token: rotated.json.refresh_token },
+})
+check('refresh: reuse kills the whole family (401)', afterReuse.status === 401)
+
+// A fresh sign-in, then sign out everywhere.
+const reLogin = await api('/auth/login', { method: 'POST', body: { email: a.email, password: 'Testpass12345!' } })
+check('A: can sign in again after the family was revoked', reLogin.status === 200)
+
+const logoutAll = await api('/auth/logout-all', { method: 'POST', token: reLogin.json.access_token })
+check('logout-all: accepted', logoutAll.status === 200)
+
+const deadAccess = await api('/clients', { token: reLogin.json.access_token })
+check('logout-all: the access token is stranded (401)', deadAccess.status === 401)
+
+const deadRefresh = await api('/auth/refresh', {
+  method: 'POST',
+  body: { refresh_token: reLogin.json.refresh_token },
+})
+check('logout-all: the refresh token is revoked (401)', deadRefresh.status === 401)
 
 // ── password reset ────────────────────────────────────────────
 // Unknown emails answer exactly like known ones (no account enumeration).

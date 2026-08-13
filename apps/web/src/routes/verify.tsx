@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { Camera, Loader2, XCircle } from 'lucide-react'
 import { authToken } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
-import { setToken } from '@/shared/auth/token'
+import { setTokens } from '@/shared/auth/token'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Card, CardContent } from '@/shared/ui/card'
 
@@ -22,12 +22,13 @@ export function VerifyEmailPage() {
     let active = true
     void (async () => {
       try {
-        const { access_token } = await callApi('/auth/verify', {
-          method: 'POST',
-          body: { token },
-          responseSchema: authToken,
-        })
-        setToken(access_token)
+        setTokens(
+          await callApi('/auth/verify', {
+            method: 'POST',
+            body: { token },
+            responseSchema: authToken,
+          }),
+        )
         await refresh()
         if (active) await navigate({ to: '/dashboard' })
       } catch {

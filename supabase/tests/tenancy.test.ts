@@ -55,6 +55,7 @@ async function freshDb() {
   await db.exec(mig('0021_email_verification.sql'))
   await db.exec(mig('0022_password_reset.sql'))
   await db.exec(mig('0023_password_version.sql'))
+  await db.exec(mig('0024_refresh_tokens.sql'))
   return db
 }
 
@@ -1243,5 +1244,111 @@ describe('password reset (0022)', () => {
     )
     expect(after.rows[0]!.password_changed_at).not.toBeNull()
     expect(after.rows[0]!.password_version).toBe(1)
+  })
+})
+
+describe('refresh tokens (0024)', () => {
+  let db: PGlite
+  const uid = '88888888-8888-8888-8888-888888888888'
+
+  const issue = async () =>
+    (await db.query<{ token: string }>(`select issue_refresh_token('${uid}') as token;`)).rows[0]!
+      .token
+
+  const rotate = async (raw: string) =>
+    (
+      await db.query<{ user_id: string | null; token: string | null }>(
+        `select * from rotate_refresh_token('${raw}');`,
+      )
+    ).rows[0]!
+
+  const liveCount = async () =>
+    (
+      await db.query<{ n: number }>(
+        `select count(*)::int as n from refresh_tokens
+          where user_id = '${uid}' and revoked_at is null;`,
+      )
+    ).rows[0]!.n
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${uid}', 'refresh@s.test');`)
+  })
+
+  it('rotation returns a new token and spends the old one', async () => {
+    const first = await issue()
+    const r = await rotate(first)
+    expect(r.user_id).toBe(uid)
+    expect(r.token).not.toBeNull()
+    expect(r.token).not.toBe(first)
+
+    // The successor works.
+    const second = await rotate(r.token!)
+    expect(second.user_id).toBe(uid)
+  })
+
+  it('the successor inherits the original expiry — refreshing cannot extend a session forever', async () => {
+    const raw = await issue()
+    await db.exec(
+      `update refresh_tokens set expires_at = now() + interval '3 days'
+        where consumed_at is null and revoked_at is null and user_id = '${uid}';`,
+    )
+    const r = await rotate(raw)
+    const exp = await db.query<{ days: number }>(
+      `select extract(day from (expires_at - now()))::int as days
+         from refresh_tokens where token_hash = encode(sha256(convert_to('${r.token}', 'UTF8')), 'hex');`,
+    )
+    expect(exp.rows[0]!.days).toBeLessThan(30)
+  })
+
+  it('stale reuse revokes the whole family', async () => {
+    const raw = await issue()
+    const r = await rotate(raw)
+    // Age the consumption past the race grace window.
+    await db.exec(
+      `update refresh_tokens set consumed_at = now() - interval '5 minutes' where consumed_at is not null;`,
+    )
+    const replay = await rotate(raw)
+    expect(replay.user_id).toBeNull()
+
+    // The successor handed out earlier is dead too — that is the point.
+    const after = await rotate(r.token!)
+    expect(after.user_id).toBeNull()
+  })
+
+  it('a same-moment double refresh does NOT kill the family (two tabs)', async () => {
+    const raw = await issue()
+    const r = await rotate(raw)
+    const replay = await rotate(raw) // still inside the grace window
+    expect(replay.user_id).toBeNull()
+    // The winner's token survives.
+    expect((await rotate(r.token!)).user_id).toBe(uid)
+  })
+
+  it('an expired or revoked token is refused', async () => {
+    const expired = await issue()
+    await db.exec(
+      `update refresh_tokens set expires_at = now() - interval '1 minute'
+        where token_hash = encode(sha256(convert_to('${expired}', 'UTF8')), 'hex');`,
+    )
+    expect((await rotate(expired)).user_id).toBeNull()
+
+    const revoked = await issue()
+    await db.query(`select revoke_refresh_family('${revoked}');`)
+    expect((await rotate(revoked)).user_id).toBeNull()
+  })
+
+  it('revoke_all_sessions kills every family and bumps password_version', async () => {
+    await issue()
+    await issue()
+    expect(await liveCount()).toBeGreaterThan(0)
+
+    const before = await db.query<{ v: number }>(
+      `select password_version as v from auth.users where id = '${uid}';`,
+    )
+    const bumped = await db.query<{ v: number }>(`select revoke_all_sessions('${uid}') as v;`)
+
+    expect(await liveCount()).toBe(0)
+    expect(bumped.rows[0]!.v).toBe(before.rows[0]!.v + 1)
   })
 })

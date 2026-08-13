@@ -77,8 +77,15 @@ const boardTasks = [
 export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/auth/session') return mockSession
   if (method === 'POST' && path === '/auth/forgot-password') return { ok: true }
+  if (method === 'POST' && (path === '/auth/logout' || path === '/auth/logout-all')) return { ok: true }
+  if (method === 'POST' && /^\/team\/members\/[^/]+\/reset-password$/.test(path)) return { ok: true }
   if (method === 'POST' && path === '/auth/reset-password')
-    return { access_token: 'mock-token', token_type: 'bearer' }
+    return {
+      access_token: 'mock-token',
+      refresh_token: 'mock-refresh',
+      token_type: 'bearer',
+      expires_in: 1800,
+    }
   if (method === 'GET' && path === '/clients') return clients
   if (method === 'GET' && path === '/projects') return projects
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail

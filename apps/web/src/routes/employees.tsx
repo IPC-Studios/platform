@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Users, Copy, Check } from 'lucide-react'
-import { directoryMember, addMemberResponse, type AddMemberRequest } from '@ipc/contracts'
+import { Plus, Users, Copy, Check, KeyRound } from 'lucide-react'
+import { toast } from 'sonner'
+import { z, directoryMember, addMemberResponse, type AddMemberRequest } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -13,8 +14,10 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { humanize } from '@/shared/ui/format'
+import { useConfirm } from '@/shared/ui/confirm'
 
 const list = directoryMember.array()
+const ok = z.object({ ok: z.boolean() })
 const ROLE_TONE: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
   super_admin: 'success',
   admin: 'info',
@@ -67,6 +70,11 @@ function Directory() {
                 <th className="px-4 py-2 font-medium">Email</th>
                 <th className="px-4 py-2 font-medium">Phone</th>
                 <th className="px-4 py-2 font-medium">Role</th>
+                {session?.is_owner && (
+                  <th className="px-4 py-2 font-medium">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -83,6 +91,11 @@ function Directory() {
                   <td className="px-4 py-2">
                     <StatusBadge tone={ROLE_TONE[m.role] ?? 'neutral'}>{humanize(m.role)}</StatusBadge>
                   </td>
+                  {session?.is_owner && (
+                    <td className="px-4 py-2 text-right">
+                      <SendResetButton userId={m.user_id} name={m.name} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -90,6 +103,34 @@ function Directory() {
         </div>
       )}
     </>
+  )
+}
+
+/** Owner-only: email a member a reset link instead of handling their password. */
+function SendResetButton({ userId, name }: { userId: string; name: string }) {
+  const confirm = useConfirm()
+  const send = useMutation({
+    mutationFn: () =>
+      callApi(`/team/members/${userId}/reset-password`, { method: 'POST', responseSchema: ok }),
+    onSuccess: () => toast.success(`Reset link sent to ${name}.`),
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  async function onClick() {
+    const yes = await confirm({
+      title: `Send ${name} a password reset link?`,
+      description:
+        'They get an email with a one-time link that expires in 1 hour. Their current password keeps working until they use it.',
+      confirmLabel: 'Send link',
+    })
+    if (yes) send.mutate()
+  }
+
+  return (
+    <Button variant="ghost" size="sm" disabled={send.isPending} onClick={() => void onClick()}>
+      <KeyRound className="size-4" />
+      {send.isPending ? 'Sending…' : 'Reset password'}
+    </Button>
   )
 }
 

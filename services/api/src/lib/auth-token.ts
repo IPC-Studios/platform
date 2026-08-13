@@ -6,7 +6,12 @@ import type { Env } from '../context'
  * as `sub`; passwords hashed with Bun.password (argon2id). No refresh token for
  * now — a 7-day access token; add rotation later if needed.
  */
-const TTL_SECONDS = 7 * 24 * 60 * 60
+/**
+ * Access tokens are deliberately short: they cannot be revoked directly, so
+ * their life IS the revocation window. Continuity comes from the refresh token
+ * (30 days, rotating, revocable — see 0024).
+ */
+export const TTL_SECONDS = 30 * 60
 
 /**
  * `pwv` is the user's password_version at issue time. A reset bumps the stored

@@ -1,14 +1,17 @@
 import { createContext, use, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { sessionState, type SessionState } from '@ipc/contracts'
+import { z, sessionState, type SessionState } from '@ipc/contracts'
 import { callApi } from '../api/client'
-import { getToken, clearToken } from './token'
+import { getToken, getRefreshToken, clearToken } from './token'
 import { MOCK_ENABLED, mockSession } from '../dev/mock'
+
+const ok = z.object({ ok: z.boolean() })
 
 interface AuthValue {
   session: SessionState | null
   loading: boolean
   refresh: () => Promise<void>
   signOut: () => Promise<void>
+  signOutEverywhere: () => Promise<void>
 }
 
 const AuthCtx = createContext<AuthValue | null>(null)
@@ -47,11 +50,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const signOut = useCallback(async () => {
+    const refresh_token = getRefreshToken()
+    // Drop the tokens first: sign-out must feel instant and must not hinge on
+    // the network. The server call just revokes the family behind us.
+    clearToken()
+    setSession(null)
+    if (!MOCK_ENABLED && refresh_token) {
+      await callApi('/auth/logout', {
+        method: 'POST',
+        body: { refresh_token },
+        responseSchema: ok,
+      }).catch(() => null)
+    }
+  }, [])
+
+  /** Sign out on every device, this one included. */
+  const signOutEverywhere = useCallback(async () => {
+    if (!MOCK_ENABLED) {
+      await callApi('/auth/logout-all', { method: 'POST', responseSchema: ok }).catch(() => null)
+    }
     clearToken()
     setSession(null)
   }, [])
 
-  return <AuthCtx value={{ session, loading, refresh, signOut }}>{children}</AuthCtx>
+  return (
+    <AuthCtx value={{ session, loading, refresh, signOut, signOutEverywhere }}>{children}</AuthCtx>
+  )
 }
 
 export function useAuth(): AuthValue {

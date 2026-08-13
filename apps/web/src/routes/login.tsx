@@ -4,7 +4,7 @@ import { MailCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { z, authToken, registerResult, forgotPasswordResult } from '@ipc/contracts'
 import { callApi, ApiError } from '@/shared/api/client'
-import { setToken } from '@/shared/auth/token'
+import { setTokens } from '@/shared/auth/token'
 import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
@@ -74,12 +74,13 @@ export function LoginPage() {
         setPendingEmail(email) // show the "check your inbox" screen
         return
       }
-      const { access_token } = await callApi('/auth/login', {
-        method: 'POST',
-        body: { email, password },
-        responseSchema: authToken,
-      })
-      setToken(access_token)
+      setTokens(
+        await callApi('/auth/login', {
+          method: 'POST',
+          body: { email, password },
+          responseSchema: authToken,
+        }),
+      )
       await refresh()
       await navigate({ to: '/dashboard' })
     } catch (err) {

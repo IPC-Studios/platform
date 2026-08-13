@@ -24,12 +24,25 @@ export const loginRequest = z.object({
 })
 export type LoginRequest = z.infer<typeof loginRequest>
 
-/** What /auth/login and /auth/verify return — a bearer access token. */
+/**
+ * What every sign-in path returns: a short-lived bearer access token plus the
+ * refresh token that rotates it. `expires_in` is seconds on the access token.
+ */
 export const authToken = z.object({
   access_token: z.string(),
+  refresh_token: z.string(),
   token_type: z.literal('bearer'),
+  expires_in: z.number().int().positive(),
 })
 export type AuthToken = z.infer<typeof authToken>
+
+/** Exchange a refresh token for a fresh pair (the old one is spent). */
+export const refreshRequest = z.object({ refresh_token: z.string().min(1) })
+export type RefreshRequest = z.infer<typeof refreshRequest>
+
+/** Sign out this device. The refresh token identifies the session to kill. */
+export const logoutRequest = z.object({ refresh_token: z.string().min(1).optional() })
+export type LogoutRequest = z.infer<typeof logoutRequest>
 
 /** /auth/register response — email verification is required before sign-in. */
 export const registerResult = z.object({

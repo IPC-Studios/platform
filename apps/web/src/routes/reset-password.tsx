@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { Camera, XCircle } from 'lucide-react'
 import { authToken } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
-import { setToken } from '@/shared/auth/token'
+import { setTokens } from '@/shared/auth/token'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -35,12 +35,13 @@ export function ResetPasswordPage() {
     }
     setBusy(true)
     try {
-      const { access_token } = await callApi('/auth/reset-password', {
-        method: 'POST',
-        body: { token, password },
-        responseSchema: authToken,
-      })
-      setToken(access_token)
+      setTokens(
+        await callApi('/auth/reset-password', {
+          method: 'POST',
+          body: { token, password },
+          responseSchema: authToken,
+        }),
+      )
       await refresh()
       await navigate({ to: '/dashboard' })
     } catch (err) {

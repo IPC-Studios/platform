@@ -9,15 +9,18 @@ import {
   forgotPasswordRequest,
   forgotPasswordResult,
   resetPasswordRequest,
+  refreshRequest,
+  logoutRequest,
   authToken,
   sessionState,
+  type AuthToken,
 } from '@ipc/contracts'
 import { serializeAccess } from '@ipc/permissions'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
 import { withService } from '../../lib/db'
-import { issueToken, hashPassword, verifyPassword } from '../../lib/auth-token'
+import { issueToken, hashPassword, verifyPassword, TTL_SECONDS } from '../../lib/auth-token'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
 
 /** The version stamped into a freshly minted token (see issueToken). */
@@ -25,6 +28,25 @@ async function passwordVersion(sql: TransactionSql, uid: string): Promise<number
   const [r] = await sql<{ password_version: number }[]>`
     select password_version from auth.users where id = ${uid}`
   return r?.password_version ?? 0
+}
+
+/**
+ * The one place a session is minted. Every sign-in path (login, verify, reset)
+ * returns this pair: a short access token stamped with the caller's current
+ * password_version, and a fresh refresh-token family.
+ */
+async function signIn(env: AppEnv['Bindings'], uid: string): Promise<AuthToken> {
+  const { pwv, refresh } = await withService(env, async (sql) => {
+    const pwv = await passwordVersion(sql, uid)
+    const [r] = await sql<{ token: string }[]>`select issue_refresh_token(${uid}) as token`
+    return { pwv, refresh: r!.token }
+  })
+  return authToken.parse({
+    access_token: await issueToken(env, uid, pwv),
+    refresh_token: refresh,
+    token_type: 'bearer',
+    expires_in: TTL_SECONDS,
+  })
 }
 
 const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
@@ -79,17 +101,15 @@ export const authRouter = new Hono<AppEnv>()
     const parsed = verifyEmailRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid verification link.')
 
-    const user = await withService(c.env, async (sql) => {
+    const uid = await withService(c.env, async (sql) => {
       const [r] = await sql<{ uid: string | null }[]>`
         select consume_email_verification(${parsed.data.token}) as uid`
-      if (!r?.uid) return null
-      return { uid: r.uid, pwv: await passwordVersion(sql, r.uid) }
+      return r?.uid ?? null
     })
-    if (!user) fail(400, 'This verification link is invalid or has expired.')
+    if (!uid) fail(400, 'This verification link is invalid or has expired.')
 
     // Verified → sign them straight in.
-    const token = await issueToken(c.env, user.uid, user.pwv)
-    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+    return c.json(await signIn(c.env, uid))
   })
 
   .post('/resend-verification', async (c) => {
@@ -116,15 +136,8 @@ export const authRouter = new Hono<AppEnv>()
     const [row] = await withService(
       c.env,
       (sql) =>
-        sql<
-          {
-            id: string
-            encrypted_password: string | null
-            email_verified: boolean
-            password_version: number
-          }[]
-        >`select id, encrypted_password, email_verified, password_version
-            from auth.users where email = ${email}`,
+        sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
+          select id, encrypted_password, email_verified from auth.users where email = ${email}`,
     )
     if (!row?.encrypted_password || !(await verifyPassword(password, row.encrypted_password))) {
       fail(401, 'Invalid email or password.')
@@ -133,8 +146,7 @@ export const authRouter = new Hono<AppEnv>()
       fail(403, 'Please verify your email before signing in. Check your inbox for the link.')
     }
 
-    const token = await issueToken(c.env, row.id, row.password_version)
-    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+    return c.json(await signIn(c.env, row.id))
   })
 
   .post('/forgot-password', async (c) => {
@@ -167,18 +179,61 @@ export const authRouter = new Hono<AppEnv>()
     // Hash first (Bun-side argon2id), then swap it in as the token is consumed —
     // one transaction, so a half-done reset can't leave the account unusable.
     const pwHash = await hashPassword(parsed.data.password)
-    const user = await withService(c.env, async (sql) => {
+    const uid = await withService(c.env, async (sql) => {
       const [r] = await sql<{ uid: string | null }[]>`
         select consume_password_reset(${parsed.data.token}, ${pwHash}) as uid`
-      if (!r?.uid) return null
-      return { uid: r.uid, pwv: await passwordVersion(sql, r.uid) }
+      // Refresh tokens are revoked here, not in SQL: the reset RPC predates
+      // them and stays focused on the password.
+      if (r?.uid) await sql`select revoke_all_sessions(${r.uid})`
+      return r?.uid ?? null
     })
-    if (!user) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
+    if (!uid) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
 
     // Reset proves mailbox control → sign them straight in. Every session issued
     // before it now carries a stale password_version and is refused.
-    const token = await issueToken(c.env, user.uid, user.pwv)
-    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+    return c.json(await signIn(c.env, uid))
+  })
+
+  .post('/refresh', async (c) => {
+    const parsed = refreshRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Missing refresh token.')
+
+    const rotated = await withService(c.env, async (sql) => {
+      const [r] = await sql<{ user_id: string | null; token: string | null }[]>`
+        select * from rotate_refresh_token(${parsed.data.refresh_token})`
+      if (!r?.user_id || !r.token) return null
+      return { uid: r.user_id, refresh: r.token, pwv: await passwordVersion(sql, r.user_id) }
+    })
+    if (!rotated) fail(401, 'Your session has expired. Please sign in again.')
+
+    return c.json(
+      authToken.parse({
+        access_token: await issueToken(c.env, rotated.uid, rotated.pwv),
+        refresh_token: rotated.refresh,
+        token_type: 'bearer',
+        expires_in: TTL_SECONDS,
+      }),
+    )
+  })
+
+  .post('/logout', async (c) => {
+    const parsed = logoutRequest.safeParse(await c.req.json().catch(() => ({})))
+    // Sign-out never fails: the client has already dropped its tokens.
+    if (parsed.success && parsed.data.refresh_token) {
+      await withService(
+        c.env,
+        (sql) => sql`select revoke_refresh_family(${parsed.data.refresh_token!})`,
+      ).catch(() => null)
+    }
+    return c.json({ ok: true })
+  })
+
+  // Sign out everywhere, this device included: revokes every refresh family and
+  // bumps password_version, which strands the access tokens already out there.
+  .post('/logout-all', requireAuth, async (c) => {
+    const uid = c.get('auth').userId
+    await withService(c.env, (sql) => sql`select revoke_all_sessions(${uid})`).catch(() => null)
+    return c.json({ ok: true })
   })
 
   // Whole-session hydration for an established tenant.

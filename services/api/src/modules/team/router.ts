@@ -6,6 +6,7 @@ import { requireOwner } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
 import { withUser, withService } from '../../lib/db'
 import { hashPassword } from '../../lib/auth-token'
+import { sendPasswordResetEmail } from '../../lib/email'
 
 /** Team directory. /members backs pickers; /directory is the full staff list. */
 export const teamRouter = new Hono<AppEnv>()
@@ -90,4 +91,29 @@ export const teamRouter = new Hono<AppEnv>()
     }
 
     return c.json(addMemberResponse.parse({ user_id: userId!, temp_password: tempPassword }), 201)
+  })
+
+  // Owner emails a staff member a reset link — the everyday "I'm locked out"
+  // fix, without the owner ever handling their password.
+  .post('/members/:id/reset-password', requireOwner(), async (c) => {
+    const targetId = c.req.param('id')!
+
+    // Read the target through the CALLER's RLS scope, so an owner can only ever
+    // trigger this for someone in their own studio.
+    const [member] = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql<{ email: string }[]>`
+        select email from users where user_id = ${targetId} and deleted_at is null`,
+    ).catch(() => [])
+    if (!member) fail(404, 'We could not find that team member.')
+
+    const raw = await withService(c.env, async (sql) => {
+      const [t] = await sql<{ token: string }[]>`select issue_password_reset(${targetId}) as token`
+      return t!.token
+    }).catch(() => null)
+    if (!raw) fail(400, 'We could not start a password reset for this member.')
+
+    await sendPasswordResetEmail(c.env, member.email, `${c.env.APP_URL}/reset-password?token=${raw}`)
+    return c.json({ ok: true })
   })
