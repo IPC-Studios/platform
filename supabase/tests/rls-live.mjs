@@ -108,12 +108,14 @@ check('refresh: the new access token works', refreshedCall.status === 200)
 const spent = await api('/auth/refresh', { method: 'POST', body: { refresh_token: a.refresh } })
 check('refresh: the spent token is refused (401)', spent.status === 401)
 
-// Reuse revoked A's family, so its successor is dead too.
+// That replay landed inside the 60s grace window, where a spent token means
+// "two tabs raced", not theft — so the successor must still work. Revocation on
+// STALE reuse is covered by the pglite suite, which can age the row.
 const afterReuse = await api('/auth/refresh', {
   method: 'POST',
   body: { refresh_token: rotated.json.refresh_token },
 })
-check('refresh: reuse kills the whole family (401)', afterReuse.status === 401)
+check('refresh: a racing replay does not kill the family', afterReuse.status === 200)
 
 // A fresh sign-in, then sign out everywhere.
 const reLogin = await api('/auth/login', { method: 'POST', body: { email: a.email, password: 'Testpass12345!' } })
