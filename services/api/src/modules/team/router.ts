@@ -3,10 +3,14 @@ import { addMemberRequest, addMemberResponse, directoryMember, teamMember } from
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireOwner } from '../../middleware/permissions'
+import { rateLimit } from '../../middleware/security'
 import { fail } from '../../middleware/errors'
 import { withUser, withService } from '../../lib/db'
 import { hashPassword } from '../../lib/auth-token'
 import { sendPasswordResetEmail } from '../../lib/email'
+
+/** Route params reach Postgres as uuids; a malformed one is a miss, not a 500. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Team directory. /members backs pickers; /directory is the full staff list. */
 export const teamRouter = new Hono<AppEnv>()
@@ -95,17 +99,24 @@ export const teamRouter = new Hono<AppEnv>()
 
   // Owner emails a staff member a reset link — the everyday "I'm locked out"
   // fix, without the owner ever handling their password.
-  .post('/members/:id/reset-password', requireOwner(), async (c) => {
+  // Issuing supersedes the member's own outstanding link, and it sends mail, so
+  // it needs a ceiling of its own — /team/* is outside the global /auth/* limit.
+  .post('/members/:id/reset-password', requireOwner(), rateLimit({ windowMs: 60_000, limit: 5 }), async (c) => {
     const targetId = c.req.param('id')!
+    if (!UUID_RE.test(targetId)) fail(404, 'We could not find that team member.')
 
     // Read the target through the CALLER's RLS scope, so an owner can only ever
-    // trigger this for someone in their own studio.
-    const [member] = await withUser(
+    // trigger this for someone in their own studio. A thrown query is a real
+    // failure, not a miss — collapsing it into 404 would report a studio-wide
+    // outage as "member not found".
+    const rows = await withUser(
       c.env,
       c.get('auth').userId,
       (sql) => sql<{ email: string }[]>`
         select email from users where user_id = ${targetId} and deleted_at is null`,
-    ).catch(() => [])
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not look up that team member. Please try again.')
+    const member = rows[0]
     if (!member) fail(404, 'We could not find that team member.')
 
     const raw = await withService(c.env, async (sql) => {

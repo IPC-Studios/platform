@@ -1,6 +1,7 @@
 import { createContext, use, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { z, sessionState, type SessionState } from '@ipc/contracts'
-import { callApi } from '../api/client'
+import { callApi, setAuthLostHandler } from '../api/client'
 import { getToken, getRefreshToken, clearToken } from './token'
 import { MOCK_ENABLED, mockSession } from '../dev/mock'
 
@@ -19,6 +20,25 @@ const AuthCtx = createContext<AuthValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionState | null>(null)
   const [loading, setLoading] = useState(true)
+  const qc = useQueryClient()
+
+  /**
+   * End the local session. The query cache holds one tenant's rows, so it must
+   * go with it — otherwise the next account signed in on this machine is served
+   * the previous studio's data straight from cache.
+   */
+  const endSession = useCallback(() => {
+    clearToken()
+    setSession(null)
+    qc.clear()
+  }, [qc])
+
+  // A refused refresh means the session is gone server-side; drop it here too so
+  // the route guard bounces to /login instead of leaving a shell that errors.
+  useEffect(() => {
+    setAuthLostHandler(() => endSession())
+    return () => setAuthLostHandler(null)
+  }, [endSession])
 
   const refresh = useCallback(async () => {
     if (MOCK_ENABLED) {
@@ -51,10 +71,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const refresh_token = getRefreshToken()
-    // Drop the tokens first: sign-out must feel instant and must not hinge on
+    // Drop the session first: sign-out must feel instant and must not hinge on
     // the network. The server call just revokes the family behind us.
-    clearToken()
-    setSession(null)
+    endSession()
     if (!MOCK_ENABLED && refresh_token) {
       await callApi('/auth/logout', {
         method: 'POST',
@@ -62,16 +81,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         responseSchema: ok,
       }).catch(() => null)
     }
-  }, [])
+  }, [endSession])
 
-  /** Sign out on every device, this one included. */
+  /**
+   * Sign out on every device, this one included. The server call is the whole
+   * point here, so a failure propagates — the caller must not tell the user
+   * their other devices are dead when nothing was revoked.
+   */
   const signOutEverywhere = useCallback(async () => {
-    if (!MOCK_ENABLED) {
-      await callApi('/auth/logout-all', { method: 'POST', responseSchema: ok }).catch(() => null)
+    try {
+      if (!MOCK_ENABLED) {
+        await callApi('/auth/logout-all', { method: 'POST', responseSchema: ok })
+      }
+    } finally {
+      endSession()
     }
-    clearToken()
-    setSession(null)
-  }, [])
+  }, [endSession])
 
   return (
     <AuthCtx value={{ session, loading, refresh, signOut, signOutEverywhere }}>{children}</AuthCtx>

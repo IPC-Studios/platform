@@ -56,6 +56,7 @@ async function freshDb() {
   await db.exec(mig('0022_password_reset.sql'))
   await db.exec(mig('0023_password_version.sql'))
   await db.exec(mig('0024_refresh_tokens.sql'))
+  await db.exec(mig('0025_session_hardening.sql'))
   return db
 }
 
@@ -1262,11 +1263,13 @@ describe('refresh tokens (0024)', () => {
       )
     ).rows[0]!
 
+  // "Live" means usable: unrevoked AND unexpired. The revoke functions skip
+  // already-expired rows, which cannot be presented anyway.
   const liveCount = async () =>
     (
       await db.query<{ n: number }>(
         `select count(*)::int as n from refresh_tokens
-          where user_id = '${uid}' and revoked_at is null;`,
+          where user_id = '${uid}' and revoked_at is null and expires_at > now();`,
       )
     ).rows[0]!.n
 
@@ -1293,12 +1296,18 @@ describe('refresh tokens (0024)', () => {
       `update refresh_tokens set expires_at = now() + interval '3 days'
         where consumed_at is null and revoked_at is null and user_id = '${uid}';`,
     )
-    const r = await rotate(raw)
-    const exp = await db.query<{ days: number }>(
-      `select extract(day from (expires_at - now()))::int as days
-         from refresh_tokens where token_hash = encode(sha256(convert_to('${r.token}', 'UTF8')), 'hex');`,
+    const before = await db.query<{ exp: string }>(
+      `select expires_at as exp from refresh_tokens
+        where token_hash = encode(sha256(convert_to('${raw}', 'UTF8')), 'hex');`,
     )
-    expect(exp.rows[0]!.days).toBeLessThan(30)
+    const r = await rotate(raw)
+    const after = await db.query<{ exp: string }>(
+      `select expires_at as exp from refresh_tokens
+        where token_hash = encode(sha256(convert_to('${r.token}', 'UTF8')), 'hex');`,
+    )
+    // Compared to the predecessor's exact timestamp, not to a window: minting a
+    // fresh `now() + 30 days` would still land inside any day-granularity bound.
+    expect(after.rows[0]!.exp).toEqual(before.rows[0]!.exp)
   })
 
   it('stale reuse revokes the whole family', async () => {

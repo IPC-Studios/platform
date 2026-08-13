@@ -23,8 +23,17 @@ export const cronRouter = new Hono<AppEnv>().post('/reminders', async (c) => {
   const dryRun = c.req.query('dry') === '1'
   const result = await withService(c.env, async (sql) => {
     const rows = await sql`select run_reminder_cron(p_dry_run => ${dryRun}) as summary`
-    return { summary: rows[0]?.summary as unknown }
+    // Rotation writes a refresh_tokens row every 30 minutes per active user, so
+    // the table needs a sweep or it grows forever. Piggybacks the hourly tick.
+    const purged = dryRun
+      ? 0
+      : ((await sql<{ n: number }[]>`select purge_expired_refresh_tokens() as n`)[0]?.n ?? 0)
+    return { summary: rows[0]?.summary as unknown, purged_refresh_tokens: purged }
   }).catch(() => null)
   if (!result) fail(400, 'The job could not run.')
-  return c.json({ ok: true, summary: result!.summary })
+  return c.json({
+    ok: true,
+    summary: result!.summary,
+    purged_refresh_tokens: result!.purged_refresh_tokens,
+  })
 })

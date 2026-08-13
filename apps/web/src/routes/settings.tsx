@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   companyProfile,
   companyTheme,
@@ -59,7 +60,14 @@ function SecurityCard() {
     })
     if (!yes) return
     setBusy(true)
-    await signOutEverywhere()
+    try {
+      await signOutEverywhere()
+    } catch (e) {
+      // Never claim the other devices are dead when the revocation failed.
+      toast.error(e instanceof Error ? e.message : 'We could not sign out your other devices.')
+    } finally {
+      setBusy(false)
+    }
     await navigate({ to: '/login' })
   }
 

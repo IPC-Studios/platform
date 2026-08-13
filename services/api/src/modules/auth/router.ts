@@ -23,6 +23,16 @@ import { withService } from '../../lib/db'
 import { issueToken, hashPassword, verifyPassword, TTL_SECONDS } from '../../lib/auth-token'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
 
+/**
+ * A throwaway hash to verify against when no account matches, so a miss costs
+ * the same argon2 work as a hit. Computed once, on first use.
+ */
+let decoy: string | null = null
+async function decoyHash(): Promise<string> {
+  decoy ??= await hashPassword(crypto.randomUUID())
+  return decoy
+}
+
 /** The version stamped into a freshly minted token (see issueToken). */
 async function passwordVersion(sql: TransactionSql, uid: string): Promise<number> {
   const [r] = await sql<{ password_version: number }[]>`
@@ -48,6 +58,15 @@ async function signIn(env: AppEnv['Bindings'], uid: string): Promise<AuthToken> 
     expires_in: TTL_SECONDS,
   })
 }
+
+/**
+ * Whether it is safe to hand a raw token back in the response body, which the
+ * automated suites rely on. Fails CLOSED: an unset or unrecognised ENVIRONMENT
+ * withholds the token. The old `!== 'production'` test returned live reset
+ * tokens to anonymous callers on any deployment that simply forgot the var.
+ */
+const TOKEN_ECHO_ENVIRONMENTS = new Set(['development', 'test', 'ci', 'local'])
+const echoesTokens = (env: AppEnv['Bindings']) => TOKEN_ECHO_ENVIRONMENTS.has(env.ENVIRONMENT ?? '')
 
 const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
 const resetLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/reset-password?token=${raw}`
@@ -91,8 +110,8 @@ export const authRouter = new Hono<AppEnv>()
       registerResult.parse({
         verification_required: true,
         email,
-        // Expose the token off-production so automated tests can verify.
-        ...(c.env.ENVIRONMENT !== 'production' ? { verification_token: token! } : {}),
+        // Expose the token in test environments so automated suites can verify.
+        ...(echoesTokens(c.env) ? { verification_token: token! } : {}),
       }),
     )
   })
@@ -123,7 +142,9 @@ export const authRouter = new Hono<AppEnv>()
       const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u.id}) as token`
       return t!.token
     })
-    if (raw) await sendVerificationEmail(c.env, parsed.data.email, verifyLink(c.env, raw))
+    // Dispatched, not awaited: waiting on the mail provider only when the
+    // account exists turns the uniform 200 into a timing oracle.
+    if (raw) void sendVerificationEmail(c.env, parsed.data.email, verifyLink(c.env, raw))
     // Always 200 — never leak whether an account exists.
     return c.json({ ok: true })
   })
@@ -139,7 +160,11 @@ export const authRouter = new Hono<AppEnv>()
         sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
           select id, encrypted_password, email_verified from auth.users where email = ${email}`,
     )
-    if (!row?.encrypted_password || !(await verifyPassword(password, row.encrypted_password))) {
+    // Always spend a verification, even for an unknown address: short-circuiting
+    // here made a miss answer an order of magnitude faster than a hit, which
+    // enumerates the customer base by latency alone.
+    const ok = await verifyPassword(password, row?.encrypted_password ?? (await decoyHash()))
+    if (!row?.encrypted_password || !ok) {
       fail(401, 'Invalid email or password.')
     }
     if (!row.email_verified) {
@@ -160,14 +185,16 @@ export const authRouter = new Hono<AppEnv>()
       const [t] = await sql<{ token: string }[]>`select issue_password_reset(${u.id}) as token`
       return t!.token
     })
-    if (raw) await sendPasswordResetEmail(c.env, parsed.data.email, resetLink(c.env, raw))
+    // Dispatched, not awaited: waiting on the mail provider only when the
+    // account exists turns the uniform 200 into a timing oracle.
+    if (raw) void sendPasswordResetEmail(c.env, parsed.data.email, resetLink(c.env, raw))
 
     // Always 200 — never leak whether an account exists.
     return c.json(
       forgotPasswordResult.parse({
         ok: true,
-        // Expose the token off-production so automated tests can reset.
-        ...(raw && c.env.ENVIRONMENT !== 'production' ? { reset_token: raw } : {}),
+        // Expose the token in test environments so automated suites can reset.
+        ...(raw && echoesTokens(c.env) ? { reset_token: raw } : {}),
       }),
     )
   })
@@ -232,7 +259,13 @@ export const authRouter = new Hono<AppEnv>()
   // bumps password_version, which strands the access tokens already out there.
   .post('/logout-all', requireAuth, async (c) => {
     const uid = c.get('auth').userId
-    await withService(c.env, (sql) => sql`select revoke_all_sessions(${uid})`).catch(() => null)
+    // Unlike /logout, the server-side revocation IS the feature — a swallowed
+    // error here would tell the user every device was signed out when none was.
+    const revoked = await withService(
+      c.env,
+      (sql) => sql`select revoke_all_sessions(${uid})`,
+    ).catch(() => null)
+    if (!revoked) fail(400, 'We could not sign out your other devices. Please try again.')
     return c.json({ ok: true })
   })
 
