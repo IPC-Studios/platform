@@ -48,6 +48,24 @@ export type VerifyEmailRequest = z.infer<typeof verifyEmailRequest>
 export const resendVerificationRequest = z.object({ email })
 export type ResendVerificationRequest = z.infer<typeof resendVerificationRequest>
 
+/** Start a password reset. Always answered the same way — no account enumeration. */
+export const forgotPasswordRequest = z.object({ email })
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequest>
+
+export const forgotPasswordResult = z.object({
+  ok: z.literal(true),
+  /** Present only outside production (ENVIRONMENT !== 'production') for tests. */
+  reset_token: z.string().optional(),
+})
+export type ForgotPasswordResult = z.infer<typeof forgotPasswordResult>
+
+/** Finish a password reset with the token from the emailed link. */
+export const resetPasswordRequest = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8).max(200),
+})
+export type ResetPasswordRequest = z.infer<typeof resetPasswordRequest>
+
 /** Plan-gate state resolved for the current company. */
 export const planGate = z.enum(['active', 'grace', 'grandfathered', 'expired'])
 export type PlanGate = z.infer<typeof planGate>

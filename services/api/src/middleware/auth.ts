@@ -24,6 +24,7 @@ interface AuthContextRow {
   plan_gate: PlanGate
   profile_key: string | null
   overrides: { permission_key: string; enabled: boolean }[] | null
+  password_changed_at: string | null
 }
 
 /**
@@ -31,18 +32,28 @@ interface AuthContextRow {
  *   1. verify the app JWT locally (no auth server round-trip)
  *   2. run get_auth_context() as the caller inside an RLS-scoped transaction
  *      (withUser sets auth.uid() via the request.jwt.claim.sub GUC)
- *   3. compose effective permissions with the shared resolver
+ *   3. reject tokens older than the last password change
+ *   4. compose effective permissions with the shared resolver
  */
 export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const token = bearer(c)
-  const uid = await verifyToken(c.env, token)
-  if (!uid) fail(401, 'Your session has expired. Please sign in again.')
+  const claims = await verifyToken(c.env, token)
+  if (!claims) fail(401, 'Your session has expired. Please sign in again.')
+  const { uid, iat } = claims
 
   const row = await withUser(c.env, uid, async (sql) => {
     const rows = await sql<AuthContextRow[]>`select * from get_auth_context()`
     return rows[0]
   })
   if (!row) fail(403, 'No studio is linked to this account.')
+
+  // Tokens are stateless, so a password reset can't revoke them directly:
+  // anything minted before the change is refused here instead. Second
+  // granularity, so a token issued in the same second as the reset survives.
+  if (row.password_changed_at) {
+    const changedAt = Math.floor(new Date(row.password_changed_at).getTime() / 1000)
+    if (iat < changedAt) fail(401, 'Your password was changed. Please sign in again.')
+  }
 
   const access = resolveAccess({
     role: row.role,

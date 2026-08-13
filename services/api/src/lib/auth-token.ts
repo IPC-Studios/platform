@@ -13,11 +13,19 @@ export async function issueToken(env: Env, uid: string): Promise<string> {
   return sign({ sub: uid, iat: now, exp: now + TTL_SECONDS }, env.JWT_SECRET)
 }
 
-/** Returns the user id (sub) if the token is valid + unexpired, else null. */
-export async function verifyToken(env: Env, token: string): Promise<string | null> {
+/**
+ * Returns the user id (sub) + issue time if the token is valid + unexpired,
+ * else null. `iat` is what lets a password reset evict older sessions — see
+ * requireAuth.
+ */
+export async function verifyToken(
+  env: Env,
+  token: string,
+): Promise<{ uid: string; iat: number } | null> {
   try {
     const payload = await verify(token, env.JWT_SECRET, 'HS256')
-    return typeof payload.sub === 'string' ? payload.sub : null
+    if (typeof payload.sub !== 'string') return null
+    return { uid: payload.sub, iat: typeof payload.iat === 'number' ? payload.iat : 0 }
   } catch {
     return null
   }

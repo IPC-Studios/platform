@@ -92,5 +92,46 @@ check("B: cannot fetch A's client by id (404)", bGet.status === 404)
 const anon = await api('/clients')
 check('anon: rejected without a token', anon.status === 401)
 
+// ── password reset ────────────────────────────────────────────
+// Unknown emails answer exactly like known ones (no account enumeration).
+const unknown = await api('/auth/forgot-password', {
+  method: 'POST',
+  body: { email: `nobody-${rand()}@example.com` },
+})
+check(
+  'forgot-password: unknown email still returns ok, no token',
+  unknown.status === 200 && unknown.json.ok === true && !unknown.json.reset_token,
+)
+
+const forgot = await api('/auth/forgot-password', { method: 'POST', body: { email: b.email } })
+check('forgot-password: issues a token for a real account', forgot.status === 200 && !!forgot.json.reset_token)
+
+const NEW_PW = 'Newpass98765!'
+const reset = await api('/auth/reset-password', {
+  method: 'POST',
+  body: { token: forgot.json.reset_token, password: NEW_PW },
+})
+check('reset-password: succeeds and signs in', reset.status === 200 && !!reset.json.access_token)
+
+const replay = await api('/auth/reset-password', {
+  method: 'POST',
+  body: { token: forgot.json.reset_token, password: NEW_PW },
+})
+check('reset-password: the link is one-time (400)', replay.status === 400)
+
+const oldPw = await api('/auth/login', { method: 'POST', body: { email: b.email, password: 'Testpass12345!' } })
+check('B: the old password no longer works (401)', oldPw.status === 401)
+
+const newPw = await api('/auth/login', { method: 'POST', body: { email: b.email, password: NEW_PW } })
+check('B: the new password works', newPw.status === 200 && !!newPw.json.access_token)
+
+// The session B held before the reset must be dead (stateless JWT + password_changed_at).
+const stale = await api('/clients', { token: b.token })
+check('B: the pre-reset session is rejected (401)', stale.status === 401)
+
+// The token minted by the reset itself is still good.
+const fresh = await api('/clients', { token: reset.json.access_token })
+check('B: the post-reset session works', fresh.status === 200)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

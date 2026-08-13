@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-router'
 import { LoginPage } from '@/routes/login'
 import { VerifyEmailPage } from '@/routes/verify'
+import { ResetPasswordPage } from '@/routes/reset-password'
 import { DashboardPage } from '@/routes/dashboard'
 import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
@@ -46,6 +47,7 @@ const routeTree = rootRoute.addChildren([
   route('/', DashboardPage),
   route('/login', LoginPage),
   route('/verify', VerifyEmailPage),
+  route('/reset-password', ResetPasswordPage),
   route('/terms/acknowledge', TermsAcknowledgePage),
   route('/dashboard', DashboardPage),
 

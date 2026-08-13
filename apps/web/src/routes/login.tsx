@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { MailCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { z, authToken, registerResult } from '@ipc/contracts'
+import { z, authToken, registerResult, forgotPasswordResult } from '@ipc/contracts'
 import { callApi, ApiError } from '@/shared/api/client'
 import { setToken } from '@/shared/auth/token'
 import { MOCK_ENABLED } from '@/shared/dev/mock'
@@ -11,7 +11,7 @@ import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 
-type Mode = 'signin' | 'register'
+type Mode = 'signin' | 'register' | 'forgot'
 const ok = z.object({ ok: z.boolean() })
 
 export function LoginPage() {
@@ -29,8 +29,12 @@ export function LoginPage() {
   // Set once the user needs to verify their email (after register, or a 403 login).
   const [pendingEmail, setPendingEmail] = useState<string | null>(null)
   const [resent, setResent] = useState(false)
+  // Set once a reset link has been requested (shown regardless of whether the
+  // account exists — the API never tells us).
+  const [resetSentTo, setResetSentTo] = useState<string | null>(null)
 
   const isRegister = mode === 'register'
+  const isForgot = mode === 'forgot'
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -41,6 +45,15 @@ export function LoginPage() {
     }
     setBusy(true)
     try {
+      if (isForgot) {
+        await callApi('/auth/forgot-password', {
+          method: 'POST',
+          body: { email },
+          responseSchema: forgotPasswordResult,
+        })
+        setResetSentTo(email)
+        return
+      }
       if (MOCK_ENABLED) {
         await refresh()
         await navigate({ to: '/dashboard' })
@@ -103,7 +116,33 @@ export function LoginPage() {
           <span className="text-brand">IPC</span> Studios
         </h1>
 
-        {pendingEmail ? (
+        {resetSentTo ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MailCheck className="size-6" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Check your inbox</p>
+                <p className="text-sm text-muted-foreground">
+                  If an account exists for <span className="font-medium">{resetSentTo}</span>, we've sent a
+                  link to reset the password. It expires in 1 hour.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetSentTo(null)
+                  setPassword('')
+                  setMode('signin')
+                }}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Back to sign in
+              </button>
+            </CardContent>
+          </Card>
+        ) : pendingEmail ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -142,10 +181,14 @@ export function LoginPage() {
               <CardContent className="p-6 sm:p-8">
                 <div className="mb-6">
                   <h2 className="text-2xl font-bold tracking-tight">
-                    {isRegister ? 'Create your account' : 'Welcome back'}
+                    {isForgot ? 'Forgot password' : isRegister ? 'Create your account' : 'Welcome back'}
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {isRegister ? 'Start your studio workspace' : 'Sign in to your studio workspace'}
+                    {isForgot
+                      ? "Enter your email and we'll send a reset link"
+                      : isRegister
+                        ? 'Start your studio workspace'
+                        : 'Sign in to your studio workspace'}
                   </p>
                 </div>
 
@@ -214,15 +257,31 @@ export function LoginPage() {
                       </Field>
                     </div>
                   ) : (
-                    <Field label="Password">
-                      <Input
-                        type="password"
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                      />
-                    </Field>
+                    !isForgot && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label>Password</Label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMode('forgot')
+                              setError(null)
+                              setPassword('')
+                            }}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            Forgot password?
+                          </button>
+                        </div>
+                        <Input
+                          type="password"
+                          placeholder="••••••••"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                        />
+                      </div>
+                    )
                   )}
 
                   {error && (
@@ -230,40 +289,65 @@ export function LoginPage() {
                   )}
 
                   <Button type="submit" disabled={busy} className="mt-1 w-full">
-                    {busy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'}
+                    {busy
+                      ? 'Please wait…'
+                      : isForgot
+                        ? 'Send reset link'
+                        : isRegister
+                          ? 'Create account'
+                          : 'Sign in'}
                   </Button>
                 </form>
 
-                <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="h-px flex-1 bg-border" />
-                  or
-                  <span className="h-px flex-1 bg-border" />
-                </div>
+                {!isForgot && (
+                  <>
+                    <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="h-px flex-1 bg-border" />
+                      or
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => toast('Google sign-in is coming soon.')}
-                >
-                  <GoogleIcon />
-                  Continue with Google
-                </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => toast('Google sign-in is coming soon.')}
+                    >
+                      <GoogleIcon />
+                      Continue with Google
+                    </Button>
+                  </>
+                )}
               </CardContent>
             </Card>
 
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              {isRegister ? 'Already have an account?' : 'New studio?'}{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode(isRegister ? 'signin' : 'register')
-                  setError(null)
-                }}
-                className="font-medium text-primary hover:underline"
-              >
-                {isRegister ? 'Sign in' : 'Register'}
-              </button>
+              {isForgot ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signin')
+                    setError(null)
+                  }}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Back to sign in
+                </button>
+              ) : (
+                <>
+                  {isRegister ? 'Already have an account?' : 'New studio?'}{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode(isRegister ? 'signin' : 'register')
+                      setError(null)
+                    }}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {isRegister ? 'Sign in' : 'Register'}
+                  </button>
+                </>
+              )}
             </p>
           </>
         )}

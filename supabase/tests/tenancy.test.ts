@@ -22,7 +22,9 @@ async function freshDb() {
   const db = new PGlite()
   // Shim the Supabase surface pglite lacks.
   await db.exec(`create schema if not exists auth;`)
-  await db.exec(`create table auth.users (id uuid primary key default gen_random_uuid(), email text);`)
+  await db.exec(
+    `create table auth.users (id uuid primary key default gen_random_uuid(), email text, encrypted_password text);`,
+  )
   await db.exec(
     `create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;`,
   )
@@ -51,6 +53,7 @@ async function freshDb() {
   await db.exec(mig('0019_platform_console.sql'))
   await db.exec(mig('0020_platform_ops.sql'))
   await db.exec(mig('0021_email_verification.sql'))
+  await db.exec(mig('0022_password_reset.sql'))
   return db
 }
 
@@ -1131,5 +1134,99 @@ describe('email verification (0021)', () => {
       `select consume_email_verification('not-a-real-token') as uid;`,
     )
     expect(r.rows[0]!.uid).toBeNull()
+  })
+})
+
+describe('password reset (0022)', () => {
+  let db: PGlite
+  const uid = '66666666-6666-6666-6666-666666666666'
+
+  const issue = async () =>
+    (await db.query<{ token: string }>(`select issue_password_reset('${uid}') as token;`)).rows[0]!
+      .token
+
+  const consume = async (raw: string, hash = 'argon2-hash-new') =>
+    (
+      await db.query<{ uid: string | null }>(
+        `select consume_password_reset('${raw}', '${hash}') as uid;`,
+      )
+    ).rows[0]!.uid
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email, encrypted_password) values ('${uid}', 'reset@s.test', 'argon2-hash-old');`,
+    )
+    // Simulate an account created before this migration: never had a reset.
+    await db.exec(`update auth.users set email_verified = false where id = '${uid}';`)
+  })
+
+  it('consume swaps the password, verifies the email, and stamps the change', async () => {
+    const token = await issue()
+    expect(token.length).toBeGreaterThan(20)
+    expect(await consume(token)).toBe(uid)
+
+    const after = await db.query<{
+      pw: string
+      verified: boolean
+      changed: string | null
+    }>(
+      `select encrypted_password as pw, email_verified as verified, password_changed_at as changed
+         from auth.users where id = '${uid}';`,
+    )
+    expect(after.rows[0]!.pw).toBe('argon2-hash-new')
+    // Completing a reset proves mailbox control.
+    expect(after.rows[0]!.verified).toBe(true)
+    expect(after.rows[0]!.changed).not.toBeNull()
+  })
+
+  it('a token is one-time', async () => {
+    const token = await issue()
+    expect(await consume(token, 'hash-a')).toBe(uid)
+    expect(await consume(token, 'hash-b')).toBeNull()
+    const pw = await db.query<{ pw: string }>(
+      `select encrypted_password as pw from auth.users where id = '${uid}';`,
+    )
+    expect(pw.rows[0]!.pw).toBe('hash-a') // the replay did not overwrite
+  })
+
+  it('issuing a new token kills the previous one', async () => {
+    const first = await issue()
+    const second = await issue()
+    expect(await consume(first, 'hash-first')).toBeNull()
+    expect(await consume(second, 'hash-second')).toBe(uid)
+  })
+
+  it('an expired token is refused', async () => {
+    const token = await issue()
+    await db.exec(
+      `update password_reset_tokens set expires_at = now() - interval '1 minute' where consumed_at is null;`,
+    )
+    expect(await consume(token)).toBeNull()
+  })
+
+  it('a bad token returns null', async () => {
+    expect(await consume('not-a-real-token')).toBeNull()
+  })
+
+  it('get_auth_context exposes password_changed_at for session invalidation', async () => {
+    const owner = '77777777-7777-7777-7777-777777777777'
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'ctx@s.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Ctx Studio', 'Ctx Owner', null);`)
+
+    const before = await db.query<{ password_changed_at: string | null }>(
+      `select password_changed_at from get_auth_context();`,
+    )
+    expect(before.rows[0]!.password_changed_at).toBeNull()
+
+    const t = (await db.query<{ token: string }>(`select issue_password_reset('${owner}') as token;`))
+      .rows[0]!.token
+    await db.query(`select consume_password_reset('${t}', 'hash-ctx') as uid;`)
+
+    const after = await db.query<{ password_changed_at: string | null }>(
+      `select password_changed_at from get_auth_context();`,
+    )
+    expect(after.rows[0]!.password_changed_at).not.toBeNull()
   })
 })

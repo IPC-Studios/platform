@@ -5,6 +5,9 @@ import {
   loginRequest,
   verifyEmailRequest,
   resendVerificationRequest,
+  forgotPasswordRequest,
+  forgotPasswordResult,
+  resetPasswordRequest,
   authToken,
   sessionState,
 } from '@ipc/contracts'
@@ -14,9 +17,10 @@ import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
 import { withService } from '../../lib/db'
 import { issueToken, hashPassword, verifyPassword } from '../../lib/auth-token'
-import { sendVerificationEmail } from '../../lib/email'
+import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
 
 const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
+const resetLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/reset-password?token=${raw}`
 
 /**
  * Auth router (self-issued, no GoTrue). Register creates the auth user + studio
@@ -114,6 +118,49 @@ export const authRouter = new Hono<AppEnv>()
     }
 
     const token = await issueToken(c.env, row.id)
+    return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
+  })
+
+  .post('/forgot-password', async (c) => {
+    const parsed = forgotPasswordRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please enter your email.')
+
+    const raw = await withService(c.env, async (sql) => {
+      const [u] = await sql<{ id: string }[]>`
+        select id from auth.users where email = ${parsed.data.email}`
+      if (!u) return null
+      const [t] = await sql<{ token: string }[]>`select issue_password_reset(${u.id}) as token`
+      return t!.token
+    })
+    if (raw) await sendPasswordResetEmail(c.env, parsed.data.email, resetLink(c.env, raw))
+
+    // Always 200 — never leak whether an account exists.
+    return c.json(
+      forgotPasswordResult.parse({
+        ok: true,
+        // Expose the token off-production so automated tests can reset.
+        ...(raw && c.env.ENVIRONMENT !== 'production' ? { reset_token: raw } : {}),
+      }),
+    )
+  })
+
+  .post('/reset-password', async (c) => {
+    const parsed = resetPasswordRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please choose a password of at least 8 characters.')
+
+    // Hash first (Bun-side argon2id), then swap it in as the token is consumed —
+    // one transaction, so a half-done reset can't leave the account unusable.
+    const pwHash = await hashPassword(parsed.data.password)
+    const uid = await withService(c.env, async (sql) => {
+      const [r] = await sql<{ uid: string | null }[]>`
+        select consume_password_reset(${parsed.data.token}, ${pwHash}) as uid`
+      return r?.uid ?? null
+    })
+    if (!uid) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
+
+    // Reset proves mailbox control → sign them straight in. Sessions issued
+    // before this moment are refused by requireAuth (password_changed_at).
+    const token = await issueToken(c.env, uid)
     return c.json(authToken.parse({ access_token: token, token_type: 'bearer' }))
   })
 
