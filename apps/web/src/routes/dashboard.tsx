@@ -13,8 +13,12 @@ import { EmptyState } from '@/shared/ui/states'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { useProjects } from '@/features/projects/api'
 import { useClients } from '@/features/clients/api'
-import { useMembers } from '@/features/allocation/api'
+import { useMembers, useSlots } from '@/features/allocation/api'
 import { useInvoices } from '@/features/billing/api'
+import { useDataRecords } from '@/features/data/api'
+import { useBoard } from '@/features/tasks/api'
+import { buildJourney } from '@/features/onboarding/journey'
+import { SetupJourney } from '@/features/onboarding/SetupJourney'
 
 export function DashboardPage() {
   return (
@@ -41,12 +45,44 @@ function DashboardInner() {
   const clients = useClients()
   const members = useMembers()
   const invoices = useInvoices()
+  const slots = useSlots()
+  const dataRecords = useDataRecords()
+  const board = useBoard()
 
   const activeProjects = (projects.data ?? []).filter((p) => p.status === 'active').length
   const clientCount = clients.data?.length ?? 0
   const teamCount = members.data?.length ?? 0
   const outstanding = (invoices.data ?? []).reduce((s, i) => s + i.balance_due, 0)
   const recent = (projects.data ?? []).slice(0, 5)
+
+  // The setup guide is for whoever is standing the studio up. An employee has
+  // no business being told to add teammates or invoice a client.
+  const isSetupAudience =
+    session?.is_owner || session?.role === 'super_admin' || session?.role === 'admin'
+  // Waiting on every query first — a half-loaded journey would show steps as
+  // outstanding and then tick them off, which reads as work being undone.
+  const journeyReady =
+    !projects.isPending &&
+    !clients.isPending &&
+    !members.isPending &&
+    !invoices.isPending &&
+    !slots.isPending &&
+    !dataRecords.isPending &&
+    !board.isPending
+  const journey = buildJourney(
+    {
+      // The owner is in the directory from registration, so they don't count.
+      teammates: (members.data ?? []).filter((m) => m.user_id !== session?.user_id).length,
+      clients: clientCount,
+      projects: projects.data?.length ?? 0,
+      bookings: (slots.data ?? []).filter((s) => s.status === 'booked').length,
+      dataRecords: dataRecords.data?.length ?? 0,
+      invoices: invoices.data?.length ?? 0,
+      trackedTasks: board.data?.length ?? 0,
+    },
+    (m) => access.hasModule(m),
+  )
+  const showJourney = isSetupAudience && journeyReady && !journey.allDone
 
   return (
     <>
@@ -63,6 +99,10 @@ function DashboardInner() {
           )
         }
       />
+
+      {showJourney && (
+        <SetupJourney steps={journey.steps} completed={journey.completed} total={journey.total} />
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {access.hasModule('projects') && (
