@@ -1,9 +1,18 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { MailCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { z, authToken, registerResult, forgotPasswordResult } from '@ipc/contracts'
+import {
+  z,
+  authToken,
+  registerRequest,
+  registerResult,
+  loginRequest,
+  forgotPasswordRequest,
+  forgotPasswordResult,
+} from '@ipc/contracts'
 import { callApi, ApiError } from '@/shared/api/client'
+import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 import { setTokens } from '@/shared/auth/token'
 import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -13,6 +22,42 @@ import { Input, Label } from '@/shared/ui/input'
 
 type Mode = 'signin' | 'register' | 'forgot'
 const ok = z.object({ ok: z.boolean() })
+
+/** Every field any of the three modes can show, plus the one the API has no say in. */
+type FieldName = 'company_name' | 'admin_name' | 'email' | 'phone' | 'password' | 'confirm_password'
+
+const LABELS: Record<FieldName, string> = {
+  company_name: 'Company name',
+  admin_name: 'Your name',
+  email: 'Email',
+  phone: 'Phone',
+  password: 'Password',
+  confirm_password: 'Confirm password',
+}
+
+const OVERRIDES: Partial<Record<FieldName, string | undefined>> = {
+  // The contract's phone message ("invalid phone number") says what is wrong but
+  // not what to do; every phone failure is the same failure, so one sentence covers it.
+  phone: 'Enter a valid phone number — 10 digits, or with a country code.',
+}
+
+/** The wiring a Field hands its control so label, error and input stay tied together. */
+interface ControlProps {
+  id: string
+  name: string
+  'aria-invalid'?: true | undefined
+  'aria-describedby'?: string | undefined
+}
+
+/** Focus order for the jump-to-first-problem on submit; matches the visual order. */
+const FIELD_ORDER: FieldName[] = [
+  'company_name',
+  'admin_name',
+  'email',
+  'phone',
+  'password',
+  'confirm_password',
+]
 
 export function LoginPage() {
   const { refresh } = useAuth()
@@ -25,7 +70,9 @@ export function LoginPage() {
   const [adminName, setAdminName] = useState('')
   const [phone, setPhone] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<FieldErrors<FieldName>>({})
   const [busy, setBusy] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
   // Set once the user needs to verify their email (after register, or a 403 login).
   const [pendingEmail, setPendingEmail] = useState<string | null>(null)
   const [resent, setResent] = useState(false)
@@ -36,19 +83,83 @@ export function LoginPage() {
   const isRegister = mode === 'register'
   const isForgot = mode === 'forgot'
 
+  /**
+   * The payload as the API would receive it, so the form is checked against the
+   * exact same object the server will parse. Phone is omitted when blank because
+   * the contract treats it as optional-but-valid-if-present.
+   */
+  function payload(): Record<string, unknown> {
+    if (isForgot) return { email }
+    if (isRegister) {
+      return {
+        company_name: companyName,
+        admin_name: adminName,
+        email,
+        password,
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
+      }
+    }
+    return { email, password }
+  }
+
+  const schema = isForgot ? forgotPasswordRequest : isRegister ? registerRequest : loginRequest
+
+  /** Contract failures, plus the confirm-password rule the API has no opinion on. */
+  function validate(): FieldErrors<FieldName> {
+    const found = fieldErrors<FieldName>(schema, payload(), {
+      labels: LABELS,
+      overrides: OVERRIDES,
+    })
+    if (isRegister && !found.password) {
+      if (!confirmPassword) found.confirm_password = 'Please re-type your password.'
+      else if (password !== confirmPassword) found.confirm_password = 'Passwords do not match.'
+    }
+    return found
+  }
+
+  /** Re-check one field once the user leaves it — but never nag about a blank one. */
+  function validateField(field: FieldName, value: string) {
+    if (!value.trim()) return setErrors((prev) => ({ ...prev, [field]: undefined }))
+    setErrors((prev) => ({ ...prev, [field]: validate()[field] }))
+  }
+
+  /** Switching tabs must not carry the previous form's complaints across. */
+  function switchMode(next: Mode) {
+    setMode(next)
+    setErrors({})
+    setError(null)
+    setPassword('')
+    setConfirmPassword('')
+  }
+
+  /** Editing a field clears its complaint; submitting decides whether it comes back. */
+  function edit(field: FieldName, set: (v: string) => void) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => {
+      set(e.target.value)
+      setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev))
+      setError(null)
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    if (isRegister && password !== confirmPassword) {
-      setError('Passwords do not match.')
+
+    const found = validate()
+    setErrors(found)
+    if (Object.values(found).some(Boolean)) {
+      // Land the cursor on the first problem rather than making them hunt for it.
+      const first = FIELD_ORDER.find((f) => found[f])
+      formRef.current?.querySelector<HTMLInputElement>(`[name="${first}"]`)?.focus()
       return
     }
+
     setBusy(true)
     try {
       if (isForgot) {
         await callApi('/auth/forgot-password', {
           method: 'POST',
-          body: { email },
+          body: payload(),
           responseSchema: forgotPasswordResult,
         })
         setResetSentTo(email)
@@ -62,13 +173,7 @@ export function LoginPage() {
       if (isRegister) {
         await callApi('/auth/register', {
           method: 'POST',
-          body: {
-            company_name: companyName,
-            admin_name: adminName,
-            email,
-            password,
-            ...(phone.trim() ? { phone: phone.trim() } : {}),
-          },
+          body: payload(),
           responseSchema: registerResult,
         })
         setPendingEmail(email) // show the "check your inbox" screen
@@ -77,7 +182,7 @@ export function LoginPage() {
       setTokens(
         await callApi('/auth/login', {
           method: 'POST',
-          body: { email, password },
+          body: payload(),
           responseSchema: authToken,
         }),
       )
@@ -87,9 +192,16 @@ export function LoginPage() {
       // A 403 on sign-in means the email isn't verified yet.
       if (err instanceof ApiError && err.status === 403) {
         setPendingEmail(email)
-      } else {
-        setError(err instanceof Error ? err.message : 'Something went wrong.')
+        return
       }
+      // "Email already taken" is a fact about one field, so it belongs under
+      // that field rather than in a banner the user has to map back themselves.
+      if (err instanceof ApiError && err.status === 409 && /email/i.test(err.message)) {
+        setErrors((prev) => ({ ...prev, email: err.message }))
+        formRef.current?.querySelector<HTMLInputElement>('[name="email"]')?.focus()
+        return
+      }
+      setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setBusy(false)
     }
@@ -126,16 +238,15 @@ export function LoginPage() {
               <div className="space-y-1">
                 <p className="text-sm font-medium">Check your inbox</p>
                 <p className="text-sm text-muted-foreground">
-                  If an account exists for <span className="font-medium">{resetSentTo}</span>, we've sent a
-                  link to reset the password. It expires in 1 hour.
+                  If an account exists for <span className="font-medium">{resetSentTo}</span>, we've
+                  sent a link to reset the password. It expires in 1 hour.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   setResetSentTo(null)
-                  setPassword('')
-                  setMode('signin')
+                  switchMode('signin')
                 }}
                 className="text-sm font-medium text-primary hover:underline"
               >
@@ -152,14 +263,19 @@ export function LoginPage() {
               <div className="space-y-1">
                 <p className="text-sm font-medium">Check your inbox</p>
                 <p className="text-sm text-muted-foreground">
-                  We sent a verification link to <span className="font-medium">{pendingEmail}</span>. Click it
-                  to activate your studio, then sign in.
+                  We sent a verification link to <span className="font-medium">{pendingEmail}</span>
+                  . Click it to activate your studio, then sign in.
                 </p>
               </div>
               {resent ? (
                 <p className="text-sm text-success">Verification email sent again.</p>
               ) : (
-                <Button variant="outline" className="w-full" disabled={busy} onClick={() => void resend()}>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => void resend()}
+                >
                   {busy ? 'Sending…' : 'Resend email'}
                 </Button>
               )}
@@ -168,7 +284,7 @@ export function LoginPage() {
                 onClick={() => {
                   setPendingEmail(null)
                   setResent(false)
-                  setMode('signin')
+                  switchMode('signin')
                 }}
                 className="text-sm font-medium text-primary hover:underline"
               >
@@ -182,7 +298,11 @@ export function LoginPage() {
               <CardContent className="p-6 sm:p-8">
                 <div className="mb-6">
                   <h2 className="text-2xl font-bold tracking-tight">
-                    {isForgot ? 'Forgot password' : isRegister ? 'Create your account' : 'Welcome back'}
+                    {isForgot
+                      ? 'Forgot password'
+                      : isRegister
+                        ? 'Create your account'
+                        : 'Welcome back'}
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {isForgot
@@ -193,100 +313,161 @@ export function LoginPage() {
                   </p>
                 </div>
 
-                <form onSubmit={onSubmit} className="flex flex-col gap-4">
+                {/* noValidate: the browser's own bubbles ("Please fill out this
+                    field") would fire first and hide the specific messages below. */}
+                <form ref={formRef} onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
                   {isRegister && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <Field label="Company name">
-                        <Input
-                          placeholder="e.g. Aperture Studios"
-                          value={companyName}
-                          onChange={(e) => setCompanyName(e.target.value)}
-                          required
-                        />
+                      <Field label="Company name" name="company_name" error={errors.company_name}>
+                        {(p) => (
+                          <Input
+                            {...p}
+                            placeholder="e.g. Aperture Studios"
+                            value={companyName}
+                            onChange={edit('company_name', setCompanyName)}
+                            onBlur={(e) => validateField('company_name', e.target.value)}
+                            required
+                          />
+                        )}
                       </Field>
-                      <Field label="Your name">
-                        <Input
-                          placeholder="e.g. Priya Sharma"
-                          value={adminName}
-                          onChange={(e) => setAdminName(e.target.value)}
-                          required
-                        />
+                      <Field label="Your name" name="admin_name" error={errors.admin_name}>
+                        {(p) => (
+                          <Input
+                            {...p}
+                            placeholder="e.g. Priya Sharma"
+                            value={adminName}
+                            onChange={edit('admin_name', setAdminName)}
+                            onBlur={(e) => validateField('admin_name', e.target.value)}
+                            required
+                          />
+                        )}
                       </Field>
                     </div>
                   )}
 
-                  <Field label="Email">
-                    <Input
-                      type="email"
-                      placeholder="you@studio.in"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
+                  <Field label="Email" name="email" error={errors.email}>
+                    {(p) => (
+                      <Input
+                        {...p}
+                        type="email"
+                        autoComplete="email"
+                        placeholder="you@studio.in"
+                        value={email}
+                        onChange={edit('email', setEmail)}
+                        onBlur={(e) => validateField('email', e.target.value)}
+                        required
+                      />
+                    )}
                   </Field>
 
                   {isRegister && (
-                    <Field label="Phone">
-                      <Input
-                        type="tel"
-                        placeholder="98765 43210"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                      />
+                    <Field
+                      label="Phone"
+                      name="phone"
+                      error={errors.phone}
+                      hint="Optional — 10 digits, or with a country code."
+                    >
+                      {(p) => (
+                        <Input
+                          {...p}
+                          type="tel"
+                          autoComplete="tel"
+                          placeholder="98765 43210"
+                          value={phone}
+                          onChange={edit('phone', setPhone)}
+                          onBlur={(e) => validateField('phone', e.target.value)}
+                        />
+                      )}
                     </Field>
                   )}
 
                   {isRegister ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <Field label="Password">
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          required
-                        />
+                      <Field
+                        label="Password"
+                        name="password"
+                        error={errors.password}
+                        hint="At least 8 characters."
+                      >
+                        {(p) => (
+                          <Input
+                            {...p}
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={edit('password', setPassword)}
+                            onBlur={(e) => validateField('password', e.target.value)}
+                            required
+                          />
+                        )}
                       </Field>
-                      <Field label="Confirm password">
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          required
-                        />
+                      <Field
+                        label="Confirm password"
+                        name="confirm_password"
+                        error={errors.confirm_password}
+                      >
+                        {(p) => (
+                          <Input
+                            {...p}
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="••••••••"
+                            value={confirmPassword}
+                            onChange={edit('confirm_password', setConfirmPassword)}
+                            onBlur={() => {
+                              // Compared, not format-checked — only meaningful once
+                              // both boxes have something in them.
+                              if (confirmPassword && password !== confirmPassword) {
+                                setErrors((prev) => ({
+                                  ...prev,
+                                  confirm_password: 'Passwords do not match.',
+                                }))
+                              }
+                            }}
+                            required
+                          />
+                        )}
                       </Field>
                     </div>
                   ) : (
                     !isForgot && (
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label>Password</Label>
+                      <Field
+                        label="Password"
+                        name="password"
+                        error={errors.password}
+                        action={
                           <button
                             type="button"
-                            onClick={() => {
-                              setMode('forgot')
-                              setError(null)
-                              setPassword('')
-                            }}
+                            onClick={() => switchMode('forgot')}
                             className="text-xs font-medium text-primary hover:underline"
                           >
                             Forgot password?
                           </button>
-                        </div>
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          required
-                        />
-                      </div>
+                        }
+                      >
+                        {(p) => (
+                          <Input
+                            {...p}
+                            type="password"
+                            autoComplete="current-password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={edit('password', setPassword)}
+                            required
+                          />
+                        )}
+                      </Field>
                     )
                   )}
 
                   {error && (
-                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+                    <p
+                      role="alert"
+                      className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      {error}
+                    </p>
                   )}
 
                   <Button type="submit" disabled={busy} className="mt-1 w-full">
@@ -327,8 +508,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setMode('signin')
-                    setError(null)
+                    switchMode('signin')
                   }}
                   className="font-medium text-primary hover:underline"
                 >
@@ -340,8 +520,7 @@ export function LoginPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setMode(isRegister ? 'signin' : 'register')
-                      setError(null)
+                      switchMode(isRegister ? 'signin' : 'register')
                     }}
                     className="font-medium text-primary hover:underline"
                   >
@@ -357,11 +536,52 @@ export function LoginPage() {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * A labelled input with its own error slot. The error replaces the hint rather
+ * than stacking under it, and is tied to the control by aria-describedby so it
+ * is announced instead of just being red.
+ */
+function Field({
+  label,
+  name,
+  error,
+  hint,
+  action,
+  children,
+}: {
+  label: string
+  name: string
+  error?: string | undefined
+  hint?: string | undefined
+  /** Optional control on the label row, e.g. "Forgot password?". */
+  action?: React.ReactNode
+  /** Given the id/aria wiring this field owns, so the control cannot forget it. */
+  children: (props: ControlProps) => React.ReactNode
+}) {
+  const id = useId()
+  const messageId = `${id}-message`
+
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      {children}
+      <div className="flex items-center justify-between">
+        <Label htmlFor={id}>{label}</Label>
+        {action}
+      </div>
+      {children({
+        id,
+        name,
+        'aria-invalid': error ? true : undefined,
+        'aria-describedby': error || hint ? messageId : undefined,
+      })}
+      {error ? (
+        <p id={messageId} role="alert" className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      ) : hint ? (
+        <p id={messageId} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   )
 }
