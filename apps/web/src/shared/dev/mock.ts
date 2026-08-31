@@ -11,6 +11,26 @@ export const MOCK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_MOCK ===
 /** Sentinel: this path is not mocked → fall through to the real fetch. */
 export const NOT_MOCKED = Symbol('not-mocked')
 
+/**
+ * DEV knob for previewing the dashboard's Studio Setup Journey, which only
+ * shows while a studio is still being set up. Append `?setup=fresh` for a brand
+ * new studio (0 of 7) or `?setup=partial` for one three steps in. Without it the
+ * fixtures are full, so the journey is correctly hidden.
+ */
+type SetupStage = 'fresh' | 'partial' | 'full'
+
+function setupStage(): SetupStage {
+  const v = new URLSearchParams(window.location.search).get('setup')
+  return v === 'fresh' || v === 'partial' ? v : 'full'
+}
+
+/** Empty a fixture when the requested stage has not reached it yet. */
+function atStage<T>(rows: T[], presentFrom: 'partial' | 'full'): T[] {
+  const stage = setupStage()
+  if (stage === 'full') return rows
+  return stage === 'partial' && presentFrom === 'partial' ? rows : []
+}
+
 /** Deterministic uuid from a short seed so fixtures satisfy uuid contracts. */
 const uid = (n: number) => `${n.toString(16).padStart(8, '0')}-0000-4000-8000-000000000000`
 
@@ -74,11 +94,20 @@ const boardTasks = [
 ]
 
 /** Canned response for a path, or NOT_MOCKED to fall through to the network. */
-export function mockResponse(path: string, method: string): unknown {
+/**
+ * Theme is the one fixture that must REMEMBER a write: the picker saves, then
+ * refetches, so a hard-coded reply would snap the selection back and make the
+ * palette impossible to try in preview mode.
+ */
+const themeState = { preset_key: 'brand', color_scheme: 'light' }
+
+export function mockResponse(path: string, method: string, body?: unknown): unknown {
   if (method === 'GET' && path === '/auth/session') return mockSession
   if (method === 'POST' && path === '/auth/forgot-password') return { ok: true }
-  if (method === 'POST' && (path === '/auth/logout' || path === '/auth/logout-all')) return { ok: true }
-  if (method === 'POST' && /^\/team\/members\/[^/]+\/reset-password$/.test(path)) return { ok: true }
+  if (method === 'POST' && (path === '/auth/logout' || path === '/auth/logout-all'))
+    return { ok: true }
+  if (method === 'POST' && /^\/team\/members\/[^/]+\/reset-password$/.test(path))
+    return { ok: true }
   if (method === 'POST' && path === '/auth/reset-password')
     return {
       access_token: 'mock-token',
@@ -86,10 +115,11 @@ export function mockResponse(path: string, method: string): unknown {
       token_type: 'bearer',
       expires_in: 1800,
     }
-  if (method === 'GET' && path === '/clients') return clients
-  if (method === 'GET' && path === '/projects') return projects
+  if (method === 'GET' && path === '/clients') return atStage(clients, 'partial')
+  if (method === 'GET' && path === '/projects') return atStage(projects, 'partial')
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
-  if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board'))) return boardTasks
+  if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
+    return atStage(boardTasks, 'full')
   if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
   if (method === 'GET' && (path === '/shoots' || path.startsWith('/shoots?'))) return shootsFx
   if (method === 'POST' && path === '/shoots') return { id: uid(0x5c) }
@@ -99,24 +129,30 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'DELETE' && path.startsWith('/projects/')) return {}
   if (method === 'POST' && /^\/projects\/[^/]+\/(deliverables|payments)$/.test(path)) return {}
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
-  if (method === 'GET' && path === '/team/members') return members
+  if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return directory
-  if (method === 'POST' && path === '/team/members') return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
+  if (method === 'POST' && path === '/team/members')
+    return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
   if (method === 'GET' && path === '/settings/company') return companyFx
   if (method === 'PATCH' && path === '/settings/company') return companyFx
-  if (method === 'GET' && path === '/settings/theme') return { preset_key: 'brand', color_scheme: 'light' }
-  if (method === 'PATCH' && path === '/settings/theme') return { preset_key: 'brand', color_scheme: 'light' }
-  if (method === 'GET' && path === '/allocation') return slots
+  if (method === 'GET' && path === '/settings/theme') return { ...themeState }
+  if (method === 'PATCH' && path === '/settings/theme') {
+    Object.assign(themeState, body as Record<string, unknown>)
+    return { ...themeState }
+  }
+  if (method === 'GET' && path === '/allocation') return atStage(slots, 'full')
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
-  if (method === 'GET' && (path === '/data' || path.startsWith('/data?'))) return dataRecords
+  if (method === 'GET' && (path === '/data' || path.startsWith('/data?')))
+    return atStage(dataRecords, 'full')
   if (method === 'POST' && path.includes('/verify')) return {}
   if (method === 'POST' && path === '/data') return dataRecords[0]
   if (method === 'GET' && path === '/work/submissions') return workSubs
   if (method === 'POST' && path === '/work/submissions') return { id: uid(0x8a) }
   if (method === 'GET' && path === '/billing/states') return states
-  if (method === 'GET' && path === '/billing/invoices') return invoices2
+  if (method === 'GET' && path === '/billing/invoices') return atStage(invoices2, 'full')
   if (method === 'GET' && path.startsWith('/billing/invoices/')) return invoiceDetailFx
-  if (method === 'POST' && path === '/billing/invoices') return { id: uid(0x9a), invoice_number: 'INV-0004' }
+  if (method === 'POST' && path === '/billing/invoices')
+    return { id: uid(0x9a), invoice_number: 'INV-0004' }
   if (method === 'POST' && path.includes('/payments')) return {}
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
@@ -124,14 +160,20 @@ export function mockResponse(path: string, method: string): unknown {
   if (method === 'GET' && path === '/crm/leads') return leads
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
-  if (method === 'GET' && path === '/hr/location') return { lat: 19.076, lng: 72.8777, radius_m: 150 }
+  if (method === 'GET' && path === '/hr/location')
+    return { lat: 19.076, lng: 72.8777, radius_m: 150 }
   if (method === 'POST' && path === '/hr/check-in') return { id: uid(0xc0) }
   if (method === 'GET' && path === '/notifications') return notifs
   if (method === 'POST' && path.includes('/notifications/')) return {}
   if (method === 'GET' && path === '/subscription/plans') return plansFx
-  if (method === 'POST' && path === '/subscription/order') return { order_id: uid(0xd0), amount: 5900 }
-  if (method === 'POST' && path === '/subscription/activate') return { duplicate: false, expires_at: '2027-01-01T00:00:00Z' }
-  if (method === 'GET' && path.startsWith('/public/terms/')) return { body: 'These are the terms of service for your photography package. By clicking "I agree" you accept the scope, payment schedule, and delivery timelines outlined in your quotation.' }
+  if (method === 'POST' && path === '/subscription/order')
+    return { order_id: uid(0xd0), amount: 5900 }
+  if (method === 'POST' && path === '/subscription/activate')
+    return { duplicate: false, expires_at: '2027-01-01T00:00:00Z' }
+  if (method === 'GET' && path.startsWith('/public/terms/'))
+    return {
+      body: 'These are the terms of service for your photography package. By clicking "I agree" you accept the scope, payment schedule, and delivery timelines outlined in your quotation.',
+    }
   if (method === 'POST' && path.includes('/terms/') && path.endsWith('/ack')) return { ok: true }
   if (method === 'POST' && path === '/tasks/generate') return { created: 3 }
   if (method === 'GET' && path === '/platform/studios') return platformStudiosFx
@@ -144,10 +186,46 @@ export function mockResponse(path: string, method: string): unknown {
 }
 
 const platformStudiosFx = [
-  { id: uid(0xaa), name: 'Demo Studio', owner_email: 'owner@demostudio.in', plan_gate: 'active', plan_expiry: '2027-01-01T00:00:00Z', user_count: 4, project_count: 4, created_at: '2026-05-01T10:00:00Z' },
-  { id: uid(0xab), name: 'Lens & Light', owner_email: 'hi@lenslight.in', plan_gate: 'grandfathered', plan_expiry: null, user_count: 2, project_count: 7, created_at: '2026-06-12T10:00:00Z' },
-  { id: uid(0xac), name: 'Frame Story', owner_email: 'team@framestory.in', plan_gate: 'grace', plan_expiry: '2026-08-01T00:00:00Z', user_count: 6, project_count: 12, created_at: '2026-03-20T10:00:00Z' },
-  { id: uid(0xad), name: 'Old Studio', owner_email: 'x@old.in', plan_gate: 'expired', plan_expiry: '2026-04-01T00:00:00Z', user_count: 1, project_count: 2, created_at: '2025-11-02T10:00:00Z' },
+  {
+    id: uid(0xaa),
+    name: 'Demo Studio',
+    owner_email: 'owner@demostudio.in',
+    plan_gate: 'active',
+    plan_expiry: '2027-01-01T00:00:00Z',
+    user_count: 4,
+    project_count: 4,
+    created_at: '2026-05-01T10:00:00Z',
+  },
+  {
+    id: uid(0xab),
+    name: 'Lens & Light',
+    owner_email: 'hi@lenslight.in',
+    plan_gate: 'grandfathered',
+    plan_expiry: null,
+    user_count: 2,
+    project_count: 7,
+    created_at: '2026-06-12T10:00:00Z',
+  },
+  {
+    id: uid(0xac),
+    name: 'Frame Story',
+    owner_email: 'team@framestory.in',
+    plan_gate: 'grace',
+    plan_expiry: '2026-08-01T00:00:00Z',
+    user_count: 6,
+    project_count: 12,
+    created_at: '2026-03-20T10:00:00Z',
+  },
+  {
+    id: uid(0xad),
+    name: 'Old Studio',
+    owner_email: 'x@old.in',
+    plan_gate: 'expired',
+    plan_expiry: '2026-04-01T00:00:00Z',
+    user_count: 1,
+    project_count: 2,
+    created_at: '2025-11-02T10:00:00Z',
+  },
 ]
 
 const platformUsageFx = {
@@ -158,46 +236,207 @@ const platformUsageFx = {
 }
 
 const dataRecords = [
-  { id: uid(0x71), data_label: 'CF Card A (Cam 1)', data_type: 'photo', primary_status: 'verified', backup_status: 'verified', card_count: 2, size_gb: 64.5, verified_at: '2026-07-02T09:00:00Z' },
-  { id: uid(0x72), data_label: 'SD Card B (Cam 2)', data_type: 'photo', primary_status: 'copied', backup_status: 'pending', card_count: 1, size_gb: 32, verified_at: null },
-  { id: uid(0x73), data_label: 'Cinema drive', data_type: 'video', primary_status: 'copied', backup_status: 'copied', card_count: 4, size_gb: 512, verified_at: null },
+  {
+    id: uid(0x71),
+    data_label: 'CF Card A (Cam 1)',
+    data_type: 'photo',
+    primary_status: 'verified',
+    backup_status: 'verified',
+    card_count: 2,
+    size_gb: 64.5,
+    verified_at: '2026-07-02T09:00:00Z',
+  },
+  {
+    id: uid(0x72),
+    data_label: 'SD Card B (Cam 2)',
+    data_type: 'photo',
+    primary_status: 'copied',
+    backup_status: 'pending',
+    card_count: 1,
+    size_gb: 32,
+    verified_at: null,
+  },
+  {
+    id: uid(0x73),
+    data_label: 'Cinema drive',
+    data_type: 'video',
+    primary_status: 'copied',
+    backup_status: 'copied',
+    card_count: 4,
+    size_gb: 512,
+    verified_at: null,
+  },
 ]
 
 const plansFx = [
   { id: uid(0xe0), key: 'starter', name: 'Starter', price: 2000, billing_interval: 'monthly' },
   { id: uid(0xe1a), key: 'pro', name: 'Pro', price: 5000, billing_interval: 'monthly' },
-  { id: uid(0xe2a), key: 'studio', name: 'Studio (Yearly)', price: 50000, billing_interval: 'yearly' },
+  {
+    id: uid(0xe2a),
+    key: 'studio',
+    name: 'Studio (Yearly)',
+    price: 50000,
+    billing_interval: 'yearly',
+  },
 ]
 
 const notifs = [
-  { id: uid(0xf1), type: 'reminder', title: 'Call Priya about wedding date', body: null, read_at: null, created_at: '2026-07-06T06:00:00Z' },
-  { id: uid(0xf2), type: 'work', title: 'Album v1 was approved', body: 'Great work', read_at: null, created_at: '2026-07-05T10:00:00Z' },
-  { id: uid(0xf3), type: 'billing', title: 'INV-0001 is overdue', body: null, read_at: '2026-07-04T10:00:00Z', created_at: '2026-07-03T10:00:00Z' },
+  {
+    id: uid(0xf1),
+    type: 'reminder',
+    title: 'Call Priya about wedding date',
+    body: null,
+    read_at: null,
+    created_at: '2026-07-06T06:00:00Z',
+  },
+  {
+    id: uid(0xf2),
+    type: 'work',
+    title: 'Album v1 was approved',
+    body: 'Great work',
+    read_at: null,
+    created_at: '2026-07-05T10:00:00Z',
+  },
+  {
+    id: uid(0xf3),
+    type: 'billing',
+    title: 'INV-0001 is overdue',
+    body: null,
+    read_at: '2026-07-04T10:00:00Z',
+    created_at: '2026-07-03T10:00:00Z',
+  },
 ]
 
 const attendanceFx = [
-  { id: uid(0xd1), a_date: '2026-07-06', check_in_at: '2026-07-06T04:05:00Z', check_out_at: null, status: 'present' },
-  { id: uid(0xd2), a_date: '2026-07-05', check_in_at: '2026-07-05T04:35:00Z', check_out_at: '2026-07-05T13:00:00Z', status: 'late' },
+  {
+    id: uid(0xd1),
+    a_date: '2026-07-06',
+    check_in_at: '2026-07-06T04:05:00Z',
+    check_out_at: null,
+    status: 'present',
+  },
+  {
+    id: uid(0xd2),
+    a_date: '2026-07-05',
+    check_in_at: '2026-07-05T04:35:00Z',
+    check_out_at: '2026-07-05T13:00:00Z',
+    status: 'late',
+  },
   { id: uid(0xd3), a_date: '2026-07-04', check_in_at: null, check_out_at: null, status: 'absent' },
 ]
 
 const leads = [
-  { id: uid(0xb1), name: 'Priya & Arjun', phone: '9876500001', email: 'priya@x.in', source: 'facebook', status: 'new', assigned_to: uid(0xe1), assignee_name: 'Rahul', created_at: '2026-07-05T08:00:00Z' },
-  { id: uid(0xb2), name: 'Meera', phone: '9876500002', email: null, source: 'webform', status: 'contacted', assigned_to: uid(0xe3), assignee_name: 'Sana', created_at: '2026-07-04T08:00:00Z' },
-  { id: uid(0xb3), name: 'Corporate Event', phone: '9876500003', email: 'events@co.in', source: 'referral', status: 'qualified', assigned_to: uid(0xe1), assignee_name: 'Rahul', created_at: '2026-07-03T08:00:00Z' },
-  { id: uid(0xb4), name: 'Kunal', phone: '9876500004', email: null, source: 'facebook', status: 'converted', assigned_to: uid(0xe3), assignee_name: 'Sana', created_at: '2026-07-01T08:00:00Z' },
-  { id: uid(0xb5), name: 'Old enquiry', phone: '9876500005', email: null, source: 'enquiry', status: 'lost', assigned_to: null, assignee_name: null, created_at: '2026-06-20T08:00:00Z' },
+  {
+    id: uid(0xb1),
+    name: 'Priya & Arjun',
+    phone: '9876500001',
+    email: 'priya@x.in',
+    source: 'facebook',
+    status: 'new',
+    assigned_to: uid(0xe1),
+    assignee_name: 'Rahul',
+    created_at: '2026-07-05T08:00:00Z',
+  },
+  {
+    id: uid(0xb2),
+    name: 'Meera',
+    phone: '9876500002',
+    email: null,
+    source: 'webform',
+    status: 'contacted',
+    assigned_to: uid(0xe3),
+    assignee_name: 'Sana',
+    created_at: '2026-07-04T08:00:00Z',
+  },
+  {
+    id: uid(0xb3),
+    name: 'Corporate Event',
+    phone: '9876500003',
+    email: 'events@co.in',
+    source: 'referral',
+    status: 'qualified',
+    assigned_to: uid(0xe1),
+    assignee_name: 'Rahul',
+    created_at: '2026-07-03T08:00:00Z',
+  },
+  {
+    id: uid(0xb4),
+    name: 'Kunal',
+    phone: '9876500004',
+    email: null,
+    source: 'facebook',
+    status: 'converted',
+    assigned_to: uid(0xe3),
+    assignee_name: 'Sana',
+    created_at: '2026-07-01T08:00:00Z',
+  },
+  {
+    id: uid(0xb5),
+    name: 'Old enquiry',
+    phone: '9876500005',
+    email: null,
+    source: 'enquiry',
+    status: 'lost',
+    assigned_to: null,
+    assignee_name: null,
+    created_at: '2026-06-20T08:00:00Z',
+  },
 ]
 
 const expensesFx = [
-  { id: uid(0xa1), project_id: PROJ.p1, category: 'Travel', description: 'Outstation shoot', amount: 15000, expense_date: '2026-06-20', gst_treatment: 'non_gst', is_fixed_overhead: false },
-  { id: uid(0xa2), project_id: null, category: 'Rent', description: 'Studio rent', amount: 40000, expense_date: '2026-06-01', gst_treatment: 'gst_applicable', is_fixed_overhead: true },
-  { id: uid(0xa3), project_id: PROJ.p3, category: 'Props', description: 'Product staging', amount: 8000, expense_date: '2026-06-28', gst_treatment: 'non_gst', is_fixed_overhead: false },
+  {
+    id: uid(0xa1),
+    project_id: PROJ.p1,
+    category: 'Travel',
+    description: 'Outstation shoot',
+    amount: 15000,
+    expense_date: '2026-06-20',
+    gst_treatment: 'non_gst',
+    is_fixed_overhead: false,
+  },
+  {
+    id: uid(0xa2),
+    project_id: null,
+    category: 'Rent',
+    description: 'Studio rent',
+    amount: 40000,
+    expense_date: '2026-06-01',
+    gst_treatment: 'gst_applicable',
+    is_fixed_overhead: true,
+  },
+  {
+    id: uid(0xa3),
+    project_id: PROJ.p3,
+    category: 'Props',
+    description: 'Product staging',
+    amount: 8000,
+    expense_date: '2026-06-28',
+    gst_treatment: 'non_gst',
+    is_fixed_overhead: false,
+  },
 ]
 
 const projectFin = [
-  { project_id: PROJ.p1, name: 'Sharma Wedding', revenue: 227000, received: 150000, direct_team_cost: 40000, project_expenses: 15000, gross_profit: 172000, balance_pending: 77000 },
-  { project_id: PROJ.p3, name: 'Nova Product Shoot', revenue: 72000, received: 72000, direct_team_cost: 18000, project_expenses: 8000, gross_profit: 46000, balance_pending: 0 },
+  {
+    project_id: PROJ.p1,
+    name: 'Sharma Wedding',
+    revenue: 227000,
+    received: 150000,
+    direct_team_cost: 40000,
+    project_expenses: 15000,
+    gross_profit: 172000,
+    balance_pending: 77000,
+  },
+  {
+    project_id: PROJ.p3,
+    name: 'Nova Product Shoot',
+    revenue: 72000,
+    received: 72000,
+    direct_team_cost: 18000,
+    project_expenses: 8000,
+    gross_profit: 46000,
+    balance_pending: 0,
+  },
 ]
 
 const invoiceDetailFx = {
@@ -216,8 +455,28 @@ const invoiceDetailFx = {
   balance_due: 40400,
   created_at: '2026-06-10T10:00:00Z',
   items: [
-    { id: uid(0x9b1), description: 'Photography package', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, cgst: 9000, sgst: 9000, igst: 0 },
-    { id: uid(0x9b2), description: 'Wedding album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 12, cgst: 1200, sgst: 1200, igst: 0 },
+    {
+      id: uid(0x9b1),
+      description: 'Photography package',
+      quantity: 1,
+      rate: 100000,
+      amount: 100000,
+      gst_rate: 18,
+      cgst: 9000,
+      sgst: 9000,
+      igst: 0,
+    },
+    {
+      id: uid(0x9b2),
+      description: 'Wedding album',
+      quantity: 2,
+      rate: 10000,
+      amount: 20000,
+      gst_rate: 12,
+      cgst: 1200,
+      sgst: 1200,
+      igst: 0,
+    },
   ],
   payments: [{ id: uid(0x9c1), amount: 100000, paid_on: '2026-06-12', mode: 'upi' }],
 }
@@ -230,15 +489,66 @@ const states = [
 ]
 
 const invoices2 = [
-  { id: uid(0x91), invoice_number: 'INV-0001', client_name: 'Sharma Family', invoice_date: '2026-06-10', total: 140400, balance_due: 40400, status: 'partial' },
-  { id: uid(0x92), invoice_number: 'INV-0002', client_name: 'Verma Weddings', invoice_date: '2026-06-18', total: 90000, balance_due: 0, status: 'paid' },
-  { id: uid(0x93), invoice_number: 'INV-0003', client_name: 'Nova Events', invoice_date: '2026-07-01', total: 72000, balance_due: 72000, status: 'sent' },
+  {
+    id: uid(0x91),
+    invoice_number: 'INV-0001',
+    client_name: 'Sharma Family',
+    invoice_date: '2026-06-10',
+    total: 140400,
+    balance_due: 40400,
+    status: 'partial',
+  },
+  {
+    id: uid(0x92),
+    invoice_number: 'INV-0002',
+    client_name: 'Verma Weddings',
+    invoice_date: '2026-06-18',
+    total: 90000,
+    balance_due: 0,
+    status: 'paid',
+  },
+  {
+    id: uid(0x93),
+    invoice_number: 'INV-0003',
+    client_name: 'Nova Events',
+    invoice_date: '2026-07-01',
+    total: 72000,
+    balance_due: 72000,
+    status: 'sent',
+  },
 ]
 
 const workSubs = [
-  { id: uid(0x81), project_id: PROJ.p1, task_id: null, submission_link: 'https://drive.google.com/album-v1', notes: 'First album cut', status: 'submitted', review_notes: null, created_at: '2026-07-03T08:00:00Z' },
-  { id: uid(0x82), project_id: PROJ.p1, task_id: null, submission_link: 'https://drive.google.com/film-v2', notes: 'Highlight film', status: 'approved', review_notes: 'Great work', created_at: '2026-07-01T08:00:00Z' },
-  { id: uid(0x83), project_id: PROJ.p2, task_id: null, submission_link: 'https://drive.google.com/teaser', notes: null, status: 'rejected', review_notes: 'Re-grade the outdoor shots', created_at: '2026-06-28T08:00:00Z' },
+  {
+    id: uid(0x81),
+    project_id: PROJ.p1,
+    task_id: null,
+    submission_link: 'https://drive.google.com/album-v1',
+    notes: 'First album cut',
+    status: 'submitted',
+    review_notes: null,
+    created_at: '2026-07-03T08:00:00Z',
+  },
+  {
+    id: uid(0x82),
+    project_id: PROJ.p1,
+    task_id: null,
+    submission_link: 'https://drive.google.com/film-v2',
+    notes: 'Highlight film',
+    status: 'approved',
+    review_notes: 'Great work',
+    created_at: '2026-07-01T08:00:00Z',
+  },
+  {
+    id: uid(0x83),
+    project_id: PROJ.p2,
+    task_id: null,
+    submission_link: 'https://drive.google.com/teaser',
+    notes: null,
+    status: 'rejected',
+    review_notes: 'Re-grade the outdoor shots',
+    created_at: '2026-06-28T08:00:00Z',
+  },
 ]
 
 const members = [
@@ -248,9 +558,33 @@ const members = [
 ]
 
 const shootsFx = [
-  { id: uid(0x61), name: 'Engagement shoot', project_id: PROJ.p1, project_name: 'Sharma Wedding', shoot_date: '2026-08-10', location: 'Bandra, Mumbai', status: 'confirmed' },
-  { id: uid(0x62), name: 'Wedding day', project_id: PROJ.p1, project_name: 'Sharma Wedding', shoot_date: '2026-08-22', location: 'Taj Lands End', status: 'planned' },
-  { id: uid(0x63), name: 'Product set A', project_id: PROJ.p3, project_name: 'Nova Product Shoot', shoot_date: '2026-07-01', location: 'Studio', status: 'completed' },
+  {
+    id: uid(0x61),
+    name: 'Engagement shoot',
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    shoot_date: '2026-08-10',
+    location: 'Bandra, Mumbai',
+    status: 'confirmed',
+  },
+  {
+    id: uid(0x62),
+    name: 'Wedding day',
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    shoot_date: '2026-08-22',
+    location: 'Taj Lands End',
+    status: 'planned',
+  },
+  {
+    id: uid(0x63),
+    name: 'Product set A',
+    project_id: PROJ.p3,
+    project_name: 'Nova Product Shoot',
+    shoot_date: '2026-07-01',
+    location: 'Studio',
+    status: 'completed',
+  },
 ]
 
 const companyFx = {
@@ -265,10 +599,38 @@ const companyFx = {
 }
 
 const directory = [
-  { user_id: uid(0x1), name: 'Demo Owner', email: 'owner@demostudio.in', role: 'super_admin', phone: '9800000000', status: 'active' },
-  { user_id: uid(0xe1), name: 'Rahul Sharma', email: 'rahul@demostudio.in', role: 'employee', phone: '9811111111', status: 'active' },
-  { user_id: uid(0xe2), name: 'Anita Desai', email: 'anita@demostudio.in', role: 'employee', phone: null, status: 'active' },
-  { user_id: uid(0xe3), name: 'Sana Khan', email: 'sana@demostudio.in', role: 'manager', phone: '9833333333', status: 'active' },
+  {
+    user_id: uid(0x1),
+    name: 'Demo Owner',
+    email: 'owner@demostudio.in',
+    role: 'super_admin',
+    phone: '9800000000',
+    status: 'active',
+  },
+  {
+    user_id: uid(0xe1),
+    name: 'Rahul Sharma',
+    email: 'rahul@demostudio.in',
+    role: 'employee',
+    phone: '9811111111',
+    status: 'active',
+  },
+  {
+    user_id: uid(0xe2),
+    name: 'Anita Desai',
+    email: 'anita@demostudio.in',
+    role: 'employee',
+    phone: null,
+    status: 'active',
+  },
+  {
+    user_id: uid(0xe3),
+    name: 'Sana Khan',
+    email: 'sana@demostudio.in',
+    role: 'manager',
+    phone: '9833333333',
+    status: 'active',
+  },
 ]
 
 const slots = [
@@ -304,7 +666,16 @@ function boardTask(
   project_name: string,
   sort_order: number,
 ) {
-  return { id, title, status, priority, due_date: null, project_id: PROJ.p1, project_name, sort_order }
+  return {
+    id,
+    title,
+    status,
+    priority,
+    due_date: null,
+    project_id: PROJ.p1,
+    project_name,
+    sort_order,
+  }
 }
 
 function fakeClient(id: string, name: string, phone: string | null): Client {

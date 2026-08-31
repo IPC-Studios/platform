@@ -106,7 +106,7 @@ export async function callApi<TOut extends z.ZodTypeAny>(
 
   // DEV UI-preview short-circuit — never reached in production.
   if (MOCK_ENABLED) {
-    const canned = mockResponse(path, method)
+    const canned = mockResponse(path, method, opts.body)
     if (canned !== NOT_MOCKED) return opts.responseSchema.parse(canned)
   }
 
