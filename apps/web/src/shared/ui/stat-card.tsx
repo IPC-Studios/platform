@@ -17,7 +17,7 @@ export function StatCard({
   className?: string
 }) {
   return (
-    <Card className={cn('lift', className)}>
+    <Card className={className}>
       <CardContent className="flex items-start justify-between gap-4 p-5">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">{label}</p>
@@ -25,7 +25,7 @@ export function StatCard({
           {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
         </div>
         {Icon && (
-          <span className="rounded-md bg-primary/10 p-2 text-primary ring-1 ring-primary/10">
+          <span className={cn('rounded-md bg-primary/10 p-2 text-primary')}>
             <Icon className="size-5" />
           </span>
         )}

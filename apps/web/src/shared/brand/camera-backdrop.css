@@ -1,0 +1,114 @@
+/*
+ * Sign-in backdrop. Deliberately colourless — everything is drawn in
+ * currentColor at a few percent alpha, so it sits behind the card on a light or
+ * a dark page without tinting either. Only transform and opacity animate, so it
+ * stays on the compositor and never costs a layout.
+ */
+
+.cb-root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--foreground);
+}
+
+/* ── Aperture ─────────────────────────────────────────────────────── */
+
+.cb-iris {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(104vmin, 760px);
+  height: min(104vmin, 760px);
+  transform: translate(-50%, -50%);
+  opacity: 0.05;
+  animation: cb-turn 90s linear infinite;
+}
+
+.cb-ring {
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+.cb-ring--faint {
+  stroke-width: 0.7;
+}
+
+/* Blades stop down and open back up — the one motion that says "camera". */
+.cb-diaphragm {
+  transform-origin: center;
+  animation: cb-stop-down 14s ease-in-out infinite;
+}
+
+.cb-blade-edge {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.cb-blade {
+  stroke: currentColor;
+  stroke-width: 0.9;
+}
+
+@keyframes cb-turn {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes cb-stop-down {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    /* Closing the iris also twists the blades, the way a real diaphragm does. */
+    transform: scale(0.52) rotate(26deg);
+  }
+}
+
+/* ── Bokeh ────────────────────────────────────────────────────────── */
+
+.cb-bokeh {
+  position: absolute;
+  border-radius: 50%;
+  /* Bright rim, hollow centre — how a defocused highlight actually renders. */
+  background: radial-gradient(
+    circle,
+    transparent 54%,
+    color-mix(in oklch, currentColor 10%, transparent) 72%,
+    transparent 78%
+  );
+  animation: cb-float 30s ease-in-out infinite;
+  will-change: transform;
+}
+
+.cb-bokeh--slow {
+  animation-duration: 42s;
+  animation-direction: reverse;
+}
+.cb-bokeh--slower {
+  animation-duration: 54s;
+  animation-delay: -12s;
+}
+
+@keyframes cb-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate3d(3rem, -2.5rem, 0) scale(1.14);
+    opacity: 0.95;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-iris,
+  .cb-diaphragm,
+  .cb-bokeh {
+    animation: none;
+  }
+}

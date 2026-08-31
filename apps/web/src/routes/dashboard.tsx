@@ -6,7 +6,6 @@ import { RequireAuth } from '@/shared/auth/guards'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
-import { CountUp } from '@/shared/ui/count-up'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
@@ -105,29 +104,21 @@ function DashboardInner() {
         <SetupJourney steps={journey.steps} completed={journey.completed} total={journey.total} />
       )}
 
-      <div className="rise-in grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {access.hasModule('projects') && (
-          <StatCard
-            label="Active projects"
-            value={<CountUp value={activeProjects} />}
-            icon={FolderKanban}
-          />
+          <StatCard label="Active projects" value={activeProjects} icon={FolderKanban} />
         )}
         {access.hasModule('clients') && (
-          <StatCard label="Clients" value={<CountUp value={clientCount} />} icon={Contact} />
+          <StatCard label="Clients" value={clientCount} icon={Contact} />
         )}
-        <StatCard label="Team members" value={<CountUp value={teamCount} />} icon={Users} />
+        <StatCard label="Team members" value={teamCount} icon={Users} />
         {access.hasModule('billing') && (
-          <StatCard
-            label="Outstanding"
-            value={<CountUp value={outstanding} format={formatINR} />}
-            icon={Receipt}
-          />
+          <StatCard label="Outstanding" value={formatINR(outstanding)} icon={Receipt} />
         )}
       </div>
 
       {access.hasModule('projects') && (
-        <Card className="rise-in mt-6">
+        <Card className="mt-6">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Recent projects</CardTitle>
             <Button asChild variant="ghost" size="sm">

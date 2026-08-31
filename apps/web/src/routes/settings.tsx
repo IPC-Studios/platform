@@ -3,7 +3,11 @@ import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
 import { toast } from 'sonner'
-import { companyProfile, companyTheme, type UpdateCompanyRequest } from '@ipc/contracts'
+import {
+  companyProfile,
+  companyTheme,
+  type UpdateCompanyRequest,
+} from '@ipc/contracts'
 import { THEME_PRESETS } from '@/shared/theme/presets'
 import { useTheme } from '@/shared/theme/ThemeProvider'
 import { callApi } from '@/shared/api/client'
@@ -93,24 +97,14 @@ function CompanyCard({ readOnly }: { readOnly: boolean }) {
   })
   const save = useMutation({
     mutationFn: (input: UpdateCompanyRequest) =>
-      callApi('/settings/company', {
-        method: 'PATCH',
-        body: input,
-        responseSchema: companyProfile,
-      }),
+      callApi('/settings/company', { method: 'PATCH', body: input, responseSchema: companyProfile }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'company'] }),
   })
 
   const [form, setForm] = useState<UpdateCompanyRequest>({})
   const [saved, setSaved] = useState(false)
   useEffect(() => {
-    if (data)
-      setForm({
-        name: data.name,
-        city: data.city ?? '',
-        state: data.state ?? '',
-        invoice_gst_number: data.invoice_gst_number ?? '',
-      })
+    if (data) setForm({ name: data.name, city: data.city ?? '', state: data.state ?? '', invoice_gst_number: data.invoice_gst_number ?? '' })
   }, [data])
 
   async function onSubmit(e: FormEvent) {
@@ -120,14 +114,7 @@ function CompanyCard({ readOnly }: { readOnly: boolean }) {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  if (isLoading)
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <LoadingState />
-        </CardContent>
-      </Card>
-    )
+  if (isLoading) return <Card><CardContent className="p-6"><LoadingState /></CardContent></Card>
 
   return (
     <Card>
@@ -138,48 +125,28 @@ function CompanyCard({ readOnly }: { readOnly: boolean }) {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Studio name</Label>
-            <Input
-              value={form.name ?? ''}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              disabled={readOnly}
-            />
+            <Input value={form.name ?? ''} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={readOnly} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>City</Label>
-              <Input
-                value={form.city ?? ''}
-                onChange={(e) => setForm({ ...form, city: e.target.value })}
-                disabled={readOnly}
-              />
+              <Input value={form.city ?? ''} onChange={(e) => setForm({ ...form, city: e.target.value })} disabled={readOnly} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>State</Label>
-              <Input
-                value={form.state ?? ''}
-                onChange={(e) => setForm({ ...form, state: e.target.value })}
-                disabled={readOnly}
-              />
+              <Input value={form.state ?? ''} onChange={(e) => setForm({ ...form, state: e.target.value })} disabled={readOnly} />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>GST number</Label>
-            <Input
-              value={form.invoice_gst_number ?? ''}
-              onChange={(e) => setForm({ ...form, invoice_gst_number: e.target.value })}
-              disabled={readOnly}
-            />
+            <Input value={form.invoice_gst_number ?? ''} onChange={(e) => setForm({ ...form, invoice_gst_number: e.target.value })} disabled={readOnly} />
           </div>
           {!readOnly && (
             <div className="flex items-center gap-2">
               <Button type="submit" disabled={save.isPending}>
                 {save.isPending ? 'Saving…' : 'Save'}
               </Button>
-              {saved && (
-                <span className="flex items-center gap-1 text-sm text-success">
-                  <Check className="size-4" /> Saved
-                </span>
-              )}
+              {saved && <span className="flex items-center gap-1 text-sm text-success"><Check className="size-4" /> Saved</span>}
             </div>
           )}
         </form>
@@ -227,35 +194,24 @@ function ThemeCard({ readOnly }: { readOnly: boolean }) {
       </CardHeader>
       <CardContent>
         <Label>Accent colour</Label>
-        <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {Object.values(THEME_PRESETS).map((p) => (
             <button
               key={p.key}
               type="button"
               onClick={() => pick(p.key)}
               disabled={readOnly}
-              aria-pressed={selected === p.key}
               className={cn(
-                'group flex flex-col items-center gap-2 rounded-lg border p-3 transition-all',
-                'hover:-translate-y-0.5 hover:shadow-md',
-                selected === p.key
-                  ? 'border-primary ring-2 ring-ring'
-                  : 'border-border hover:bg-accent',
+                'flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors',
+                selected === p.key ? 'border-primary ring-2 ring-ring' : 'border-border hover:bg-accent',
               )}
             >
-              <span
-                className="size-8 rounded-full shadow-sm ring-1 ring-black/5 transition-transform group-hover:scale-110"
-                style={{ backgroundColor: p.swatch }}
-              />
+              <span className="size-8 rounded-full" style={{ backgroundColor: p.swatch }} />
               <span className="text-xs font-medium">{p.label}</span>
             </button>
           ))}
         </div>
-        {!readOnly && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Changes apply instantly and save automatically.
-          </p>
-        )}
+        {!readOnly && <p className="mt-3 text-xs text-muted-foreground">Changes apply instantly and save automatically.</p>}
       </CardContent>
     </Card>
   )

@@ -62,12 +62,13 @@ describe('theme presets', () => {
     }
   })
 
-  it('offers a real choice of themes', () => {
-    expect(THEME_PRESET_KEYS.length).toBeGreaterThanOrEqual(12)
+  it('has no duplicate keys', () => {
     expect(new Set(THEME_PRESET_KEYS).size).toBe(THEME_PRESET_KEYS.length)
   })
 
-  it('keeps the default preset available', () => {
-    expect(THEME_PRESETS.brand).toBeDefined()
+  it('keeps the shipped palette intact', () => {
+    // These are the presets studios may already have saved; dropping one would
+    // leave a stored preset_key that no longer resolves.
+    expect([...THEME_PRESET_KEYS].sort()).toEqual(['amber', 'brand', 'emerald', 'indigo', 'rose'])
   })
 })

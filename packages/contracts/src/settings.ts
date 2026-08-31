@@ -29,20 +29,7 @@ export type UpdateCompanyRequest = z.infer<typeof updateCompanyRequest>
  * is the shared key list so the server can refuse a preset that does not exist
  * instead of persisting arbitrary strings into company_theme_settings.
  */
-export const themePresetKey = z.enum([
-  'brand',
-  'ocean',
-  'indigo',
-  'violet',
-  'plum',
-  'rose',
-  'crimson',
-  'sunset',
-  'amber',
-  'emerald',
-  'teal',
-  'graphite',
-])
+export const themePresetKey = z.enum(['brand', 'indigo', 'emerald', 'amber', 'rose'])
 export type ThemePresetKey = z.infer<typeof themePresetKey>
 
 export const companyTheme = z.object({

@@ -19,8 +19,7 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
-import { Camera3D } from '@/shared/brand/Camera3D'
-import { AuroraBackdrop } from '@/shared/ui/aurora'
+import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 
 type Mode = 'signin' | 'register' | 'forgot'
 const ok = z.object({ ok: z.boolean() })
@@ -226,338 +225,315 @@ export function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/40 p-4">
-      <AuroraBackdrop />
+      <CameraBackdrop />
 
-      <div className="relative grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.05fr_minmax(0,26rem)]">
-        {/* Showpiece column — hidden on small screens, where the form is the
-            only thing worth the vertical space. */}
-        <div className="hidden lg:flex lg:flex-col lg:items-center">
-          <Camera3D />
-          <div className="mt-6 max-w-md text-center">
-            <h2 className="text-2xl font-bold tracking-tight">
-              Run the whole studio from one place
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Leads, shoots, crew, data custody, deliverables and GST invoicing — the full
-              lifecycle, in one workspace built for Indian photography studios.
-            </p>
-          </div>
-        </div>
+      <div className="relative w-full max-w-md">
+        <h1 className="mb-6 text-center text-2xl font-bold tracking-tight">
+          <span className="text-brand">IPC</span> Studios
+        </h1>
 
-        <div className="mx-auto w-full max-w-md">
-          <h1 className="mb-6 text-center text-2xl font-bold tracking-tight">
-            <span className="text-brand">IPC</span> Studios
-          </h1>
-
-          {resetSentTo ? (
+        {resetSentTo ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MailCheck className="size-6" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Check your inbox</p>
+                <p className="text-sm text-muted-foreground">
+                  If an account exists for <span className="font-medium">{resetSentTo}</span>, we've
+                  sent a link to reset the password. It expires in 1 hour.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetSentTo(null)
+                  switchMode('signin')
+                }}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Back to sign in
+              </button>
+            </CardContent>
+          </Card>
+        ) : pendingEmail ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MailCheck className="size-6" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Check your inbox</p>
+                <p className="text-sm text-muted-foreground">
+                  We sent a verification link to <span className="font-medium">{pendingEmail}</span>
+                  . Click it to activate your studio, then sign in.
+                </p>
+              </div>
+              {resent ? (
+                <p className="text-sm text-success">Verification email sent again.</p>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => void resend()}
+                >
+                  {busy ? 'Sending…' : 'Resend email'}
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingEmail(null)
+                  setResent(false)
+                  switchMode('signin')
+                }}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Back to sign in
+              </button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
             <Card>
-              <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
-                <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <MailCheck className="size-6" />
-                </span>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">Check your inbox</p>
-                  <p className="text-sm text-muted-foreground">
-                    If an account exists for <span className="font-medium">{resetSentTo}</span>,
-                    we've sent a link to reset the password. It expires in 1 hour.
+              <CardContent className="p-6 sm:p-8">
+                <div className="mb-6">
+                  <h2 className="text-2xl font-bold tracking-tight">
+                    {isForgot
+                      ? 'Forgot password'
+                      : isRegister
+                        ? 'Create your account'
+                        : 'Welcome back'}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {isForgot
+                      ? "Enter your email and we'll send a reset link"
+                      : isRegister
+                        ? 'Start your studio workspace'
+                        : 'Sign in to your studio workspace'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setResetSentTo(null)
-                    switchMode('signin')
-                  }}
-                  className="text-sm font-medium text-primary hover:underline"
-                >
-                  Back to sign in
-                </button>
-              </CardContent>
-            </Card>
-          ) : pendingEmail ? (
-            <Card>
-              <CardContent className="flex flex-col items-center gap-4 p-6 text-center">
-                <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <MailCheck className="size-6" />
-                </span>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">Check your inbox</p>
-                  <p className="text-sm text-muted-foreground">
-                    We sent a verification link to{' '}
-                    <span className="font-medium">{pendingEmail}</span>. Click it to activate your
-                    studio, then sign in.
-                  </p>
-                </div>
-                {resent ? (
-                  <p className="text-sm text-success">Verification email sent again.</p>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    disabled={busy}
-                    onClick={() => void resend()}
-                  >
-                    {busy ? 'Sending…' : 'Resend email'}
-                  </Button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingEmail(null)
-                    setResent(false)
-                    switchMode('signin')
-                  }}
-                  className="text-sm font-medium text-primary hover:underline"
-                >
-                  Back to sign in
-                </button>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <Card>
-                <CardContent className="p-6 sm:p-8">
-                  <div className="mb-6">
-                    <h2 className="text-2xl font-bold tracking-tight">
-                      {isForgot
-                        ? 'Forgot password'
-                        : isRegister
-                          ? 'Create your account'
-                          : 'Welcome back'}
-                    </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {isForgot
-                        ? "Enter your email and we'll send a reset link"
-                        : isRegister
-                          ? 'Start your studio workspace'
-                          : 'Sign in to your studio workspace'}
-                    </p>
-                  </div>
 
-                  {/* noValidate: the browser's own bubbles ("Please fill out this
+                {/* noValidate: the browser's own bubbles ("Please fill out this
                     field") would fire first and hide the specific messages below. */}
-                  <form
-                    ref={formRef}
-                    onSubmit={onSubmit}
-                    noValidate
-                    className="flex flex-col gap-4"
-                  >
-                    {isRegister && (
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <Field label="Company name" name="company_name" error={errors.company_name}>
-                          {(p) => (
-                            <Input
-                              {...p}
-                              placeholder="e.g. Aperture Studios"
-                              value={companyName}
-                              onChange={edit('company_name', setCompanyName)}
-                              onBlur={(e) => validateField('company_name', e.target.value)}
-                              required
-                            />
-                          )}
-                        </Field>
-                        <Field label="Your name" name="admin_name" error={errors.admin_name}>
-                          {(p) => (
-                            <Input
-                              {...p}
-                              placeholder="e.g. Priya Sharma"
-                              value={adminName}
-                              onChange={edit('admin_name', setAdminName)}
-                              onBlur={(e) => validateField('admin_name', e.target.value)}
-                              required
-                            />
-                          )}
-                        </Field>
-                      </div>
-                    )}
+                <form ref={formRef} onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
+                  {isRegister && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field label="Company name" name="company_name" error={errors.company_name}>
+                        {(p) => (
+                          <Input
+                            {...p}
+                            placeholder="e.g. Aperture Studios"
+                            value={companyName}
+                            onChange={edit('company_name', setCompanyName)}
+                            onBlur={(e) => validateField('company_name', e.target.value)}
+                            required
+                          />
+                        )}
+                      </Field>
+                      <Field label="Your name" name="admin_name" error={errors.admin_name}>
+                        {(p) => (
+                          <Input
+                            {...p}
+                            placeholder="e.g. Priya Sharma"
+                            value={adminName}
+                            onChange={edit('admin_name', setAdminName)}
+                            onBlur={(e) => validateField('admin_name', e.target.value)}
+                            required
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  )}
 
-                    <Field label="Email" name="email" error={errors.email}>
+                  <Field label="Email" name="email" error={errors.email}>
+                    {(p) => (
+                      <Input
+                        {...p}
+                        type="email"
+                        autoComplete="email"
+                        placeholder="you@studio.in"
+                        value={email}
+                        onChange={edit('email', setEmail)}
+                        onBlur={(e) => validateField('email', e.target.value)}
+                        required
+                      />
+                    )}
+                  </Field>
+
+                  {isRegister && (
+                    <Field
+                      label="Phone"
+                      name="phone"
+                      error={errors.phone}
+                      hint="Optional — 10 digits, or with a country code."
+                    >
                       {(p) => (
                         <Input
                           {...p}
-                          type="email"
-                          autoComplete="email"
-                          placeholder="you@studio.in"
-                          value={email}
-                          onChange={edit('email', setEmail)}
-                          onBlur={(e) => validateField('email', e.target.value)}
-                          required
+                          type="tel"
+                          autoComplete="tel"
+                          placeholder="98765 43210"
+                          value={phone}
+                          onChange={edit('phone', setPhone)}
+                          onBlur={(e) => validateField('phone', e.target.value)}
                         />
                       )}
                     </Field>
+                  )}
 
-                    {isRegister && (
+                  {isRegister ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Field
-                        label="Phone"
-                        name="phone"
-                        error={errors.phone}
-                        hint="Optional — 10 digits, or with a country code."
+                        label="Password"
+                        name="password"
+                        error={errors.password}
+                        hint="At least 8 characters."
                       >
                         {(p) => (
                           <Input
                             {...p}
-                            type="tel"
-                            autoComplete="tel"
-                            placeholder="98765 43210"
-                            value={phone}
-                            onChange={edit('phone', setPhone)}
-                            onBlur={(e) => validateField('phone', e.target.value)}
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={edit('password', setPassword)}
+                            onBlur={(e) => validateField('password', e.target.value)}
+                            required
                           />
                         )}
                       </Field>
-                    )}
-
-                    {isRegister ? (
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <Field
-                          label="Password"
-                          name="password"
-                          error={errors.password}
-                          hint="At least 8 characters."
-                        >
-                          {(p) => (
-                            <Input
-                              {...p}
-                              type="password"
-                              autoComplete="new-password"
-                              placeholder="••••••••"
-                              value={password}
-                              onChange={edit('password', setPassword)}
-                              onBlur={(e) => validateField('password', e.target.value)}
-                              required
-                            />
-                          )}
-                        </Field>
-                        <Field
-                          label="Confirm password"
-                          name="confirm_password"
-                          error={errors.confirm_password}
-                        >
-                          {(p) => (
-                            <Input
-                              {...p}
-                              type="password"
-                              autoComplete="new-password"
-                              placeholder="••••••••"
-                              value={confirmPassword}
-                              onChange={edit('confirm_password', setConfirmPassword)}
-                              onBlur={() => {
-                                // Compared, not format-checked — only meaningful once
-                                // both boxes have something in them.
-                                if (confirmPassword && password !== confirmPassword) {
-                                  setErrors((prev) => ({
-                                    ...prev,
-                                    confirm_password: 'Passwords do not match.',
-                                  }))
-                                }
-                              }}
-                              required
-                            />
-                          )}
-                        </Field>
-                      </div>
-                    ) : (
-                      !isForgot && (
-                        <Field
-                          label="Password"
-                          name="password"
-                          error={errors.password}
-                          action={
-                            <button
-                              type="button"
-                              onClick={() => switchMode('forgot')}
-                              className="text-xs font-medium text-primary hover:underline"
-                            >
-                              Forgot password?
-                            </button>
-                          }
-                        >
-                          {(p) => (
-                            <Input
-                              {...p}
-                              type="password"
-                              autoComplete="current-password"
-                              placeholder="••••••••"
-                              value={password}
-                              onChange={edit('password', setPassword)}
-                              required
-                            />
-                          )}
-                        </Field>
-                      )
-                    )}
-
-                    {error && (
-                      <p
-                        role="alert"
-                        className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                      <Field
+                        label="Confirm password"
+                        name="confirm_password"
+                        error={errors.confirm_password}
                       >
-                        {error}
-                      </p>
-                    )}
-
-                    <Button type="submit" disabled={busy} className="mt-1 w-full">
-                      {busy
-                        ? 'Please wait…'
-                        : isForgot
-                          ? 'Send reset link'
-                          : isRegister
-                            ? 'Create account'
-                            : 'Sign in'}
-                    </Button>
-                  </form>
-
-                  {!isForgot && (
-                    <>
-                      <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-                        <span className="h-px flex-1 bg-border" />
-                        or
-                        <span className="h-px flex-1 bg-border" />
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => toast('Google sign-in is coming soon.')}
+                        {(p) => (
+                          <Input
+                            {...p}
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="••••••••"
+                            value={confirmPassword}
+                            onChange={edit('confirm_password', setConfirmPassword)}
+                            onBlur={() => {
+                              // Compared, not format-checked — only meaningful once
+                              // both boxes have something in them.
+                              if (confirmPassword && password !== confirmPassword) {
+                                setErrors((prev) => ({
+                                  ...prev,
+                                  confirm_password: 'Passwords do not match.',
+                                }))
+                              }
+                            }}
+                            required
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  ) : (
+                    !isForgot && (
+                      <Field
+                        label="Password"
+                        name="password"
+                        error={errors.password}
+                        action={
+                          <button
+                            type="button"
+                            onClick={() => switchMode('forgot')}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            Forgot password?
+                          </button>
+                        }
                       >
-                        <GoogleIcon />
-                        Continue with Google
-                      </Button>
-                    </>
+                        {(p) => (
+                          <Input
+                            {...p}
+                            type="password"
+                            autoComplete="current-password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={edit('password', setPassword)}
+                            required
+                          />
+                        )}
+                      </Field>
+                    )
                   )}
-                </CardContent>
-              </Card>
 
-              <p className="mt-4 text-center text-sm text-muted-foreground">
-                {isForgot ? (
+                  {error && (
+                    <p
+                      role="alert"
+                      className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      {error}
+                    </p>
+                  )}
+
+                  <Button type="submit" disabled={busy} className="mt-1 w-full">
+                    {busy
+                      ? 'Please wait…'
+                      : isForgot
+                        ? 'Send reset link'
+                        : isRegister
+                          ? 'Create account'
+                          : 'Sign in'}
+                  </Button>
+                </form>
+
+                {!isForgot && (
+                  <>
+                    <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="h-px flex-1 bg-border" />
+                      or
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => toast('Google sign-in is coming soon.')}
+                    >
+                      <GoogleIcon />
+                      Continue with Google
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              {isForgot ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    switchMode('signin')
+                  }}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Back to sign in
+                </button>
+              ) : (
+                <>
+                  {isRegister ? 'Already have an account?' : 'New studio?'}{' '}
                   <button
                     type="button"
                     onClick={() => {
-                      switchMode('signin')
+                      switchMode(isRegister ? 'signin' : 'register')
                     }}
                     className="font-medium text-primary hover:underline"
                   >
-                    Back to sign in
+                    {isRegister ? 'Sign in' : 'Register'}
                   </button>
-                ) : (
-                  <>
-                    {isRegister ? 'Already have an account?' : 'New studio?'}{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        switchMode(isRegister ? 'signin' : 'register')
-                      }}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {isRegister ? 'Sign in' : 'Register'}
-                    </button>
-                  </>
-                )}
-              </p>
-            </>
-          )}
-        </div>
+                </>
+              )}
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

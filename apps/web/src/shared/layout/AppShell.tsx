@@ -11,12 +11,7 @@ import { NAV, type NavEntry, type NavGroup, type NavLeaf } from './nav'
 
 type Access = ReturnType<typeof useAccess>
 
-function leafVisible(
-  leaf: NavLeaf,
-  role: string,
-  access: Access,
-  isPlatformAdmin: boolean,
-): boolean {
+function leafVisible(leaf: NavLeaf, role: string, access: Access, isPlatformAdmin: boolean): boolean {
   if (leaf.platformOnly) return isPlatformAdmin
   if (leaf.roles && !leaf.roles.includes(role as never)) return false
   if (leaf.module && !access.hasModule(leaf.module as ModuleKey)) return false
@@ -44,7 +39,8 @@ function filterNav(
   return out
 }
 
-const isActive = (pathname: string, to: string) => pathname === to || pathname.startsWith(to + '/')
+const isActive = (pathname: string, to: string) =>
+  pathname === to || pathname.startsWith(to + '/')
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { session, signOut } = useAuth()
@@ -60,10 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {mobileOpen && (
         <>
-          <div
-            className="fixed inset-0 z-40 bg-black/40 md:hidden"
-            onClick={() => setMobileOpen(false)}
-          />
+          <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} />
           <Sidebar
             entries={entries}
             onSignOut={() => void signOut()}
@@ -73,15 +66,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Sticky + translucent so long tables scroll under it rather than
-            pushing it away. Falls back to an opaque bar without backdrop-filter. */}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur-md supports-[not(backdrop-filter:blur(0px))]:bg-background">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setMobileOpen(true)}
-          >
+        <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(true)}>
             <Menu />
           </Button>
           <span className="text-xl font-bold tracking-tight">
@@ -103,15 +89,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="relative min-w-0 flex-1 p-4 md:p-6">
-          {/* A breath of the tenant accent behind the page title, fading out
-              before it reaches the content. Decorative and click-through. */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-primary/[0.055] to-transparent"
-          />
-          <div className="relative">{children}</div>
-        </main>
+        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </div>
     </div>
   )
@@ -140,13 +118,7 @@ function Sidebar({
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
         {entries.map((e) =>
           e.kind === 'leaf' ? (
-            <NavItem
-              key={e.to}
-              to={e.to}
-              label={e.label}
-              icon={e.icon}
-              active={isActive(pathname, e.to)}
-            />
+            <NavItem key={e.to} to={e.to} label={e.label} icon={e.icon} active={isActive(pathname, e.to)} />
           ) : (
             <Group key={e.label} group={e} pathname={pathname} />
           ),
@@ -185,13 +157,7 @@ function Group({ group, pathname }: { group: NavGroup; pathname: string }) {
       {open && (
         <div className="mt-0.5 ml-4 space-y-0.5 border-l border-border pl-2">
           {group.children.map((c) => (
-            <NavItem
-              key={c.to}
-              to={c.to}
-              label={c.label}
-              icon={c.icon}
-              active={isActive(pathname, c.to)}
-            />
+            <NavItem key={c.to} to={c.to} label={c.label} icon={c.icon} active={isActive(pathname, c.to)} />
           ))}
         </div>
       )}
