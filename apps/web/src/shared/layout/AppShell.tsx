@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
 import { Menu, Moon, Sun, LogOut, ChevronDown, ChevronsLeft, ChevronsRight, X } from 'lucide-react'
 import type { ModuleKey } from '@ipc/permissions'
@@ -12,6 +12,29 @@ import { NAV, type NavEntry, type NavGroup, type NavLeaf } from './nav'
 type Access = ReturnType<typeof useAccess>
 
 const COLLAPSE_KEY = 'ipc.sidebar.collapsed'
+const GROUPS_KEY = 'ipc.sidebar.groups'
+
+/**
+ * Which nav groups are open, remembered across mounts.
+ *
+ * Every route wraps itself in AuthedPage → AppShell, so the whole sidebar
+ * unmounts and rebuilds on each navigation. Local state would reset to the
+ * default on every click — collapse a group, open something inside it, and it
+ * springs back open. Storage outlives the remount; so does the scroll position
+ * below, for the same reason.
+ */
+function readOpenGroups(): Record<string, boolean> {
+  try {
+    const raw = globalThis.localStorage?.getItem(GROUPS_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** How far the nav was scrolled, so a remount doesn't jump back to the top. */
+let navScrollTop = 0
 
 function leafVisible(leaf: NavLeaf, role: string, access: Access, isPlatformAdmin: boolean): boolean {
   if (leaf.platformOnly) return isPlatformAdmin
@@ -78,12 +101,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(
     () => globalThis.localStorage?.getItem(COLLAPSE_KEY) === '1',
   )
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readOpenGroups)
   const role = session?.role ?? 'none'
   const entries = filterNav(NAV, role, access, session?.is_platform_admin ?? false)
 
   useEffect(() => {
     globalThis.localStorage?.setItem(COLLAPSE_KEY, collapsed ? '1' : '0')
   }, [collapsed])
+
+  const toggleGroup = useCallback((label: string) => {
+    setOpenGroups((groups) => {
+      const next = { ...groups, [label]: !(groups[label] ?? true) }
+      try {
+        globalThis.localStorage?.setItem(GROUPS_KEY, JSON.stringify(next))
+      } catch {
+        // A blocked localStorage costs the preference, not the navigation.
+      }
+      return next
+    })
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-background print:block print:h-auto print:overflow-visible">
@@ -92,6 +128,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         onSignOut={() => void signOut()}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((c) => !c)}
+        openGroups={openGroups}
+        onToggleGroup={toggleGroup}
         className="hidden md:flex"
       />
 
@@ -103,6 +141,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             onSignOut={() => void signOut()}
             collapsed={false}
             onClose={() => setMobileOpen(false)}
+            openGroups={openGroups}
+            onToggleGroup={toggleGroup}
             className="fixed inset-y-0 left-0 z-50 flex md:hidden"
           />
         </>
@@ -144,6 +184,8 @@ function Sidebar({
   collapsed,
   onToggleCollapse,
   onClose,
+  openGroups,
+  onToggleGroup,
   className,
 }: {
   entries: NavEntry[]
@@ -151,10 +193,19 @@ function Sidebar({
   collapsed: boolean
   onToggleCollapse?: () => void
   onClose?: () => void
+  openGroups: Record<string, boolean>
+  onToggleGroup: (label: string) => void
   className?: string
 }) {
   const { pathname } = useLocation()
   const active = activeTarget(entries, pathname)
+  const navRef = useRef<HTMLElement>(null)
+
+  // Restore the scroll offset this sidebar had before the route change tore it
+  // down, so clicking a link near the bottom doesn't fling the menu to the top.
+  useEffect(() => {
+    if (navRef.current) navRef.current.scrollTop = navScrollTop
+  }, [])
   return (
     <aside
       className={cn(
@@ -206,7 +257,13 @@ function Sidebar({
         </p>
       )}
 
-      <nav className={cn('flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3', collapsed && 'px-2 pt-3')}>
+      <nav
+        ref={navRef}
+        onScroll={(e) => {
+          navScrollTop = e.currentTarget.scrollTop
+        }}
+        className={cn('flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3', collapsed && 'px-2 pt-3')}
+      >
         {entries.map((e) =>
           e.kind === 'leaf' ? (
             <NavItem
@@ -223,6 +280,8 @@ function Sidebar({
               group={e}
               active={active}
               collapsed={collapsed}
+              open={openGroups[e.label] ?? true}
+              onToggle={() => onToggleGroup(e.label)}
               onExpand={onToggleCollapse}
             />
           ),
@@ -251,15 +310,18 @@ function Group({
   group,
   active,
   collapsed,
+  open,
+  onToggle,
   onExpand,
 }: {
   group: NavGroup
   active: string | null
   collapsed: boolean
+  open: boolean
+  onToggle: () => void
   onExpand?: (() => void) | undefined
 }) {
   const hasActive = group.children.some((c) => c.to === active)
-  const [open, setOpen] = useState(true)
   const Icon = group.icon
 
   // Collapsed: the group icon is a stub — clicking it reopens the rail with the
@@ -270,10 +332,10 @@ function Group({
         type="button"
         onClick={() => {
           if (collapsed) {
-            setOpen(true)
+            if (!open) onToggle()
             onExpand?.()
           } else {
-            setOpen((o) => !o)
+            onToggle()
           }
         }}
         title={collapsed ? group.label : undefined}
