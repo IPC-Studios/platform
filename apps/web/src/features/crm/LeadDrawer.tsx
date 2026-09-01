@@ -31,7 +31,7 @@ const QUICK_DATES: ReadonlyArray<{ label: string; days: number }> = [
  * phone calls, not filled in like a form.
  */
 export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => void }) {
-  const update = useUpdateLead()
+  const update = useUpdateLead('Lead updated')
   const { data: leads } = useLeads()
   const [notes, setNotes] = useState(lead.notes ?? '')
   const [followUp, setFollowUp] = useState(toLocalInput(lead.follow_up_at))

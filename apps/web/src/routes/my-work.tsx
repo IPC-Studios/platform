@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, ExternalLink } from 'lucide-react'
 import { workSubmission, type SubmitWorkRequest, z } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -36,7 +37,10 @@ function useSubmitWork() {
         body: input,
         responseSchema: z.object({ id: z.string() }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['work', 'submissions'] }),
+    onSuccess: () => {
+      toast.success('Work submitted')
+      void qc.invalidateQueries({ queryKey: ['work', 'submissions'] })
+    },
   })
 }
 

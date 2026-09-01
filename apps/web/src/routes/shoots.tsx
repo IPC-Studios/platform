@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Camera, Plus, MapPin } from 'lucide-react'
 import { shootListItem, z, type CreateShootRequest, type ShootStatus } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -99,7 +100,10 @@ function ShootDialog() {
   const create = useMutation({
     mutationFn: (input: CreateShootRequest) =>
       callApi('/shoots', { method: 'POST', body: input, responseSchema: z.object({ id: z.string() }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['shoots'] }),
+    onSuccess: () => {
+      toast.success('Shoot added')
+      void qc.invalidateQueries({ queryKey: ['shoots'] })
+    },
   })
   const [open, setOpen] = useState(false)
   const [projectId, setProjectId] = useState('')

@@ -16,6 +16,7 @@ import { useInvoices } from '@/features/billing/api'
 import { useDataRecords } from '@/features/data/api'
 import { useBoard } from '@/features/tasks/api'
 import { buildJourney } from '@/features/onboarding/journey'
+import { dashboardSections } from '@/features/onboarding/dashboard-sections'
 import { SetupJourney } from '@/features/onboarding/SetupJourney'
 
 export function DashboardPage() {
@@ -75,6 +76,16 @@ function DashboardInner() {
     (m) => access.hasModule(m),
   )
   const showJourney = isSetupAudience && journeyReady && !journey.allDone
+  const sections = dashboardSections(
+    {
+      activeProjects,
+      clients: clientCount,
+      teamMembers: teamCount,
+      outstanding,
+      recentProjects: recent.length,
+    },
+    showJourney,
+  )
 
   return (
     <>
@@ -96,6 +107,7 @@ function DashboardInner() {
         <SetupJourney steps={journey.steps} completed={journey.completed} total={journey.total} />
       )}
 
+      {sections.stats && (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {access.hasModule('projects') && (
           <StatCard label="Active projects" value={activeProjects} icon={FolderKanban} />
@@ -108,8 +120,9 @@ function DashboardInner() {
           <StatCard label="Outstanding" value={formatINR(outstanding)} icon={Receipt} />
         )}
       </div>
+      )}
 
-      {access.hasModule('projects') && (
+      {access.hasModule('projects') && sections.recentProjects && (
         <Card className="mt-6">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Recent projects</CardTitle>
