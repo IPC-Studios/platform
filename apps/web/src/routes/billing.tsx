@@ -10,6 +10,8 @@ import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/d
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { RecordCard, RecordCards } from '@/shared/ui/record-card'
+import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
@@ -29,6 +31,7 @@ export function BillingPage() {
 
 function Billing() {
   const { data, isLoading, isError, refetch } = useInvoices()
+  const isMobile = useIsMobile()
 
   return (
     <>
@@ -74,7 +77,33 @@ function Billing() {
           </Card>
         </div>
 
-        <div className="mt-6 table-wrap rounded-lg border border-border">
+        <div className="mt-6">
+        {isMobile ? (
+          <RecordCards>
+            {data.map((inv) => (
+              <RecordCard
+                key={inv.id}
+                title={
+                  <Link to="/billing/invoices/$id" params={{ id: inv.id }} className="hover:underline">
+                    {inv.invoice_number}
+                  </Link>
+                }
+                subtitle={`${inv.client_name ?? '—'} · ${inv.invoice_date}`}
+                badge={<StatusBadge tone={TONE[inv.status]}>{humanize(inv.status)}</StatusBadge>}
+                fields={[
+                  { label: 'Total', value: formatINR(inv.total) },
+                  { label: 'Balance', value: formatINR(inv.balance_due), strong: true },
+                ]}
+                actions={
+                  inv.balance_due > 0 ? (
+                    <PaymentDialog invoiceId={inv.id} balance={inv.balance_due} />
+                  ) : undefined
+                }
+              />
+            ))}
+          </RecordCards>
+        ) : (
+        <div className="table-wrap rounded-lg border border-border">
           <table className="table-sticky w-full text-sm">
             <thead className="bg-muted/50 text-left text-muted-foreground">
               <tr>
@@ -109,6 +138,8 @@ function Billing() {
               ))}
             </tbody>
           </table>
+        </div>
+        )}
         </div>
         </>
       )}

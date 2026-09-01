@@ -8,6 +8,8 @@ import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/d
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { RecordCard, RecordCards } from '@/shared/ui/record-card'
+import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
@@ -24,6 +26,7 @@ export function CompanyExpensesPage() {
 
 function Expenses() {
   const { data, isLoading, isError, refetch } = useExpenses()
+  const isMobile = useIsMobile()
   const total = (data ?? []).reduce((s, e) => s + e.amount, 0)
 
   return (
@@ -66,7 +69,30 @@ function Expenses() {
           </Card>
         </div>
 
-        <div className="mt-6 table-wrap rounded-lg border border-border">
+        <div className="mt-6">
+        {isMobile ? (
+          <RecordCards>
+            {data.map((e) => (
+              <RecordCard
+                key={e.id}
+                title={
+                  <span className="flex items-center gap-2">
+                    <Wallet className="size-4 text-muted-foreground" />
+                    {e.category ?? '—'}
+                  </span>
+                }
+                subtitle={e.description ?? '—'}
+                badge={e.is_fixed_overhead ? <StatusBadge tone="info">overhead</StatusBadge> : undefined}
+                fields={[
+                  { label: 'Date', value: e.expense_date },
+                  { label: 'GST', value: humanize(e.gst_treatment) },
+                  { label: 'Amount', value: formatINR(e.amount), strong: true },
+                ]}
+              />
+            ))}
+          </RecordCards>
+        ) : (
+        <div className="table-wrap rounded-lg border border-border">
           <table className="table-sticky w-full text-sm">
             <thead className="bg-muted/50 text-left text-muted-foreground">
               <tr>
@@ -95,6 +121,8 @@ function Expenses() {
               ))}
             </tbody>
           </table>
+        </div>
+        )}
         </div>
         </>
       )}

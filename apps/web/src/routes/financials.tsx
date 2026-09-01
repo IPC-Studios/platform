@@ -7,6 +7,8 @@ import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { RecordCard, RecordCards } from '@/shared/ui/record-card'
+import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR } from '@/shared/ui/format'
 import { useProjectFinancials } from '@/features/financials/api'
 
@@ -20,6 +22,7 @@ export function FinancialsPage() {
 
 function Financials() {
   const { data, isLoading, isError, refetch } = useProjectFinancials()
+  const isMobile = useIsMobile()
 
   if (isLoading) return <LoadingState />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
@@ -86,7 +89,30 @@ function Financials() {
         </Card>
       </div>
 
-      <div className="mt-6 table-wrap rounded-lg border border-border">
+      <div className="mt-6">
+      {isMobile ? (
+        <RecordCards>
+          {data.map((p) => (
+            <RecordCard
+              key={p.project_id}
+              title={p.name}
+              badge={
+                <span
+                  className={`font-semibold tabular-nums ${p.gross_profit < 0 ? 'text-destructive' : 'text-success'}`}
+                >
+                  {formatINR(p.gross_profit)}
+                </span>
+              }
+              fields={[
+                { label: 'Revenue', value: formatINR(p.revenue) },
+                { label: 'Team cost', value: formatINR(p.direct_team_cost) },
+                { label: 'Expenses', value: formatINR(p.project_expenses) },
+              ]}
+            />
+          ))}
+        </RecordCards>
+      ) : (
+      <div className="table-wrap rounded-lg border border-border">
         <table className="table-sticky w-full text-sm">
           <thead className="bg-muted/50 text-left text-muted-foreground">
             <tr>
@@ -111,6 +137,8 @@ function Financials() {
             ))}
           </tbody>
         </table>
+      </div>
+      )}
       </div>
     </>
   )
