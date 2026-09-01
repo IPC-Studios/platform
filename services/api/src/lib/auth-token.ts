@@ -44,3 +44,17 @@ export function hashPassword(password: string): Promise<string> {
 export function verifyPassword(password: string, hash: string): Promise<boolean> {
   return Bun.password.verify(password, hash)
 }
+
+/**
+ * Hex SHA-256. Invitation tokens are stored as their digest so a database read
+ * never yields a usable link — the raw value exists only in the email we send.
+ */
+export async function sha256Hex(raw: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** A 72-char opaque token: two uuids, the same shape the SQL side generates. */
+export function newRawToken(): string {
+  return crypto.randomUUID() + crypto.randomUUID()
+}

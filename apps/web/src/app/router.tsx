@@ -10,6 +10,7 @@ import {
 import { LoginPage } from '@/routes/login'
 import { VerifyEmailPage } from '@/routes/verify'
 import { ResetPasswordPage } from '@/routes/reset-password'
+import { AcceptInvitePage } from '@/routes/accept-invite'
 import { DashboardPage } from '@/routes/dashboard'
 import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
@@ -30,6 +31,7 @@ import { NotificationsPage } from '@/routes/notifications'
 import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
 import { SettingsPage } from '@/routes/settings'
+import { RolesAccessPage } from '@/routes/settings/roles'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
@@ -48,6 +50,7 @@ const routeTree = rootRoute.addChildren([
   route('/login', LoginPage),
   route('/verify', VerifyEmailPage),
   route('/reset-password', ResetPasswordPage),
+  route('/accept-invite', AcceptInvitePage),
   route('/terms/acknowledge', TermsAcknowledgePage),
   route('/dashboard', DashboardPage),
 
@@ -76,6 +79,7 @@ const routeTree = rootRoute.addChildren([
   route('/financials', FinancialsPage),
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
+  route('/settings/roles', RolesAccessPage),
   route('/settings/subscription', SubscriptionPage),
   route('/platform/studios', PlatformStudiosPage),
   route('/platform/usage', PlatformUsagePage),

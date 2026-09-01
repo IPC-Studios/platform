@@ -21,6 +21,7 @@ import {
   Users,
   Clock,
   Settings,
+  ShieldCheck,
   Building2,
   type LucideIcon,
 } from 'lucide-react'
@@ -125,6 +126,7 @@ export const NAV: NavEntry[] = [
     children: [
       leaf('Team Directory', '/employees', Users, { module: 'team_directory' }),
       leaf('Attendance', '/attendance', Clock, { module: 'attendance' }),
+      leaf('Roles & Access', '/settings/roles', ShieldCheck, { module: 'team_roles' }),
     ],
   },
 

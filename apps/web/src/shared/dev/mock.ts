@@ -50,6 +50,44 @@ export const mockSession: SessionState = {
   permissions: [],
 }
 
+/** Directory rows carry a lot of nullable columns; only name the ones that vary. */
+function member(
+  user_id: string,
+  name: string,
+  email: string | null,
+  role: string,
+  over: Partial<{
+    phone: string | null
+    alternate_phone: string | null
+    status: string
+    engagement_type: string | null
+    login_enabled: boolean
+    salary: number | null
+    address: string | null
+    created_at: string
+    role_ids: string[]
+    role_names: string[]
+  }> = {},
+) {
+  return {
+    user_id,
+    name,
+    email,
+    role,
+    phone: null,
+    alternate_phone: null,
+    status: 'active',
+    engagement_type: null,
+    login_enabled: true,
+    salary: null,
+    address: null,
+    created_at: '2026-05-01T10:00:00Z',
+    role_ids: [],
+    role_names: [],
+    ...over,
+  }
+}
+
 const clients: Client[] = [
   fakeClient(CLIENT.sharma, 'Sharma Family', '9876543210'),
   fakeClient(CLIENT.verma, 'Verma Weddings', '9812345678'),
@@ -130,9 +168,45 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && /^\/projects\/[^/]+\/(deliverables|payments)$/.test(path)) return {}
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
-  if (method === 'GET' && path === '/team/directory') return directory
+  if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'GET' && path === '/team/roles') return atStage(employeeRoles, 'partial')
+  if (method === 'POST' && path === '/team/roles')
+    return { id: uid(0xfa), type_name: 'New Role', role_code: 'new_role', member_count: 0 }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/team/roles/')) return { ok: true }
+  if (method === 'PATCH' && /^\/team\/members\/[^/]+\/roles$/.test(path)) return { ok: true }
   if (method === 'POST' && path === '/team/members')
-    return { user_id: uid(0xd5), temp_password: 'Xy8kLm2Qp4A1!' }
+    return { user_id: uid(0xd5), temp_password: null }
+  if ((method === 'PATCH' || method === 'DELETE') && /^\/team\/members\/[^/]+$/.test(path))
+    return { ok: true }
+  if (method === 'GET' && path === '/team/invitations') return atStage(invitations, 'partial')
+  if (method === 'POST' && path === '/team/invitations')
+    return {
+      id: uid(0xfb),
+      invite_link: 'http://localhost:5173/accept-invite?token=mock-invite-token',
+      expires_at: '2026-09-08T10:00:00Z',
+    }
+  if (method === 'POST' && /^\/team\/invitations\/[^/]+\/resend$/.test(path))
+    return {
+      id: uid(0xfb),
+      invite_link: 'http://localhost:5173/accept-invite?token=mock-invite-token-2',
+      expires_at: '2026-09-08T10:00:00Z',
+    }
+  if (method === 'DELETE' && path.startsWith('/team/invitations/')) return { ok: true }
+  if (method === 'GET' && path.startsWith('/auth/invite'))
+    return {
+      email: 'meera@crew.in',
+      name: 'Meera Iyer',
+      company_name: 'Demo Studio',
+      role: 'employee',
+      expires_at: '2026-09-06T10:00:00Z',
+    }
+  if (method === 'POST' && path === '/auth/accept-invite')
+    return {
+      access_token: 'mock-token',
+      refresh_token: 'mock-refresh',
+      token_type: 'bearer',
+      expires_in: 1800,
+    }
   if (method === 'GET' && path === '/settings/company') return companyFx
   if (method === 'PATCH' && path === '/settings/company') return companyFx
   if (method === 'GET' && path === '/settings/theme') return { ...themeState }
@@ -598,38 +672,65 @@ const companyFx = {
   invoice_gst_number: '27ABCDE1234F1Z5',
 }
 
+const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
+
+const employeeRoles = [
+  { id: ROLE.photographer, type_name: 'Photographer', role_code: 'photographer', member_count: 2 },
+  { id: ROLE.editor, type_name: 'Editor', role_code: 'editor', member_count: 1 },
+  { id: ROLE.drone, type_name: 'Drone Operator', role_code: 'drone_operator', member_count: 1 },
+]
+
+/** One of each shape the directory has to render: owner, staff, freelancer, no-login. */
 const directory = [
-  {
-    user_id: uid(0x1),
-    name: 'Demo Owner',
-    email: 'owner@demostudio.in',
-    role: 'super_admin',
+  member(uid(0x1), 'Demo Owner', 'owner@demostudio.in', 'super_admin', {
     phone: '9800000000',
-    status: 'active',
-  },
-  {
-    user_id: uid(0xe1),
-    name: 'Rahul Sharma',
-    email: 'rahul@demostudio.in',
-    role: 'employee',
+    engagement_type: 'in_house',
+    created_at: '2026-05-01T10:00:00Z',
+  }),
+  member(uid(0xe1), 'Rahul Sharma', 'rahul@demostudio.in', 'employee', {
     phone: '9811111111',
-    status: 'active',
-  },
-  {
-    user_id: uid(0xe2),
-    name: 'Anita Desai',
-    email: 'anita@demostudio.in',
-    role: 'employee',
-    phone: null,
-    status: 'active',
-  },
-  {
-    user_id: uid(0xe3),
-    name: 'Sana Khan',
-    email: 'sana@demostudio.in',
-    role: 'manager',
+    engagement_type: 'in_house',
+    salary: 45000,
+    role_ids: [ROLE.photographer],
+    role_names: ['Photographer'],
+    created_at: '2026-05-14T10:00:00Z',
+  }),
+  member(uid(0xe2), 'Anita Desai', 'anita@demostudio.in', 'employee', {
+    engagement_type: 'freelancer',
+    salary: 12000,
+    role_ids: [ROLE.photographer, ROLE.drone],
+    role_names: ['Drone Operator', 'Photographer'],
+    created_at: '2026-06-02T10:00:00Z',
+  }),
+  member(uid(0xe3), 'Sana Khan', 'sana@demostudio.in', 'manager', {
     phone: '9833333333',
-    status: 'active',
+    alternate_phone: '9822222222',
+    engagement_type: 'in_house',
+    salary: 68000,
+    role_ids: [ROLE.editor],
+    role_names: ['Editor'],
+    created_at: '2026-06-20T10:00:00Z',
+  }),
+  member(uid(0xe4), 'Imran Qureshi', null, 'employee', {
+    phone: '9844444444',
+    engagement_type: 'freelancer',
+    login_enabled: false,
+    status: 'inactive',
+    created_at: '2026-07-11T10:00:00Z',
+  }),
+]
+
+const invitations = [
+  {
+    id: uid(0xf9),
+    email: 'meera@crew.in',
+    name: 'Meera Iyer',
+    role: 'employee',
+    expires_at: '2026-09-06T10:00:00Z',
+    created_at: '2026-08-30T10:00:00Z',
+    last_sent_at: '2026-08-30T10:00:00Z',
+    send_count: 1,
+    expired: false,
   },
 ]
 

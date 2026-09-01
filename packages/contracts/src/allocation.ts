@@ -36,27 +36,4 @@ export const teamMember = z.object({
 })
 export type TeamMember = z.infer<typeof teamMember>
 
-/** Full directory row. */
-export const directoryMember = z.object({
-  user_id: uuid,
-  name: z.string(),
-  email: z.string(),
-  role: z.string(),
-  phone: z.string().nullable(),
-  status: z.string(),
-})
-export type DirectoryMember = z.infer<typeof directoryMember>
-
-export const addMemberRequest = z.object({
-  name: z.string().trim().min(2).max(120),
-  email: z.string().trim().email(),
-  role: z.enum(['admin', 'manager', 'employee']).default('employee'),
-  phone: z.string().trim().max(20).optional(),
-})
-export type AddMemberRequest = z.infer<typeof addMemberRequest>
-
-/** Response includes a one-time temp password for the owner to share. */
-export const addMemberResponse = z.object({
-  user_id: uuid,
-  temp_password: z.string(),
-})
+// The directory row, add-member payload and invitations live in ./team.

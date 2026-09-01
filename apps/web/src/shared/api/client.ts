@@ -27,6 +27,8 @@ const UNAUTHENTICATED_PATHS = new Set([
   '/auth/forgot-password',
   '/auth/reset-password',
   '/auth/resend-verification',
+  '/auth/invite',
+  '/auth/accept-invite',
 ])
 
 /**
@@ -132,7 +134,8 @@ export async function callApi<TOut extends z.ZodTypeAny>(
   // /auth/refresh must not recurse). Authenticated /auth/* routes are NOT
   // exempt: skipping rotation on /auth/logout-all turned "sign out everywhere"
   // into a silent no-op for any tab idle past the access-token TTL.
-  const canRotate = !UNAUTHENTICATED_PATHS.has(path)
+  // Match on the path alone: /auth/invite carries the token as a query string.
+  const canRotate = !UNAUTHENTICATED_PATHS.has(path.split('?')[0]!)
   if (res.status === 401 && canRotate && (await rotateTokens())) {
     res = await send()
   }

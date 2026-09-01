@@ -11,6 +11,8 @@ import {
   resetPasswordRequest,
   refreshRequest,
   logoutRequest,
+  acceptInvitationRequest,
+  invitationPreview,
   authToken,
   sessionState,
   type AuthToken,
@@ -219,6 +221,50 @@ export const authRouter = new Hono<AppEnv>()
     // Reset proves mailbox control → sign them straight in. Every session issued
     // before it now carries a stale password_version and is refused.
     return c.json(await signIn(c.env, uid))
+  })
+
+  // ── Invitations ─────────────────────────────────────────────
+  // Both halves are public: the invitee has no session until they accept. The
+  // token in the link is the only credential, and it is matched against a hash.
+  .get('/invite', async (c) => {
+    const token = c.req.query('token')
+    if (!token) fail(422, 'This invitation link is incomplete.')
+
+    const [row] = await withService(
+      c.env,
+      (sql) => sql<
+        { email: string; name: string; company_name: string; role: string; expires_at: string }[]
+      >`select * from peek_user_invitation(${token})`,
+    ).catch(() => [])
+    if (!row) fail(404, 'This invitation is invalid, revoked, or has expired.')
+
+    return c.json(invitationPreview.parse(row))
+  })
+
+  .post('/accept-invite', async (c) => {
+    const parsed = acceptInvitationRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please choose a password of at least 6 characters.')
+
+    // Hash first, then consume: the SQL side creates the identity and the tenant
+    // row in one transaction, so a failure leaves no half-built member behind.
+    const pwHash = await hashPassword(parsed.data.password)
+    let uid: string | null
+    try {
+      uid = await withService(c.env, async (sql) => {
+        const [r] = await sql<{ uid: string | null }[]>`
+          select consume_user_invitation(${parsed.data.token}, ${pwHash}) as uid`
+        return r?.uid ?? null
+      })
+    } catch (e) {
+      if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
+        fail(409, 'An account with this email already exists. Please sign in instead.')
+      }
+      fail(400, 'We could not accept this invitation. Please ask for a new link.')
+    }
+    if (!uid!) fail(400, 'This invitation is invalid, revoked, or has expired.')
+
+    // Following the link proves mailbox control, so acceptance signs them in.
+    return c.json(await signIn(c.env, uid!))
   })
 
   .post('/refresh', async (c) => {

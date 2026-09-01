@@ -60,6 +60,33 @@ export function sendPasswordResetEmail(env: Env, to: string, link: string): Prom
   )
 }
 
+/**
+ * The studio's name leads, not ours: to the invitee this is "Sharma Studios
+ * added me", and an email that opens with a vendor they've never heard of reads
+ * like phishing.
+ */
+export function sendInvitationEmail(
+  env: Env,
+  to: string,
+  link: string,
+  companyName: string,
+): Promise<void> {
+  return send(
+    env,
+    to,
+    `${companyName} invited you to IPC Studios`,
+    brandedHtml({
+      title: `Join ${companyName}`,
+      preheader: `${companyName} added you to their studio on IPC Studios.`,
+      body: `${companyName} has added you to their team. Set a password to open your dashboard and see the work assigned to you.`,
+      cta: 'Accept invitation',
+      link,
+      footer:
+        "This invitation expires in 7 days. If you weren't expecting it, you can ignore this email.",
+    }),
+  )
+}
+
 interface MailCopy {
   title: string
   preheader: string

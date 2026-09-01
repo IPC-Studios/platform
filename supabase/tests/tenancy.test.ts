@@ -57,6 +57,7 @@ async function freshDb() {
   await db.exec(mig('0023_password_version.sql'))
   await db.exec(mig('0024_refresh_tokens.sql'))
   await db.exec(mig('0025_session_hardening.sql'))
+  await db.exec(mig('0026_team_directory.sql'))
   return db
 }
 
@@ -1359,5 +1360,151 @@ describe('refresh tokens (0024)', () => {
 
     expect(await liveCount()).toBe(0)
     expect(bumped.rows[0]!.v).toBe(before.rows[0]!.v + 1)
+  })
+})
+
+describe('team directory + invitations (0026)', () => {
+  let db: PGlite
+  const owner = '77777777-7777-7777-7777-777777777777'
+  let companyId: string
+  let roleId: string
+
+  /** Insert a pending invitation and return its id. */
+  const invite = async (email: string, raw: string) => {
+    const r = await db.query<{ id: string }>(
+      `insert into user_invitations (company_id, email, token_hash, role, pending_name,
+         pending_phone, pending_salary, pending_engagement_type, pending_role_ids, expires_at)
+       values ('${companyId}', '${email}',
+         encode(sha256(convert_to('${raw}', 'UTF8')), 'hex'), 'employee', 'Ravi Kumar',
+         '9876543210', 42000, 'freelancer', array['${roleId}']::uuid[], now() + interval '7 days')
+       returning id;`,
+    )
+    return r.rows[0]!.id
+  }
+
+  const consume = async (raw: string, hash = 'argon2-invitee') =>
+    (
+      await db.query<{ uid: string | null }>(
+        `select consume_user_invitation('${raw}', '${hash}') as uid;`,
+      )
+    ).rows[0]!.uid
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@team.test');`)
+    await asUser(db, owner)
+    const c = await db.query<{ company_id: string }>(
+      `select company_id from register_company_and_admin('Team Studio','Owner');`,
+    )
+    companyId = c.rows[0]!.company_id
+    const r = await db.query<{ id: string }>(
+      `insert into employee_roles (company_id, type_name, role_code)
+       values ('${companyId}', 'Photographer', 'photographer') returning id;`,
+    )
+    roleId = r.rows[0]!.id
+  })
+
+  it('a directory-only member needs no email and no password', async () => {
+    await db.exec(
+      `insert into auth.users (id, email, encrypted_password)
+       values ('88888888-8888-8888-8888-888888888888', null, null);`,
+    )
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email, phone, engagement_type, login_enabled)
+       values ('88888888-8888-8888-8888-888888888888', '${companyId}', 'employee',
+               'Offline Crew', null, '9000000000', 'freelancer', false);`,
+    )
+    const r = await db.query<{ login_enabled: boolean; email: string | null }>(
+      `select login_enabled, email from users where name = 'Offline Crew';`,
+    )
+    expect(r.rows[0]!.login_enabled).toBe(false)
+    expect(r.rows[0]!.email).toBeNull()
+  })
+
+  it('engagement_type only accepts the two the wizard offers', async () => {
+    await expect(
+      db.exec(
+        `update users set engagement_type = 'contractor' where user_id = '${owner}';`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('peek shows the invite without leaking the salary', async () => {
+    const raw = 'raw-token-peek'
+    await invite('ravi@crew.test', raw)
+    const r = await db.query<Record<string, unknown>>(
+      `select * from peek_user_invitation('${raw}');`,
+    )
+    expect(r.rows[0]!.email).toBe('ravi@crew.test')
+    expect(r.rows[0]!.company_name).toBe('Team Studio')
+    expect(Object.keys(r.rows[0]!)).not.toContain('pending_salary')
+  })
+
+  it('consume creates the identity, the member row and their job roles', async () => {
+    const raw = 'raw-token-consume'
+    const id = await invite('meera@crew.test', raw)
+    const uid = await consume(raw)
+    expect(uid).toBeTruthy()
+
+    const m = await db.query<{
+      name: string
+      company_id: string
+      salary: number
+      engagement_type: string
+      status: string
+    }>(`select name, company_id, salary, engagement_type, status from users where user_id = '${uid}';`)
+    expect(m.rows[0]!.name).toBe('Ravi Kumar')
+    expect(m.rows[0]!.company_id).toBe(companyId)
+    expect(Number(m.rows[0]!.salary)).toBe(42000)
+    expect(m.rows[0]!.engagement_type).toBe('freelancer')
+    expect(m.rows[0]!.status).toBe('active')
+
+    // Acceptance proves mailbox control, so the account is usable immediately.
+    const a = await db.query<{ verified: boolean; pw: string }>(
+      `select email_verified as verified, encrypted_password as pw from auth.users where id = '${uid}';`,
+    )
+    expect(a.rows[0]!.verified).toBe(true)
+    expect(a.rows[0]!.pw).toBe('argon2-invitee')
+
+    const roles = await db.query(
+      `select 1 from employee_role_assignments where user_id = '${uid}' and role_id = '${roleId}';`,
+    )
+    expect(roles.rows.length).toBe(1)
+
+    const inv = await db.query<{ accepted_at: string | null }>(
+      `select accepted_at from user_invitations where id = '${id}';`,
+    )
+    expect(inv.rows[0]!.accepted_at).not.toBeNull()
+  })
+
+  it('a token is one-time, and a dead one peeks as nothing', async () => {
+    const raw = 'raw-token-replay'
+    await invite('once@crew.test', raw)
+    expect(await consume(raw)).toBeTruthy()
+    expect(await consume(raw)).toBeNull()
+    const peek = await db.query(`select * from peek_user_invitation('${raw}');`)
+    expect(peek.rows.length).toBe(0)
+  })
+
+  it('expired and revoked invitations are refused', async () => {
+    const expired = 'raw-token-expired'
+    const id = await invite('late@crew.test', expired)
+    await db.exec(
+      `update user_invitations set expires_at = now() - interval '1 day' where id = '${id}';`,
+    )
+    expect(await consume(expired)).toBeNull()
+
+    const revoked = 'raw-token-revoked'
+    const rid = await invite('gone@crew.test', revoked)
+    await db.exec(`update user_invitations set revoked_at = now() where id = '${rid}';`)
+    expect(await consume(revoked)).toBeNull()
+  })
+
+  it('only one live invitation per address, and revoking frees the address', async () => {
+    await invite('dup@crew.test', 'raw-dup-1')
+    await expect(invite('dup@crew.test', 'raw-dup-2')).rejects.toThrow()
+
+    await db.exec(`update user_invitations set revoked_at = now() where email = 'dup@crew.test';`)
+    await expect(invite('dup@crew.test', 'raw-dup-3')).resolves.toBeTruthy()
   })
 })
