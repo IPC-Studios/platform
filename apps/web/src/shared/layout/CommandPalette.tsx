@@ -139,10 +139,19 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     return [...pages, ...clientCmds, ...projectCmds, ...teamCmds]
   }, [clients.data, projects.data, team.data, session, access])
 
-  const results = useMemo(() => rankBy(query, commands, (c) => c.label, 12), [query, commands])
+  const results = useMemo(() => {
+    const ranked = rankBy(query, commands, (c) => c.label, 12)
+    // Keep each group contiguous. Ranking alone interleaves them, and the
+    // header logic below would then print one group's heading more than once.
+    const order: string[] = []
+    for (const c of ranked) if (!order.includes(c.group)) order.push(c.group)
+    return order.flatMap((g) => ranked.filter((c) => c.group === g))
+  }, [query, commands])
 
-  // A stale highlight can point past the end of a shorter result list.
-  useEffect(() => setActive(0), [query])
+  // A stale highlight can point past the end of a shorter result list, or at a
+  // different command entirely once the record queries resolve and re-rank —
+  // so this follows `results`, not just the text typed.
+  useEffect(() => setActive(0), [results])
 
   // Keep the highlighted row in view when arrowing past the fold.
   useEffect(() => {

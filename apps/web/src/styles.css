@@ -112,6 +112,18 @@
   main {
     padding: 0 !important;
   }
+  /* The table wrapper is a bounded scroll box on screen. Left alone it clips
+     to that box on paper, silently dropping every row past the first
+     screenful — on invoices and payroll, of all things. */
+  .table-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  /* Hover cannot happen on paper, so hover-revealed actions would print as an
+     empty column. */
+  .row-actions {
+    opacity: 1 !important;
+  }
   body {
     background: #fff;
     color: #000;
@@ -194,8 +206,11 @@ body {
 }
 
 /* Row actions are clutter on every row at once and invisible on none. They
-   appear on hover, and for anyone tabbing through, on focus. */
-@media (hover: hover) {
+   appear on hover, and for anyone tabbing through, on focus.
+   `pointer: fine` as well as `hover: hover`: a 2-in-1 in tablet mode reports
+   hover capability from its detached mouse but never delivers a hover event,
+   which would leave the actions permanently invisible yet still tappable. */
+@media (hover: hover) and (pointer: fine) {
   .row-actions {
     opacity: 0;
     transition: opacity 120ms ease;
@@ -242,6 +257,10 @@ body {
       /* Perspective lives on the card, so each one has its own vanishing
          point and a grid of them does not shear toward a shared centre. */
       transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+      /* The wrapper must carry the radius itself: the sheen below inherits it,
+         and the hover shadow is drawn on this box. Without it both render as
+         squares around a rounded card. */
+      border-radius: var(--radius-lg);
       transform-style: preserve-3d;
       transition:
         transform 220ms cubic-bezier(0.2, 0, 0, 1),
@@ -255,8 +274,9 @@ body {
         0 2px 8px -4px rgb(0 0 0 / 0.16);
     }
 
-    /* A highlight that tracks the pointer. Sits above the card's own
-       background but below its content, and never eats clicks. */
+    /* A highlight that tracks the pointer. It is a gloss, so it does lie over
+       the card's content — kept faint and pointer-events: none for that
+       reason. Its radius is inherited from .tilt-card above. */
     .tilt-card--sheen {
       position: relative;
     }

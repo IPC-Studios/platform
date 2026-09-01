@@ -37,7 +37,6 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { Avatar } from '@/shared/ui/avatar'
-import { SkeletonTable } from '@/shared/ui/skeleton'
 import { CountUp } from '@/shared/ui/count-up'
 import {
   EMPTY_FILTERS,
@@ -288,7 +287,7 @@ function TeamDashboard() {
 
       <div className="mt-4">
         {isLoading ? (
-          <SkeletonTable rows={5} columns={5} />
+          <SkeletonList rows={5} columns={5} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : shown.length === 0 ? (

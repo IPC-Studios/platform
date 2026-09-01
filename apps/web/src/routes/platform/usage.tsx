@@ -2,7 +2,7 @@ import { Building2, CheckCircle2, Users, IndianRupee } from 'lucide-react'
 import { PlatformPage } from '@/shared/layout/PlatformPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
-import { SkeletonCards } from '@/shared/ui/skeleton'
+import { SkeletonTiles } from '@/shared/ui/skeleton'
 import { ErrorState } from '@/shared/ui/states'
 import { formatINR } from '@/shared/ui/format'
 import { usePlatformUsage } from '@/features/platform/api'
@@ -18,7 +18,7 @@ export function PlatformUsagePage() {
 function Usage() {
   const { data, isLoading, isError, refetch } = usePlatformUsage()
 
-  if (isLoading) return <SkeletonCards count={3} />
+  if (isLoading) return <SkeletonTiles count={4} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
   return (

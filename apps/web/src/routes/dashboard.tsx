@@ -54,14 +54,14 @@ function DashboardInner() {
     session?.is_owner || session?.role === 'super_admin' || session?.role === 'admin'
   // Waiting on every query first — a half-loaded journey would show steps as
   // outstanding and then tick them off, which reads as work being undone.
-  const journeyReady =
-    !projects.isPending &&
-    !clients.isPending &&
-    !members.isPending &&
-    !invoices.isPending &&
-    !slots.isPending &&
-    !dataRecords.isPending &&
-    !board.isPending
+  //
+  // A FAILED query is not pending either, and its data is undefined, so every
+  // count above collapses to zero. Without this an established studio hitting
+  // a 500 is told to add its first client. Counts we could not load are not
+  // counts of zero.
+  const queries = [projects, clients, members, invoices, slots, dataRecords, board]
+  const anyFailed = queries.some((q) => q.isError)
+  const journeyReady = !queries.some((q) => q.isPending) && !anyFailed
   const journey = buildJourney(
     {
       // The owner is in the directory from registration, so they don't count.
@@ -76,6 +76,10 @@ function DashboardInner() {
     (m) => access.hasModule(m),
   )
   const showJourney = isSetupAudience && journeyReady && !journey.allDone
+  // Until the counts are real, a setup-audience viewer is shown neither the
+  // journey nor the tiles — otherwise the zeros paint first and are then
+  // pulled out from under them when the journey arrives.
+  const countsSettled = journeyReady || !isSetupAudience
   const sections = dashboardSections(
     {
       activeProjects,
@@ -84,7 +88,7 @@ function DashboardInner() {
       outstanding,
       recentProjects: recent.length,
     },
-    showJourney,
+    showJourney || !countsSettled,
   )
 
   return (

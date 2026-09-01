@@ -14,7 +14,7 @@ import type { CrmLead, LeadStatus } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
-import { SkeletonList } from '@/shared/ui/skeleton'
+import { SkeletonCards, SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Input, Select } from '@/shared/ui/input'
@@ -23,7 +23,6 @@ import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { Avatar } from '@/shared/ui/avatar'
 import { CountUp } from '@/shared/ui/count-up'
-import { SkeletonTable } from '@/shared/ui/skeleton'
 import { useDistribution, useLeads } from '@/features/crm/api'
 import { AddLeadDialog } from '@/features/crm/AddLeadDialog'
 import { LeadDrawer } from '@/features/crm/LeadDrawer'
@@ -143,7 +142,7 @@ function Crm() {
 
       <div className="mt-4">
         {isLoading ? (
-          <SkeletonTable rows={5} columns={5} />
+          <SkeletonList rows={5} columns={5} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : tab === 'inbox' ? (
@@ -690,7 +689,7 @@ function LeadCard({ lead, onOpen }: { lead: CrmLead; onOpen: (id: string) => voi
 function DistributionRules() {
   const { data, isLoading, isError, refetch } = useDistribution()
 
-  if (isLoading) return <SkeletonList rows={5} columns={6} />
+  if (isLoading) return <SkeletonCards count={4} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
 
   return (

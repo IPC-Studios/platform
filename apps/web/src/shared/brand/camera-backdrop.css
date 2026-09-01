@@ -11,9 +11,9 @@
   overflow: hidden;
   pointer-events: none;
   color: var(--foreground);
-  /* A shallow scene. The layers below sit on their own planes within it. */
-  perspective: 1000px;
-  transform-style: preserve-3d;
+  /* No perspective here: `overflow: hidden` forces the used value of
+     transform-style to flat whatever is declared, so a scene established on
+     this element cannot reach the barrel. Each .cb-layer opens its own. */
   /* Centre until the pointer says otherwise, so the first frame is not offset. */
   --cb-x: 0.5;
   --cb-y: 0.5;
@@ -28,6 +28,11 @@
 .cb-layer {
   position: absolute;
   inset: 0;
+  /* The scene lives here. Without both of these the layer is a flattening
+     boundary and every translateZ below renders orthographically — the rings
+     would separate only by their explicit scale, which is not depth. */
+  perspective: 1000px;
+  transform-style: preserve-3d;
   transform: translate3d(
     calc((var(--cb-x) - 0.5) * 2 * var(--d) * 26px),
     calc((var(--cb-y) - 0.5) * 2 * var(--d) * 26px),

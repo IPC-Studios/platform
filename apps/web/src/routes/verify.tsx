@@ -45,7 +45,7 @@ export function VerifyEmailPage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/40 p-4">
       <CameraBackdrop />
 
-      <div className="w-full max-w-sm">
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <span className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Camera className="size-6" />

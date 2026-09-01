@@ -77,6 +77,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const role = session?.role ?? 'none'
   const entries = filterNav(NAV, role, access, session?.is_platform_admin ?? false)
 
+  // The shell used to unmount on every navigation, which reset this for free.
+  // It mounts once now, so the drawer and its scrim would otherwise stay open
+  // over the page the user just navigated to.
+  useEffect(() => setMobileOpen(false), [pathname])
+
   useEffect(() => {
     globalThis.localStorage?.setItem(COLLAPSE_KEY, collapsed ? '1' : '0')
   }, [collapsed])

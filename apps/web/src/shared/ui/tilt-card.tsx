@@ -40,10 +40,13 @@ export function TiltCard({
       // hover state, so following them fights the user's own scrolling.
       if (!el || e.pointerType !== 'mouse' || prefersReducedMotion()) return
       // Never tilt the plane someone is typing on: text on a rotated surface
-      // is measurably harder to read, and the caret drifts with it. Flatten
-      // rather than returning, or the card stays stuck at whatever angle it
-      // held when the field took focus.
-      if (isTyping(el)) return flat(el)
+      // is measurably harder to read, and the caret drifts with it. Cancel
+      // first — a frame queued by the previous move would otherwise re-apply
+      // a tilt after this flattens the card.
+      if (isTyping(el)) {
+        cancelAnimationFrame(frame.current)
+        return flat(el)
+      }
 
       cancelAnimationFrame(frame.current)
       const { clientX, clientY } = e
@@ -74,6 +77,10 @@ export function TiltCard({
       ref={ref}
       onPointerMove={onPointerMove}
       onPointerLeave={reset}
+      // React's onFocus is focusin, so it bubbles from the field that was
+      // clicked. Without this, a card already tilted when a field takes focus
+      // keeps that angle until the pointer moves again.
+      onFocus={reset}
       // Focus is keyboard territory: there is no pointer to lean toward, and a
       // card that tilts on tab-in only makes the focus ring harder to place.
       onBlur={reset}

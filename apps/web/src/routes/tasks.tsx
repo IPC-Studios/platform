@@ -17,7 +17,7 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
 import { Button } from '@/shared/ui/button'
-import { SkeletonList } from '@/shared/ui/skeleton'
+import { SkeletonCards, SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
@@ -29,7 +29,6 @@ import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { AvatarGroup } from '@/shared/ui/avatar'
 import { CountUp } from '@/shared/ui/count-up'
-import { SkeletonTable } from '@/shared/ui/skeleton'
 import { useProjects } from '@/features/projects/api'
 import {
   useApplyBundle,
@@ -168,7 +167,7 @@ function Tasks() {
 
       <div className="mt-4">
         {isLoading ? (
-          <SkeletonTable rows={6} columns={6} />
+          <SkeletonList rows={6} columns={6} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : rows.length === 0 ? (
@@ -533,7 +532,7 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
           <div>
             <p className="mb-2 text-sm font-medium">Your bundles</p>
             {isLoading ? (
-              <SkeletonList rows={5} columns={7} />
+              <SkeletonCards count={3} />
             ) : !bundles || bundles.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
                 No bundles yet. Create one below.

@@ -46,9 +46,6 @@ const BOKEH = [
   { top: '44%', left: '46%', size: 110, variant: 'cb-bokeh--slower', depth: 0.35 },
 ]
 
-/** How far the nearest layer travels, corner to corner, in pixels. */
-const PARALLAX_RANGE = 26
-
 /** Rings in the lens barrel, and the gap between them in Z. */
 export const BARREL_RINGS = 7
 const RING_GAP = 64
@@ -70,17 +67,6 @@ export function barrelRing(i: number, count = BARREL_RINGS) {
     // barrel looks cut off rather than deep.
     opacity: Number((0.5 - t * 0.38).toFixed(3)),
   }
-}
-
-/**
- * How far a layer at `depth` shifts for a pointer at `pct` (0-1) across the
- * viewport. Near layers (depth 1) move most; the iris sits far back and barely
- * stirs — which is what sells the separation between them.
- */
-export function layerOffset(pct: number, depth: number, range = PARALLAX_RANGE): number {
-  if (!Number.isFinite(pct)) return 0
-  const centred = Math.min(1, Math.max(0, pct)) - 0.5
-  return Number((centred * 2 * depth * range).toFixed(2))
 }
 
 /**
