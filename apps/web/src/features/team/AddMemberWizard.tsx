@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -6,6 +6,7 @@ import { cn } from '@/shared/ui/cn'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR, humanize } from '@/shared/ui/format'
 import type { FieldErrors } from '@/shared/forms/field-errors'
+import { scrollIntoView } from '@/shared/ui/motion'
 import { useAddMember, useEmployeeRoles } from './api'
 import {
   EMPTY_DRAFT,
@@ -33,7 +34,13 @@ export function AddMemberWizard({ onDone, onCancel }: { onDone: () => void; onCa
   const [step, setStep] = useState<WizardStep>('engagement')
   const [draft, setDraft] = useState<MemberDraft>(EMPTY_DRAFT)
   const [showErrors, setShowErrors] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
   const add = useAddMember()
+
+  const goToStep = (next: WizardStep) => {
+    setStep(next)
+    scrollIntoView(cardRef.current)
+  }
 
   const set = <K extends keyof MemberDraft>(key: K, value: MemberDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -52,7 +59,7 @@ export function AddMemberWizard({ onDone, onCancel }: { onDone: () => void; onCa
     }
     setShowErrors(false)
     if (!isLast) {
-      setStep(nextStep(step))
+      goToStep(nextStep(step))
       return
     }
     add.mutate(toRequest(draft), { onSuccess: onDone })
@@ -73,9 +80,9 @@ export function AddMemberWizard({ onDone, onCancel }: { onDone: () => void; onCa
       </div>
 
       <Progress index={index} />
-      <StepChips current={step} onJump={(s) => setStep(s)} />
+      <StepChips current={step} onJump={goToStep} />
 
-      <Card className="mt-6">
+      <Card ref={cardRef} className="mt-6 scroll-mt-4">
         <CardContent className="p-6">
           {step === 'engagement' && <EngagementStep draft={draft} set={set} />}
           {step === 'login' && <LoginStep draft={draft} set={set} />}
@@ -87,7 +94,7 @@ export function AddMemberWizard({ onDone, onCancel }: { onDone: () => void; onCa
           <div className="mt-8 flex items-center justify-between">
             <Button
               variant="outline"
-              onClick={() => setStep(prevStep(step))}
+              onClick={() => goToStep(prevStep(step))}
               disabled={index === 0 || add.isPending}
             >
               Back

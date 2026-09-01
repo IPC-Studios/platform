@@ -31,6 +31,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { Stepper } from '@/shared/ui/stepper'
 import { Switch } from '@/shared/ui/switch'
 import { useConfirm } from '@/shared/ui/confirm'
+import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
 import { useCreateProject } from '@/features/projects/api'
 import {
@@ -91,6 +92,7 @@ function NewProject() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const loaded = useRef(false)
+  const sectionRef = useRef<HTMLDivElement>(null)
 
   const errors = stepErrors(draft)
   const totals = draftTotals(draft)
@@ -127,6 +129,8 @@ function NewProject() {
     setStep(next)
     setVisited((v) => new Set(v).add(next))
     setShowErrors(false)
+    // A long step leaves you at its foot; the next question is at the top.
+    scrollIntoView(sectionRef.current)
   }
 
   function onNext() {
@@ -255,7 +259,7 @@ function NewProject() {
         </CardContent>
       </Card>
 
-      <div className="mt-4">
+      <div ref={sectionRef} className="mt-4 scroll-mt-4">
         <Section title={STEP_LABELS[step]} hint={STEP_HINTS[step]}>
           {step === 'client' && <ClientStep draft={draft} patch={patch} />}
           {step === 'shoots' && <ShootsStep draft={draft} patch={patch} />}

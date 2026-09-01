@@ -94,6 +94,7 @@ function Brand({ compact }: { compact?: boolean }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
   const { session, signOut } = useAuth()
   const access = useAccess()
   const { scheme, toggleScheme } = useTheme()
@@ -172,7 +173,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 print:overflow-visible">{children}</main>
+        <main
+          key={pathname}
+          className="page-enter min-w-0 flex-1 overflow-y-auto p-4 md:p-6 print:overflow-visible"
+        >
+          {children}
+        </main>
       </div>
     </div>
   )

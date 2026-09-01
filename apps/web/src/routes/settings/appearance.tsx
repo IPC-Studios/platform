@@ -199,7 +199,7 @@ function ThemeCard({
   const tokens = preset[scheme]
 
   return (
-    <Card className={cn('flex flex-col', applied && 'border-primary ring-1 ring-primary/30')}>
+    <Card className={cn('lift flex flex-col', applied && 'border-primary ring-1 ring-primary/30')}>
       <CardContent className="flex flex-1 flex-col p-5">
         <div className="flex items-center gap-2">
           <h3 className="font-semibold tracking-tight">{preset.label}</h3>
