@@ -141,7 +141,7 @@ function Tasks() {
         />
       </div>
 
-      <div className="mt-4 grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-3">
         <div className="sm:col-span-2">
           <Input
             value={filters.search}

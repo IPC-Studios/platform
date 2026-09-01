@@ -72,7 +72,7 @@ export function CommandPalette() {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="ipc-overlay fixed inset-0 z-50 bg-black/50" />
         <DialogPrimitive.Content
-          className="ipc-dialog fixed left-1/2 top-[15%] z-50 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+          className="ipc-dialog fixed left-1/2 top-[15%] z-50 w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-card shadow-lg"
         >
           <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">

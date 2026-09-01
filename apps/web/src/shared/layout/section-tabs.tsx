@@ -25,7 +25,7 @@ export function SectionTabs<T extends string>({
   return (
     <div
       role="tablist"
-      className={cn('flex gap-1 rounded-xl border border-border bg-card p-1.5', className)}
+      className={cn('flex gap-1 rounded-lg border border-border bg-card p-1.5', className)}
     >
       {tabs.map((t) => (
         <button

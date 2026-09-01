@@ -210,7 +210,7 @@ function TeamDashboard() {
       />
 
       {!fence && session?.is_owner && (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4">
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
           <MapPin className="size-4 shrink-0 text-warning" />
           <p className="min-w-0 flex-1 text-sm">
             No attendance location set. Until there is one, anybody can check in from anywhere.
@@ -227,7 +227,7 @@ function TeamDashboard() {
         <Tile label="Attendance" value={`${totals.percent}%`} tone="neutral" />
       </div>
 
-      <div className="mt-4 grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="flex flex-col gap-1.5">
           <Label>Date</Label>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />

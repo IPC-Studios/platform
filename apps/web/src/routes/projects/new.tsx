@@ -222,7 +222,7 @@ function NewProject() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-4">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Sparkles className="size-4" />
         </span>

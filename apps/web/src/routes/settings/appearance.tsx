@@ -106,7 +106,7 @@ function Appearance() {
       />
       <SettingsTabs />
 
-      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 p-4 text-sm">
+      <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
         <p className="text-muted-foreground">
           Each theme includes a matching font. You can apply the theme directly, or use{' '}
@@ -117,7 +117,7 @@ function Appearance() {
       </div>
 
       {preview && (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="flex-1 text-sm">
             Previewing <span className="font-medium">{presetFor(preview.preset).label}</span>
             {preview.font && ` with ${fontOr(preview.font, 'inter').family}`}. Nothing is saved yet.

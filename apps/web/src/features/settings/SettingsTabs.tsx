@@ -22,7 +22,7 @@ export function SettingsTabs() {
   if (visible.length < 2) return null
 
   return (
-    <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
+    <div className="mb-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
       {visible.map((t) => (
         <Link
           key={t.to}

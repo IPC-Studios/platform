@@ -123,7 +123,7 @@ function Crm() {
 
       <SetupChecklist leads={leads} onAddLead={() => setTab('inbox')} />
 
-      <div className="mt-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
+      <div className="mt-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -268,7 +268,7 @@ function LeadInbox({
   return (
     <div className="flex flex-col gap-4">
       {!dismissed && (
-        <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4 text-sm">
+        <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/[0.04] p-4 text-sm">
           <p className="flex-1 text-muted-foreground">
             <span className="font-medium text-foreground">Lead Inbox.</span> Stack quick filters to
             narrow the list, save the combinations you use daily, and click a row to open the lead.
@@ -396,7 +396,7 @@ function LeadInbox({
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="relative lg:col-span-2">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -581,7 +581,7 @@ function TodaysWork({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
         {due.length === 0
           ? 'Nothing is due today and nothing is late. '
           : `${due.length} lead${due.length === 1 ? '' : 's'} to clear today — ${columns.overdue.length} already late. `}
@@ -654,7 +654,7 @@ function BoardColumn({
   children: ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
+    <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="font-medium">{title}</p>
         <StatusBadge tone={tone}>{count}</StatusBadge>
