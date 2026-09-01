@@ -61,6 +61,7 @@ async function freshDb() {
   await db.exec(mig('0025_session_hardening.sql'))
   await db.exec(mig('0026_team_directory.sql'))
   await db.exec(mig('0027_theme_fonts.sql'))
+  await db.exec(mig('0028_crm_followups.sql'))
   return db
 }
 
@@ -1552,5 +1553,80 @@ describe('theme presets renamed (0027)', () => {
       `select preset_key from company_theme_settings where company_id = get_current_company_id();`,
     )
     expect(r.rows[0]!.preset_key).toBe('ocean_blue')
+  })
+})
+
+describe('CRM manual lead entry (0028)', () => {
+  let db: PGlite
+  const owner = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@crm.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM Studio','Owner');`)
+  })
+
+  it('creates a lead scoped to the calling company', async () => {
+    const id = await add('Aanya', '9876500001')
+    const r = await db.query<{ company_id: string; status: string; source: string }>(
+      `select company_id, status, source from crm_leads where id = '${id}';`,
+    )
+    expect(r.rows[0]!.status).toBe('new')
+    expect(r.rows[0]!.source).toBe('enquiry')
+    expect(r.rows[0]!.company_id).toBe(
+      (await db.query<{ id: string }>(`select get_current_company_id() as id;`)).rows[0]!.id,
+    )
+  })
+
+  it('hands back the existing lead when the number is already known', async () => {
+    // The same client ringing twice is one conversation, not two rows.
+    const first = await add('Aanya', '9876500002')
+    const again = await add('Aanya Sharma', '98765 00002')
+    expect(again).toBe(first)
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_leads where phone = '9876500002' or phone = '98765 00002';`,
+    )
+    expect(count.rows[0]!.n).toBe(1)
+  })
+
+  it('hands a new lead to the rota member carrying the least', async () => {
+    const [a, b] = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc']
+    for (const [i, uid] of [a!, b!].entries()) {
+      await db.exec(`insert into auth.users (id, email) values ('${uid}', 'm${i}@crm.test');`)
+      await db.exec(
+        `insert into users (user_id, company_id, role, name, email)
+         values ('${uid}', get_current_company_id(), 'employee', 'Member ${i}', 'm${i}@crm.test');`,
+      )
+      await db.exec(
+        `insert into crm_distribution_rules (company_id, user_id, priority)
+         values (get_current_company_id(), '${uid}', ${i});`,
+      )
+    }
+    // First goes to whoever is empty; the second must not pile onto the same person.
+    const one = await add('Lead one', '9000000001')
+    const two = await add('Lead two', '9000000002')
+    const owners = await db.query<{ assigned_to: string }>(
+      `select assigned_to from crm_leads where id in ('${one}', '${two}');`,
+    )
+    const assigned = owners.rows.map((r) => r.assigned_to)
+    expect(new Set(assigned).size).toBe(2)
+  })
+
+  it('accepts the proposal_sent stage the inbox filters on', async () => {
+    const id = await add('Quoted', '9000000003')
+    await db.exec(`update crm_leads set status = 'proposal_sent' where id = '${id}';`)
+    const r = await db.query<{ status: string }>(`select status from crm_leads where id = '${id}';`)
+    expect(r.rows[0]!.status).toBe('proposal_sent')
+    await expect(
+      db.exec(`update crm_leads set status = 'ghosted' where id = '${id}';`),
+    ).rejects.toThrow()
   })
 })

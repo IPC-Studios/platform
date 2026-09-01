@@ -1,0 +1,210 @@
+import type { CrmLead, LeadStatus } from '@ipc/contracts'
+
+/**
+ * The follow-up desk's arithmetic.
+ *
+ * Every number and chip on the CRM page comes from here, computed in one pass
+ * over the same array, so the summary strip and the filtered list can never
+ * disagree. Nothing reads the clock directly — `now` is always passed in — so
+ * the same leads always bucket the same way in a test.
+ */
+
+/** Where a lead sits relative to its promised call-back. */
+export type DueBucket = 'overdue' | 'today' | 'upcoming' | 'none'
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+
+export function dueBucket(lead: CrmLead, now: Date): DueBucket {
+  // A closed lead owes nobody a call, whatever date is still on it.
+  if (lead.status === 'converted' || lead.status === 'lost') return 'none'
+  if (!lead.follow_up_at) return 'none'
+  const due = new Date(lead.follow_up_at)
+  if (Number.isNaN(due.getTime())) return 'none'
+  const today = startOfDay(now)
+  const dueDay = startOfDay(due)
+  if (dueDay < today) return 'overdue'
+  if (dueDay.getTime() === today.getTime()) return 'today'
+  return 'upcoming'
+}
+
+export const isOpen = (l: CrmLead): boolean => l.status !== 'converted' && l.status !== 'lost'
+
+/** Never contacted: still in 'new' and nothing stamped a conversation. */
+export const isUncontacted = (l: CrmLead): boolean =>
+  l.status === 'new' && l.last_contacted_at === null
+
+/** An open lead with no promised call-back — the quiet way a deal dies. */
+export const hasNoFollowUp = (l: CrmLead): boolean => isOpen(l) && l.follow_up_at === null
+
+export function wonThisMonth(l: CrmLead, now: Date): boolean {
+  if (l.status !== 'converted' || !l.converted_at) return false
+  const at = new Date(l.converted_at)
+  return at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth()
+}
+
+export interface LeadSummary {
+  total: number
+  uncontacted: number
+  today: number
+  overdue: number
+  hot: number
+  wonThisMonth: number
+}
+
+/** The strip across the top. `total` counts open leads — the working set. */
+export function summarise(leads: readonly CrmLead[], now: Date): LeadSummary {
+  return {
+    total: leads.filter(isOpen).length,
+    uncontacted: leads.filter(isUncontacted).length,
+    today: leads.filter((l) => dueBucket(l, now) === 'today').length,
+    overdue: leads.filter((l) => dueBucket(l, now) === 'overdue').length,
+    hot: leads.filter((l) => l.is_hot && isOpen(l)).length,
+    wonThisMonth: leads.filter((l) => wonThisMonth(l, now)).length,
+  }
+}
+
+export type QuickFilter =
+  | 'due_today'
+  | 'overdue'
+  | 'hot'
+  | 'uncontacted'
+  | 'proposal_sent'
+  | 'unassigned'
+  | 'no_follow_up'
+
+export const QUICK_FILTERS: ReadonlyArray<{ value: QuickFilter; label: string }> = [
+  { value: 'due_today', label: 'Due today' },
+  { value: 'overdue', label: 'Overdue' },
+  { value: 'hot', label: 'Hot' },
+  { value: 'uncontacted', label: 'Uncontacted' },
+  { value: 'proposal_sent', label: 'Proposal sent' },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'no_follow_up', label: 'No follow-up' },
+]
+
+const PREDICATES: Record<QuickFilter, (l: CrmLead, now: Date) => boolean> = {
+  due_today: (l, now) => dueBucket(l, now) === 'today',
+  overdue: (l, now) => dueBucket(l, now) === 'overdue',
+  hot: (l) => l.is_hot && isOpen(l),
+  uncontacted: (l) => isUncontacted(l),
+  proposal_sent: (l) => l.status === 'proposal_sent',
+  unassigned: (l) => l.assigned_to === null && isOpen(l),
+  no_follow_up: (l) => hasNoFollowUp(l),
+}
+
+export function countsFor(
+  leads: readonly CrmLead[],
+  now: Date,
+): Record<QuickFilter, number> {
+  const counts = {} as Record<QuickFilter, number>
+  for (const { value } of QUICK_FILTERS) {
+    counts[value] = leads.filter((l) => PREDICATES[value]!(l, now)).length
+  }
+  return counts
+}
+
+export interface LeadQuery {
+  search: string
+  /** Chips are additive: a lead must satisfy every one that is on. */
+  filters: readonly QuickFilter[]
+  status: LeadStatus | 'all'
+  assignee: string | 'all'
+}
+
+export const EMPTY_QUERY: LeadQuery = { search: '', filters: [], status: 'all', assignee: 'all' }
+
+function matchesSearch(l: CrmLead, search: string): boolean {
+  const needle = search.trim().toLowerCase()
+  if (!needle) return true
+  return [l.name, l.phone, l.email, l.assignee_name, l.notes]
+    .filter(Boolean)
+    .some((v) => String(v).toLowerCase().includes(needle))
+}
+
+/**
+ * Chips narrow rather than widen. Two chips mean "both", which is what a person
+ * reaching for "Hot" and "Overdue" together is asking for — the leads that are
+ * hot AND late, not a longer list than either.
+ */
+export function applyQuery(
+  leads: readonly CrmLead[],
+  query: LeadQuery,
+  now: Date,
+): CrmLead[] {
+  return leads
+    .filter((l) => query.filters.every((f) => PREDICATES[f]!(l, now)))
+    .filter((l) => (query.status === 'all' ? true : l.status === query.status))
+    .filter((l) =>
+      query.assignee === 'all'
+        ? true
+        : query.assignee === 'none'
+          ? l.assigned_to === null
+          : l.assigned_to === query.assignee,
+    )
+    .filter((l) => matchesSearch(l, query.search))
+    .sort(byUrgency(now))
+}
+
+/**
+ * Late first, then due today, then everything else — and hot before cold at
+ * every level. The desk works top-down, so the order is the priority.
+ */
+export function byUrgency(now: Date) {
+  const rank = (l: CrmLead): number => {
+    const bucket = dueBucket(l, now)
+    if (bucket === 'overdue') return 0
+    if (bucket === 'today') return 1
+    if (isUncontacted(l)) return 2
+    if (bucket === 'upcoming') return 3
+    return 4
+  }
+  return (a: CrmLead, b: CrmLead): number => {
+    const byRank = rank(a) - rank(b)
+    if (byRank !== 0) return byRank
+    if (a.is_hot !== b.is_hot) return a.is_hot ? -1 : 1
+    // Within a bucket, the one waiting longest goes first.
+    const aDue = a.follow_up_at ?? a.created_at
+    const bDue = b.follow_up_at ?? b.created_at
+    return aDue.localeCompare(bDue)
+  }
+}
+
+export const STAGES: ReadonlyArray<{ key: LeadStatus; label: string }> = [
+  { key: 'new', label: 'New' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'qualified', label: 'Qualified' },
+  { key: 'proposal_sent', label: 'Proposal sent' },
+  { key: 'converted', label: 'Won' },
+  { key: 'lost', label: 'Lost' },
+]
+
+export const STAGE_LABEL: Record<LeadStatus, string> = {
+  new: 'New',
+  contacted: 'Contacted',
+  qualified: 'Qualified',
+  proposal_sent: 'Proposal sent',
+  converted: 'Won',
+  lost: 'Lost',
+}
+
+/** Board columns for the follow-up view — by when, not by stage. */
+export const DUE_COLUMNS: ReadonlyArray<{ key: DueBucket; label: string; hint: string }> = [
+  { key: 'overdue', label: 'Overdue', hint: 'Promised earlier and missed' },
+  { key: 'today', label: 'Today', hint: 'Due before the day ends' },
+  { key: 'upcoming', label: 'Upcoming', hint: 'Scheduled ahead' },
+  { key: 'none', label: 'No follow-up', hint: 'Nobody has agreed to call back' },
+]
+
+/** Group open leads by due bucket, each column already in working order. */
+export function boardColumns(
+  leads: readonly CrmLead[],
+  now: Date,
+): Record<DueBucket, CrmLead[]> {
+  const columns: Record<DueBucket, CrmLead[]> = { overdue: [], today: [], upcoming: [], none: [] }
+  for (const lead of leads) {
+    if (!isOpen(lead)) continue
+    columns[dueBucket(lead, now)].push(lead)
+  }
+  for (const key of Object.keys(columns) as DueBucket[]) columns[key].sort(byUrgency(now))
+  return columns
+}

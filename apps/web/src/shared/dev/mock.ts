@@ -246,7 +246,16 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
-  if (method === 'GET' && path === '/crm/leads') return leads
+  if (method === 'GET' && path === '/crm/leads') return atStage(leads, 'partial')
+  if (method === 'GET' && path === '/crm/distribution') return atStage(distributionFx, 'partial')
+  if (method === 'POST' && path === '/crm/leads')
+    return {
+      ...leads[3],
+      id: uid(0xbf),
+      ...(body as Record<string, unknown>),
+      status: 'new',
+      assignee_name: null,
+    }
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
   if (method === 'GET' && path === '/hr/location')
@@ -414,6 +423,14 @@ const attendanceFx = [
   { id: uid(0xd3), a_date: '2026-07-04', check_in_at: null, check_out_at: null, status: 'absent' },
 ]
 
+/** Dates are relative to "now" so the due/overdue buckets are always live. */
+const daysFromNow = (n: number, hour = 10) => {
+  const at = new Date()
+  at.setDate(at.getDate() + n)
+  at.setHours(hour, 0, 0, 0)
+  return at.toISOString()
+}
+
 const leads = [
   {
     id: uid(0xb1),
@@ -424,6 +441,11 @@ const leads = [
     status: 'new',
     assigned_to: uid(0xe1),
     assignee_name: 'Rahul',
+    notes: 'Dec wedding, asked for two photographers.',
+    follow_up_at: daysFromNow(-2),
+    last_contacted_at: null,
+    converted_at: null,
+    is_hot: true,
     created_at: '2026-07-05T08:00:00Z',
   },
   {
@@ -435,6 +457,11 @@ const leads = [
     status: 'contacted',
     assigned_to: uid(0xe3),
     assignee_name: 'Sana',
+    notes: null,
+    follow_up_at: daysFromNow(0, 16),
+    last_contacted_at: daysFromNow(-3),
+    converted_at: null,
+    is_hot: false,
     created_at: '2026-07-04T08:00:00Z',
   },
   {
@@ -443,33 +470,53 @@ const leads = [
     phone: '9876500003',
     email: 'events@co.in',
     source: 'referral',
-    status: 'qualified',
+    status: 'proposal_sent',
     assigned_to: uid(0xe1),
     assignee_name: 'Rahul',
+    notes: 'Quote sent for a two-day conference shoot.',
+    follow_up_at: daysFromNow(4),
+    last_contacted_at: daysFromNow(-5),
+    converted_at: null,
+    is_hot: false,
     created_at: '2026-07-03T08:00:00Z',
   },
   {
     id: uid(0xb4),
-    name: 'Kunal',
+    name: 'Walk-in enquiry',
     phone: '9876500004',
     email: null,
-    source: 'facebook',
-    status: 'converted',
-    assigned_to: uid(0xe3),
-    assignee_name: 'Sana',
-    created_at: '2026-07-01T08:00:00Z',
+    source: 'enquiry',
+    status: 'new',
+    assigned_to: null,
+    assignee_name: null,
+    notes: null,
+    follow_up_at: null,
+    last_contacted_at: null,
+    converted_at: null,
+    is_hot: false,
+    created_at: '2026-07-02T08:00:00Z',
   },
   {
     id: uid(0xb5),
-    name: 'Old enquiry',
+    name: 'Kapoor Family',
     phone: '9876500005',
     email: null,
-    source: 'enquiry',
-    status: 'lost',
-    assigned_to: null,
-    assignee_name: null,
+    source: 'referral',
+    status: 'converted',
+    assigned_to: uid(0xe3),
+    assignee_name: 'Sana',
+    notes: 'Booked the pre-wedding package.',
+    follow_up_at: null,
+    last_contacted_at: daysFromNow(-12),
+    converted_at: daysFromNow(-6),
+    is_hot: false,
     created_at: '2026-06-20T08:00:00Z',
   },
+]
+
+const distributionFx = [
+  { id: uid(0xba), user_id: uid(0xe1), user_name: 'Rahul Sharma', priority: 0, is_active: true, lead_count: 2 },
+  { id: uid(0xbb), user_id: uid(0xe3), user_name: 'Sana Khan', priority: 1, is_active: true, lead_count: 1 },
 ]
 
 const expensesFx = [
