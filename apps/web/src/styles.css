@@ -36,7 +36,8 @@
    written onto :root at runtime by ThemeProvider. ───────────────── */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
+  /* Page sits a shade below white so cards and the sidebar read as surfaces. */
+  --background: oklch(0.979 0.004 285);
   --foreground: oklch(0.21 0.006 285);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.21 0.006 285);
@@ -57,7 +58,7 @@
   --border: oklch(0.92 0.004 286);
   --input: oklch(0.92 0.004 286);
   --ring: oklch(0.3 0.06 264);
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.21 0.006 285);
   --sidebar-accent: oklch(0.97 0.001 286);
 }
