@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { layerOffset, pointOnCircle, polygonPoints } from './CameraBackdrop'
+import { BARREL_RINGS, barrelRing, layerOffset, pointOnCircle, polygonPoints } from './CameraBackdrop'
 
 describe('pointOnCircle', () => {
   it('puts 0° straight up, not to the right', () => {
@@ -77,5 +77,35 @@ describe('layerOffset', () => {
 
   it('stays put for a value that is not a number', () => {
     expect(layerOffset(NaN, 1, 26)).toBe(0)
+  })
+})
+
+describe('barrelRing', () => {
+  const rings = Array.from({ length: BARREL_RINGS }, (_, i) => barrelRing(i))
+
+  it('starts the front element at the viewer, not behind them', () => {
+    expect(rings[0]).toMatchObject({ z: 0, scale: 1 })
+  })
+
+  it('recedes, narrows and fades together', () => {
+    // All three have to move the same way. A ring that goes back without
+    // narrowing and fading reads as a flat circle, not a barrel.
+    for (let i = 1; i < rings.length; i++) {
+      expect(rings[i]!.z).toBeLessThan(rings[i - 1]!.z)
+      expect(rings[i]!.scale).toBeLessThan(rings[i - 1]!.scale)
+      expect(rings[i]!.opacity).toBeLessThan(rings[i - 1]!.opacity)
+    }
+  })
+
+  it('keeps the furthest ring faint but present', () => {
+    // Fading to zero would read as the barrel being cut off rather than deep.
+    const last = rings[rings.length - 1]!
+    expect(last.opacity).toBeGreaterThan(0)
+    expect(last.opacity).toBeLessThan(0.2)
+    expect(last.scale).toBeGreaterThan(0.5)
+  })
+
+  it('survives a single-ring barrel without dividing by zero', () => {
+    expect(barrelRing(0, 1)).toEqual({ z: 0, scale: 1, opacity: 0.5 })
   })
 })

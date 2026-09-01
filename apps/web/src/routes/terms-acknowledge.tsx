@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { z } from '@ipc/contracts'
 import { CheckCircle2, FileText } from 'lucide-react'
 import { callApi, ApiError } from '@/shared/api/client'
+import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
@@ -52,7 +53,9 @@ export function TermsAcknowledgePage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
+    <div className="relative overflow-hidden">
+      <CameraBackdrop />
+      <div className="relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
       <div className="flex items-center gap-2">
         <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <FileText className="size-5" />
@@ -104,6 +107,7 @@ export function TermsAcknowledgePage() {
           </Card>
         </>
       )}
+      </div>
     </div>
   )
 }

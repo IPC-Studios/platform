@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Camera, XCircle } from 'lucide-react'
 import { authToken, invitationPreview } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
+import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { setTokens } from '@/shared/auth/token'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
@@ -69,7 +70,9 @@ export function AcceptInvitePage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/40 p-4">
+      <CameraBackdrop />
+
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <span className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">

@@ -37,6 +37,52 @@
   will-change: transform;
 }
 
+/* ── Lens barrel ──────────────────────────────────────────────────
+ * Rings on real Z planes inside the scene's perspective. The barrel turns a
+ * few degrees off-axis rather than spinning about its own centre: circles
+ * spun about Z look identical frame to frame, so the only rotation that
+ * reads as depth is the one that lets you see INTO the tube.
+ */
+
+.cb-barrel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(78vmin, 560px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  transform-style: preserve-3d;
+  animation: cb-barrel-turn 40s ease-in-out infinite;
+}
+
+.cb-ring3d {
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: var(--o);
+  /* Its own plane in the tube. `scale` tapers it toward the mount; perspective
+     shrinks it further, and the two together are what stop the stack reading
+     as concentric circles drawn on glass. */
+  transform: translateZ(var(--z)) scale(var(--s));
+}
+
+/* The front element is the heavy one on a real lens, and giving the nearest
+   ring more weight is what stops the stack reading as evenly-drawn circles. */
+.cb-ring3d:first-child {
+  border-width: 2px;
+}
+
+@keyframes cb-barrel-turn {
+  0%,
+  100% {
+    transform: rotateX(7deg) rotateY(-9deg);
+  }
+  50% {
+    transform: rotateX(-6deg) rotateY(9deg);
+  }
+}
+
 /* ── Aperture ─────────────────────────────────────────────────────── */
 
 .cb-iris {
@@ -45,7 +91,11 @@
   top: 50%;
   width: min(104vmin, 760px);
   height: min(104vmin, 760px);
-  transform: translate(-50%, -50%);
+  /* Centring on the independent `translate` property, so the rotation below
+     is free to own `transform` outright. Putting both in `transform` means
+     the keyframe replaces the centring and the iris leaves the frame. */
+  translate: -50% -50%;
+  transform: translateZ(-460px);
   opacity: 0.05;
   animation: cb-turn 90s linear infinite;
 }
@@ -75,9 +125,14 @@
   stroke-width: 0.9;
 }
 
+/* The barrel's depth is restated in both stops: an implicit `from` would take
+   the base transform and interpolate the Z away to nothing over the cycle. */
 @keyframes cb-turn {
+  from {
+    transform: translateZ(-460px) rotate(0deg);
+  }
   to {
-    transform: translate(-50%, -50%) rotate(360deg);
+    transform: translateZ(-460px) rotate(360deg);
   }
 }
 
@@ -140,5 +195,8 @@
   .cb-layer {
     transform: none;
     transition: none;
+  }
+  .cb-barrel {
+    animation: none;
   }
 }

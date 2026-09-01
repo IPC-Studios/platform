@@ -49,6 +49,29 @@ const BOKEH = [
 /** How far the nearest layer travels, corner to corner, in pixels. */
 const PARALLAX_RANGE = 26
 
+/** Rings in the lens barrel, and the gap between them in Z. */
+export const BARREL_RINGS = 7
+const RING_GAP = 64
+
+/**
+ * Where ring `i` sits in the barrel, `0` being the front element.
+ *
+ * Three things happen together as a ring recedes, and it is the combination
+ * that reads as a tube rather than as flat circles: it moves back in Z, it
+ * narrows (a lens barrel tapers toward the mount), and it fades (haze eats
+ * contrast with distance). Drop any one and the depth stops being legible.
+ */
+export function barrelRing(i: number, count = BARREL_RINGS) {
+  const t = count <= 1 ? 0 : i / (count - 1)
+  return {
+    z: Number((-(i * RING_GAP)).toFixed(2)),
+    scale: Number((1 - t * 0.38).toFixed(3)),
+    // Never reaches zero: the far ring should be faint, not absent, or the
+    // barrel looks cut off rather than deep.
+    opacity: Number((0.5 - t * 0.38).toFixed(3)),
+  }
+}
+
 /**
  * How far a layer at `depth` shifts for a pointer at `pct` (0-1) across the
  * viewport. Near layers (depth 1) move most; the iris sits far back and barely
@@ -138,8 +161,29 @@ export function CameraBackdrop() {
         </span>
       ))}
 
-      {/* The iris sits furthest back, so it barely moves. */}
+      {/* The barrel sits furthest back, so it barely moves with the pointer. */}
       <span className="cb-layer cb-layer--iris" style={{ '--d': 0.18 } as React.CSSProperties}>
+        {/* The lens: rings receding into the screen, turning slowly off-axis
+            so you see into the tube rather than straight down it. */}
+        <div className="cb-barrel">
+          {Array.from({ length: BARREL_RINGS }, (_, i) => {
+            const { z, scale, opacity } = barrelRing(i)
+            return (
+              <span
+                key={i}
+                className="cb-ring3d"
+                style={
+                  {
+                    '--z': `${z}px`,
+                    '--s': scale,
+                    '--o': opacity,
+                  } as React.CSSProperties
+                }
+              />
+            )
+          })}
+        </div>
+
         <svg className="cb-iris" viewBox="-120 -120 240 240" fill="none">
           {/* Barrel rings — the fixed part of the lens. */}
           <circle r="116" className="cb-ring" />
