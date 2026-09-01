@@ -270,7 +270,11 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
   if (method === 'GET' && path === '/hr/location')
-    return { lat: 19.076, lng: 72.8777, radius_m: 150 }
+    return { lat: 19.076, lng: 72.8777, radius_m: 150, timezone: 'Asia/Kolkata' }
+  if (method === 'PATCH' && path === '/hr/location')
+    return { ...(body as Record<string, unknown>), timezone: 'Asia/Kolkata' }
+  if (method === 'GET' && path.startsWith('/hr/attendance?')) return atStage(rosterFx, 'partial')
+  if (method === 'POST' && path === '/hr/check-out') return { id: uid(0xc1) }
   if (method === 'POST' && path === '/hr/check-in') return { id: uid(0xc0) }
   if (method === 'GET' && path === '/notifications') return notifs
   if (method === 'POST' && path.includes('/notifications/')) return {}
@@ -413,6 +417,50 @@ const notifs = [
     body: null,
     read_at: '2026-07-04T10:00:00Z',
     created_at: '2026-07-03T10:00:00Z',
+  },
+]
+
+/** One of each shape the roster has to render: closed, still in, late, absent. */
+const rosterFx = [
+  {
+    user_id: uid(0xe1),
+    name: 'Rahul Sharma',
+    email: 'rahul@demostudio.in',
+    phone: '9811111111',
+    engagement_type: 'in_house',
+    status: 'present',
+    check_in_at: '2026-09-01T03:34:00Z',
+    check_out_at: '2026-09-01T12:04:00Z',
+  },
+  {
+    user_id: uid(0xe3),
+    name: 'Sana Khan',
+    email: 'sana@demostudio.in',
+    phone: '9833333333',
+    engagement_type: 'in_house',
+    status: 'present',
+    check_in_at: '2026-09-01T04:02:00Z',
+    check_out_at: null,
+  },
+  {
+    user_id: uid(0xe2),
+    name: 'Anita Desai',
+    email: 'anita@demostudio.in',
+    phone: null,
+    engagement_type: 'freelancer',
+    status: 'late',
+    check_in_at: '2026-09-01T05:41:00Z',
+    check_out_at: '2026-09-01T12:30:00Z',
+  },
+  {
+    user_id: uid(0xe4),
+    name: 'Imran Qureshi',
+    email: null,
+    phone: '9844444444',
+    engagement_type: 'freelancer',
+    status: 'absent',
+    check_in_at: null,
+    check_out_at: null,
   },
 ]
 

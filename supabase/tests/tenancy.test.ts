@@ -63,6 +63,7 @@ async function freshDb() {
   await db.exec(mig('0027_theme_fonts.sql'))
   await db.exec(mig('0028_crm_followups.sql'))
   await db.exec(mig('0029_lead_sources.sql'))
+  await db.exec(mig('0030_attendance_ops.sql'))
   return db
 }
 
@@ -1690,5 +1691,67 @@ describe('lead sources (0029)', () => {
     await expect(
       db.query(`select capture_lead('${key}', 'Late', '9000000013', null, '{}'::jsonb);`),
     ).rejects.toThrow()
+  })
+})
+
+describe('attendance check-out and fence (0030)', () => {
+  let db: PGlite
+  const owner = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@hr.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('HR Studio','Owner');`)
+  })
+
+  it('refuses to check out of a day that was never checked into', async () => {
+    // Silently creating a row here would invent a shift nobody worked.
+    await expect(db.query(`select check_out();`)).rejects.toThrow()
+  })
+
+  it('closes the day it was opened on', async () => {
+    await db.query(`select check_in(19.076, 72.8777);`)
+    const id = (await db.query<{ id: string }>(`select check_out() as id;`)).rows[0]!.id
+
+    const r = await db.query<{ check_in_at: string; check_out_at: string; a_date: string }>(
+      `select check_in_at, check_out_at, a_date from attendance where id = '${id}';`,
+    )
+    expect(r.rows[0]!.check_out_at).not.toBeNull()
+    // One row per person per day: checking out must not open a second one.
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from attendance where user_id = '${owner}';`,
+    )
+    expect(count.rows[0]!.n).toBe(1)
+  })
+
+  it('will not check out twice', async () => {
+    await expect(db.query(`select check_out();`)).rejects.toThrow()
+  })
+
+  it('stores a fence and refuses a radius that would be useless', async () => {
+    const r = await db.query<{ radius_m: number; timezone: string }>(
+      `select radius_m, timezone from set_company_location(19.076, 72.8777, 200, 'Asia/Kolkata');`,
+    )
+    expect(r.rows[0]!.radius_m).toBe(200)
+    expect(r.rows[0]!.timezone).toBe('Asia/Kolkata')
+
+    // Under 20m GPS drift alone locks people out; over 5km is not a fence.
+    await expect(db.query(`select set_company_location(19.076, 72.8777, 5, 'Asia/Kolkata');`)).rejects.toThrow()
+    await expect(db.query(`select set_company_location(19.076, 72.8777, 9000, 'Asia/Kolkata');`)).rejects.toThrow()
+  })
+
+  it('moves the fence rather than stacking a second one', async () => {
+    await db.query(`select set_company_location(28.6139, 77.209, 300, 'Asia/Kolkata');`)
+    const r = await db.query<{ n: number; lat: number }>(
+      `select count(*)::int as n, max(lat) as lat from company_location;`,
+    )
+    expect(r.rows[0]!.n).toBe(1)
+    expect(Number(r.rows[0]!.lat)).toBeCloseTo(28.6139, 3)
+  })
+
+  it('keeps the fence out once it is set', async () => {
+    // Same coordinates the fence was just moved away from.
+    await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow()
   })
 })
