@@ -15,6 +15,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
  */
 const migDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations')
 const mig = (f: string) => readFileSync(join(migDir, f), 'utf8')
+/** Same read, named for the tests that re-run a migration to prove it is idempotent. */
+const readMig = mig
 
 const OWNER = '11111111-1111-1111-1111-111111111111'
 
@@ -58,6 +60,7 @@ async function freshDb() {
   await db.exec(mig('0024_refresh_tokens.sql'))
   await db.exec(mig('0025_session_hardening.sql'))
   await db.exec(mig('0026_team_directory.sql'))
+  await db.exec(mig('0027_theme_fonts.sql'))
   return db
 }
 
@@ -1506,5 +1509,48 @@ describe('team directory + invitations (0026)', () => {
 
     await db.exec(`update user_invitations set revoked_at = now() where email = 'dup@crew.test';`)
     await expect(invite('dup@crew.test', 'raw-dup-3')).resolves.toBeTruthy()
+  })
+})
+
+describe('theme presets renamed (0027)', () => {
+  let db: PGlite
+  const owner = '99999999-9999-9999-9999-999999999999'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@theme.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Theme Studio','Owner');`)
+  })
+
+  it('carries a studio on an old preset over to its named theme', async () => {
+    // Re-run the mapping against a row that predates 0027, the way a live
+    // database looks when the migration lands.
+    await db.exec(
+      `insert into company_theme_settings (company_id, preset_key)
+       values (get_current_company_id(), 'amber')
+       on conflict (company_id) do update set preset_key = 'amber';`,
+    )
+    await db.exec(readMig('0027_theme_fonts.sql'))
+
+    const r = await db.query<{ preset_key: string; font_key: string | null }>(
+      `select preset_key, font_key from company_theme_settings
+        where company_id = get_current_company_id();`,
+    )
+    expect(r.rows[0]!.preset_key).toBe('luxury_gold')
+    // No font means "whatever the theme ships with" — never a hardcoded face.
+    expect(r.rows[0]!.font_key).toBeNull()
+  })
+
+  it('leaves a key it does not recognise alone', async () => {
+    await db.exec(
+      `update company_theme_settings set preset_key = 'ocean_blue'
+        where company_id = get_current_company_id();`,
+    )
+    await db.exec(readMig('0027_theme_fonts.sql'))
+    const r = await db.query<{ preset_key: string }>(
+      `select preset_key from company_theme_settings where company_id = get_current_company_id();`,
+    )
+    expect(r.rows[0]!.preset_key).toBe('ocean_blue')
   })
 })

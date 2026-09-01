@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import { themePresetKey } from '@ipc/contracts'
 import {
+  DEFAULT_PRESET_KEY,
+  LEGACY_PRESET_ALIASES,
   THEME_PRESETS,
   THEME_PRESET_KEYS,
   THEME_TOKENS,
   FOREGROUND_FLIP,
   foregroundFor,
+  presetFor,
 } from './presets'
+import { FONT_OPTIONS } from './fonts'
 
 describe('theme presets', () => {
   it('matches the allow-list the server validates against', () => {
@@ -66,9 +70,49 @@ describe('theme presets', () => {
     expect(new Set(THEME_PRESET_KEYS).size).toBe(THEME_PRESET_KEYS.length)
   })
 
-  it('keeps the shipped palette intact', () => {
-    // These are the presets studios may already have saved; dropping one would
-    // leave a stored preset_key that no longer resolves.
-    expect([...THEME_PRESET_KEYS].sort()).toEqual(['amber', 'brand', 'emerald', 'indigo', 'rose'])
+  it('ships the nine named themes', () => {
+    expect([...THEME_PRESET_KEYS].sort()).toEqual([
+      'blush_wedding',
+      'editorial_black',
+      'emerald_studio',
+      'ipc_classic',
+      'luxury_gold',
+      'minimal_slate',
+      'ocean_blue',
+      'royal_purple',
+      'warm_terracotta',
+    ])
+  })
+
+  it('still resolves the keys studios saved before the themes were named', () => {
+    // 0027 rewrites stored rows, but a browser can still be holding an old key
+    // in localStorage — and it must not silently become the default palette.
+    expect(presetFor('brand').key).toBe('ipc_classic')
+    expect(presetFor('indigo').key).toBe('royal_purple')
+    expect(presetFor('emerald').key).toBe('emerald_studio')
+    expect(presetFor('amber').key).toBe('luxury_gold')
+    expect(presetFor('rose').key).toBe('blush_wedding')
+    for (const key of Object.keys(LEGACY_PRESET_ALIASES)) {
+      expect(THEME_PRESET_KEYS).toContain(presetFor(key).key)
+    }
+  })
+
+  it('falls back to the default for a key it has never heard of', () => {
+    expect(presetFor('sunset').key).toBe(DEFAULT_PRESET_KEY)
+    expect(presetFor(null).key).toBe(DEFAULT_PRESET_KEY)
+    expect(presetFor(undefined).key).toBe(DEFAULT_PRESET_KEY)
+  })
+
+  it('gives every theme a font that exists', () => {
+    for (const preset of Object.values(THEME_PRESETS)) {
+      expect(FONT_OPTIONS[preset.font], preset.key).toBeTruthy()
+    }
+  })
+
+  it('describes every theme, so no card ships with an empty line', () => {
+    for (const preset of Object.values(THEME_PRESETS)) {
+      expect(preset.label.length, preset.key).toBeGreaterThan(2)
+      expect(preset.description.length, preset.key).toBeGreaterThan(10)
+    }
   })
 })

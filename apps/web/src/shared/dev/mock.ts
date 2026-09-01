@@ -137,7 +137,7 @@ const boardTasks = [
  * refetches, so a hard-coded reply would snap the selection back and make the
  * palette impossible to try in preview mode.
  */
-const themeState = { preset_key: 'brand', color_scheme: 'light' }
+const themeState = { preset_key: 'ipc_classic', font_key: null as string | null, color_scheme: 'light' }
 
 export function mockResponse(path: string, method: string, body?: unknown): unknown {
   if (method === 'GET' && path === '/auth/session') return mockSession

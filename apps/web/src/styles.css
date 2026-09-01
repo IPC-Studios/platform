@@ -109,6 +109,18 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* --font-sans is written by ThemeProvider from the studio's chosen face; the
+     stack behind it is what renders before the webfont lands, or if it never
+     does. */
+  font-family: var(
+    --font-sans,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif
+  );
 }

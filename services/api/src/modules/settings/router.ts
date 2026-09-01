@@ -39,10 +39,13 @@ export const settingsRouter = new Hono<AppEnv>()
     const auth = c.get('auth')
     const row = await withUser(c.env, auth.userId, async (sql) => {
       const rows = await sql`
-        select preset_key, color_scheme from company_theme_settings where company_id = ${auth.companyId}`
+        select preset_key, font_key, color_scheme
+        from company_theme_settings where company_id = ${auth.companyId}`
       return rows[0] ?? null
     }).catch(() => null)
-    return c.json(companyTheme.parse(row ?? { preset_key: 'brand', color_scheme: 'light' }))
+    return c.json(
+      companyTheme.parse(row ?? { preset_key: 'ipc_classic', font_key: null, color_scheme: 'light' }),
+    )
   })
 
   .patch('/theme', requireOwner(), async (c) => {
@@ -54,11 +57,15 @@ export const settingsRouter = new Hono<AppEnv>()
         insert into company_theme_settings ${sql({
           company_id: auth.companyId,
           preset_key: parsed.data.preset_key,
+          // null is a real value here: it hands typography back to the theme.
+          font_key: parsed.data.font_key ?? null,
           color_scheme: parsed.data.color_scheme,
         })}
         on conflict (company_id) do update
-          set preset_key = excluded.preset_key, color_scheme = excluded.color_scheme
-        returning preset_key, color_scheme`
+          set preset_key   = excluded.preset_key,
+              font_key     = excluded.font_key,
+              color_scheme = excluded.color_scheme
+        returning preset_key, font_key, color_scheme`
       return rows[0]
     }).catch(() => null)
     if (!row) fail(400, 'We could not save the theme.')

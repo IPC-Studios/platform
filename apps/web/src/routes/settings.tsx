@@ -1,15 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check } from 'lucide-react'
+import { Check, Palette } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   companyProfile,
   companyTheme,
   type UpdateCompanyRequest,
 } from '@ipc/contracts'
-import { THEME_PRESETS } from '@/shared/theme/presets'
-import { useTheme } from '@/shared/theme/ThemeProvider'
+import { presetFor } from '@/shared/theme/presets'
+import { fontOr } from '@/shared/theme/fonts'
+import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -19,7 +20,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { LoadingState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
-import { cn } from '@/shared/ui/cn'
 
 export function SettingsPage() {
   return (
@@ -35,6 +35,7 @@ function Settings() {
   return (
     <>
       <PageHeader title="Settings" description="Your studio profile and appearance." />
+      <SettingsTabs />
       <div className="grid gap-4 lg:grid-cols-2">
         <CompanyCard readOnly={!isOwner} />
         <ThemeCard readOnly={!isOwner} />
@@ -156,62 +157,33 @@ function CompanyCard({ readOnly }: { readOnly: boolean }) {
 }
 
 function ThemeCard({ readOnly }: { readOnly: boolean }) {
-  const qc = useQueryClient()
-  const { applyPreset } = useTheme()
   const { data } = useQuery({
     queryKey: ['settings', 'theme'],
     queryFn: () => callApi('/settings/theme', { responseSchema: companyTheme }),
   })
-  const save = useMutation({
-    mutationFn: (preset_key: string) =>
-      callApi('/settings/theme', {
-        method: 'PATCH',
-        body: { preset_key, color_scheme: data?.color_scheme ?? 'light' },
-        responseSchema: companyTheme,
-      }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'theme'] }),
-  })
-
-  const [selected, setSelected] = useState('brand')
-  useEffect(() => {
-    if (data) {
-      setSelected(data.preset_key)
-      applyPreset(data.preset_key)
-    }
-  }, [data, applyPreset])
-
-  function pick(key: string) {
-    if (readOnly) return
-    setSelected(key)
-    applyPreset(key) // live preview
-    save.mutate(key)
-  }
+  const preset = presetFor(data?.preset_key)
+  const font = fontOr(data?.font_key, preset.font)
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Appearance</CardTitle>
+        <CardTitle>Theme & branding</CardTitle>
       </CardHeader>
       <CardContent>
-        <Label>Accent colour</Label>
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Object.values(THEME_PRESETS).map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => pick(p.key)}
-              disabled={readOnly}
-              className={cn(
-                'flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors',
-                selected === p.key ? 'border-primary ring-2 ring-ring' : 'border-border hover:bg-accent',
-              )}
-            >
-              <span className="size-8 rounded-full" style={{ backgroundColor: p.swatch }} />
-              <span className="text-xs font-medium">{p.label}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <span className="size-9 shrink-0 rounded-lg" style={{ backgroundColor: preset.swatch }} />
+          <div className="min-w-0">
+            <p className="truncate font-medium">{preset.label}</p>
+            <p className="truncate text-sm text-muted-foreground">
+              {font.family} · {preset.description}
+            </p>
+          </div>
         </div>
-        {!readOnly && <p className="mt-3 text-xs text-muted-foreground">Changes apply instantly and save automatically.</p>}
+        <Button variant="outline" className="mt-4" asChild>
+          <Link to="/settings/appearance">
+            <Palette /> {readOnly ? 'View themes' : 'Change theme & font'}
+          </Link>
+        </Button>
       </CardContent>
     </Card>
   )
