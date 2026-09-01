@@ -56,12 +56,17 @@ describe('theme presets', () => {
 
   it('picks a readable foreground for every preset in both schemes', () => {
     const lightness = (c: string) => Number(/oklch\(([\d.]+)/.exec(c)?.[1] ?? NaN)
+    // The brand colour is a fill too — nav items paint with it on hover — so it
+    // needs the same guarantee as the accent. The brands sit light enough that
+    // white-on-brand would be the unreadable case.
     for (const preset of Object.values(THEME_PRESETS)) {
       for (const scheme of ['light', 'dark'] as const) {
-        const bg = lightness(preset[scheme]['--primary']!)
-        const fg = lightness(preset[scheme]['--primary-foreground']!)
-        // Text and its background must be far apart in lightness to be legible.
-        expect(Math.abs(bg - fg), `${preset.key} ${scheme}`).toBeGreaterThan(0.28)
+        for (const fill of ['--primary', '--brand'] as const) {
+          const bg = lightness(preset[scheme][fill]!)
+          const fg = lightness(preset[scheme][`${fill}-foreground`]!)
+          // Text and its background must be far apart in lightness to be legible.
+          expect(Math.abs(bg - fg), `${preset.key} ${scheme} ${fill}`).toBeGreaterThan(0.28)
+        }
       }
     }
   })

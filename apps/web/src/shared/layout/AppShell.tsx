@@ -235,7 +235,7 @@ function Sidebar({
           onClick={onSignOut}
           title={collapsed ? 'Log out' : undefined}
           className={cn(
-            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground',
+            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
             collapsed && 'justify-center px-0',
           )}
         >
@@ -278,7 +278,7 @@ function Group({
         }}
         title={collapsed ? group.label : undefined}
         className={cn(
-          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium transition-colors hover:bg-sidebar-accent',
+          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium transition-colors hover:bg-brand hover:text-brand-foreground',
           hasActive ? 'text-foreground' : 'text-muted-foreground',
           collapsed && 'justify-center px-0',
         )}
@@ -330,7 +330,7 @@ function NavItem({
         'flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium transition-colors',
         active
           ? 'bg-primary/10 text-primary'
-          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground',
+          : 'text-muted-foreground hover:bg-brand hover:text-brand-foreground',
         collapsed && 'justify-center px-0',
       )}
     >

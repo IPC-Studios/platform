@@ -66,6 +66,9 @@ function tokens(accent: Swatch, brand: Swatch, scheme: 'light' | 'dark'): Record
     '--ring': css(accent),
     '--primary-foreground': foregroundFor(accent),
     '--brand': css(brand),
+    // The brand colour is a fill in its own right (nav hovers), so it needs the
+    // same readable-text treatment the accent gets.
+    '--brand-foreground': foregroundFor(brand),
     '--accent': tint,
     '--accent-foreground': scheme === 'light' ? `oklch(0.25 0.02 ${accent.h})` : 'oklch(0.97 0 0)',
   }
@@ -223,6 +226,7 @@ export const THEME_TOKENS = [
   '--ring',
   '--primary-foreground',
   '--brand',
+  '--brand-foreground',
   '--accent',
   '--accent-foreground',
 ] as const
