@@ -15,6 +15,7 @@ import { DashboardPage } from '@/routes/dashboard'
 import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
 import { ProjectDetailPage } from '@/routes/projects/detail'
+import { ProjectTrackingPage } from '@/routes/project-tracking'
 import { ShootsPage } from '@/routes/shoots'
 import { ClientsListPage } from '@/routes/clients/list'
 import { ProductionBoardPage } from '@/routes/production-board'
@@ -58,7 +59,7 @@ const routeTree = rootRoute.addChildren([
   route('/projects', ProjectsListPage),
   route('/projects/new', NewProjectPage),
   route('/projects/$id', ProjectDetailPage),
-  route('/project-tracking', comingSoon('Project tracking', 'projects', 'a later phase')),
+  route('/project-tracking', ProjectTrackingPage),
   route('/clients', ClientsListPage),
 
   // Nav destinations whose feature phase isn't built yet.

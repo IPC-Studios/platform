@@ -111,3 +111,31 @@ export const projectDetail = z.object({
   ),
 })
 export type ProjectDetail = z.infer<typeof projectDetail>
+
+/**
+ * One row of the tracking board: raw counters, not verdicts.
+ *
+ * The scoring lives in @ipc/domain so it can be tested and so the client can
+ * re-sort and re-filter without another round trip. The server's job here is
+ * only to count what is true.
+ */
+export const projectTrackingRow = z.object({
+  id: uuid,
+  name: z.string(),
+  status: projectStatus,
+  client_name: z.string().nullable(),
+  total_cost: money,
+  tasks_total: z.number().int(),
+  tasks_done: z.number().int(),
+  tasks_overdue: z.number().int(),
+  deliverables_total: z.number().int(),
+  deliverables_done: z.number().int(),
+  data_records_total: z.number().int(),
+  data_records_unverified: z.number().int(),
+  pending_reviews: z.number().int(),
+  shoots_total: z.number().int(),
+  shoots_done: z.number().int(),
+  next_shoot_date: isoDate.nullable(),
+  last_activity_at: isoDateTime,
+})
+export type ProjectTrackingRow = z.infer<typeof projectTrackingRow>

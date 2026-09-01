@@ -155,6 +155,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
     }
   if (method === 'GET' && path === '/clients') return atStage(clients, 'partial')
   if (method === 'GET' && path === '/projects') return atStage(projects, 'partial')
+  if (method === 'GET' && path === '/projects/tracking') return atStage(trackingRows, 'partial')
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
     return atStage(boardTasks, 'full')
@@ -731,6 +732,86 @@ const invitations = [
     last_sent_at: '2026-08-30T10:00:00Z',
     send_count: 1,
     expired: false,
+  },
+]
+
+/** Tracking rows: one burning, one late, one waiting, one stalled, one done. */
+const trackingRows = [
+  {
+    id: PROJ.p1,
+    name: 'Sharma Wedding',
+    status: 'active',
+    client_name: 'Sharma Family',
+    total_cost: 227000,
+    tasks_total: 8,
+    tasks_done: 3,
+    tasks_overdue: 2,
+    deliverables_total: 3,
+    deliverables_done: 1,
+    data_records_total: 4,
+    data_records_unverified: 3,
+    pending_reviews: 1,
+    shoots_total: 2,
+    shoots_done: 2,
+    next_shoot_date: null,
+    last_activity_at: '2026-08-28T10:00:00Z',
+  },
+  {
+    id: PROJ.p2,
+    name: 'Verma Reception',
+    status: 'on_hold',
+    client_name: 'Verma Weddings',
+    total_cost: 90000,
+    tasks_total: 5,
+    tasks_done: 2,
+    tasks_overdue: 1,
+    deliverables_total: 2,
+    deliverables_done: 0,
+    data_records_total: 2,
+    data_records_unverified: 0,
+    pending_reviews: 2,
+    shoots_total: 1,
+    shoots_done: 1,
+    next_shoot_date: null,
+    last_activity_at: '2026-08-20T10:00:00Z',
+  },
+  {
+    id: PROJ.p3,
+    name: 'Nova Product Shoot',
+    status: 'completed',
+    client_name: 'Nova Events',
+    total_cost: 72000,
+    tasks_total: 4,
+    tasks_done: 4,
+    tasks_overdue: 0,
+    deliverables_total: 2,
+    deliverables_done: 2,
+    data_records_total: 3,
+    data_records_unverified: 0,
+    pending_reviews: 0,
+    shoots_total: 1,
+    shoots_done: 1,
+    next_shoot_date: null,
+    last_activity_at: '2026-08-15T10:00:00Z',
+  },
+  {
+    id: PROJ.p4,
+    name: 'Kapoor Pre-Wedding',
+    status: 'active',
+    client_name: 'Sharma Family',
+    total_cost: 45000,
+    tasks_total: 3,
+    tasks_done: 1,
+    tasks_overdue: 0,
+    deliverables_total: 1,
+    deliverables_done: 0,
+    data_records_total: 0,
+    data_records_unverified: 0,
+    pending_reviews: 0,
+    shoots_total: 2,
+    shoots_done: 0,
+    next_shoot_date: '2026-09-18',
+    last_activity_at: '2026-08-31T10:00:00Z',
   },
 ]
 
