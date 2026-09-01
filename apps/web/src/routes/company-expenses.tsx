@@ -9,6 +9,9 @@ import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { formatINR, humanize } from '@/shared/ui/format'
+import { Card, CardContent } from '@/shared/ui/card'
+import { BarChart, ShareChart } from '@/shared/ui/chart'
+import { groupBy, monthlySeries } from '@/shared/ui/chart-geometry'
 import { useExpenses, useCreateExpense } from '@/features/financials/api'
 
 export function CompanyExpensesPage() {
@@ -37,7 +40,33 @@ function Expenses() {
       ) : !data || data.length === 0 ? (
         <EmptyState title="No expenses logged" description="Track studio costs to see accurate profit." action={<AddExpenseDialog />} />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardContent className="p-5">
+              <h2 className="font-semibold tracking-tight">Spend by month</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">The last six months.</p>
+              <BarChart
+                className="mt-4"
+                points={monthlySeries(data, (e) => e.expense_date, (e) => e.amount)}
+                format={formatINR}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <h2 className="font-semibold tracking-tight">By category</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">Where the money actually goes.</p>
+              <ShareChart
+                className="mt-4"
+                points={groupBy(data, (e) => e.category, (e) => e.amount)}
+                format={formatINR}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="mt-6 overflow-hidden rounded-lg border border-border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left text-muted-foreground">
               <tr>
@@ -67,6 +96,7 @@ function Expenses() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   )

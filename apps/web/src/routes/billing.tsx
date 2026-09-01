@@ -11,6 +11,9 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { formatINR, humanize } from '@/shared/ui/format'
+import { Card, CardContent } from '@/shared/ui/card'
+import { BarChart, ShareChart } from '@/shared/ui/chart'
+import { monthlySeries } from '@/shared/ui/chart-geometry'
 import { useInvoices, useStates, useCreateInvoice, useRecordPayment } from '@/features/billing/api'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
@@ -37,7 +40,41 @@ function Billing() {
       ) : !data || data.length === 0 ? (
         <EmptyState title="No invoices yet" description="Raise your first GST invoice." action={<NewInvoiceDialog />} />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardContent className="p-5">
+              <h2 className="font-semibold tracking-tight">Invoiced by month</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">The last six months.</p>
+              <BarChart
+                className="mt-4"
+                points={monthlySeries(data, (i) => i.invoice_date, (i) => i.total)}
+                format={formatINR}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <h2 className="font-semibold tracking-tight">Collected against outstanding</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Across every invoice raised, not just this month.
+              </p>
+              <ShareChart
+                className="mt-4"
+                points={[
+                  {
+                    label: 'Received',
+                    value: data.reduce((sum, i) => sum + (i.total - i.balance_due), 0),
+                  },
+                  { label: 'Outstanding', value: data.reduce((sum, i) => sum + i.balance_due, 0) },
+                ]}
+                format={formatINR}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="mt-6 overflow-hidden rounded-lg border border-border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left text-muted-foreground">
               <tr>
@@ -73,6 +110,7 @@ function Billing() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   )
