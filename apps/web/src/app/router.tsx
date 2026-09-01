@@ -20,6 +20,7 @@ import { LeadSourcesPage } from '@/routes/lead-sources'
 import { ShootsPage } from '@/routes/shoots'
 import { ClientsListPage } from '@/routes/clients/list'
 import { ProductionBoardPage } from '@/routes/production-board'
+import { TasksPage } from '@/routes/tasks'
 import { TeamAllocationPage } from '@/routes/team-allocation'
 import { DataManagementPage } from '@/routes/data-management'
 import { MyWorkPage } from '@/routes/my-work'
@@ -65,7 +66,7 @@ const routeTree = rootRoute.addChildren([
 
   // Nav destinations whose feature phase isn't built yet.
   route('/shoots', ShootsPage),
-  route('/tasks', ProductionBoardPage),
+  route('/tasks', TasksPage),
   route('/tasks/my', comingSoon('My tasks', 'tasks', 'Phase 12')),
   route('/shoots/my', comingSoon('My shoots', 'projects', 'a later phase')),
   route('/my-work', MyWorkPage),

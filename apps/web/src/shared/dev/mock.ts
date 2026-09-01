@@ -123,8 +123,14 @@ const projectDetail: ProjectDetail = {
 }
 
 const boardTasks = [
-  boardTask(uid(0x1a), 'Cull & select — Sharma', 'to_do', 'high', 'Sharma Wedding', 0),
-  boardTask(uid(0x1b), 'Colour grade film', 'to_do', 'urgent', 'Sharma Wedding', 1),
+  boardTask(uid(0x1a), 'Cull & select — Sharma', 'to_do', 'high', 'Sharma Wedding', 0, {
+    due_date: '2026-08-28',
+    description: 'First pass, then hand to the editor.',
+  }),
+  boardTask(uid(0x1b), 'Colour grade film', 'to_do', 'urgent', 'Sharma Wedding', 1, {
+    due_date: '2026-09-01',
+    assignee_names: [],
+  }),
   boardTask(uid(0x1c), 'Album layout', 'in_progress', 'medium', 'Sharma Wedding', 0),
   boardTask(uid(0x1d), 'Edit teaser', 'in_progress', 'high', 'Verma Reception', 1),
   boardTask(uid(0x1e), 'Client review call', 'completed', 'low', 'Nova Product Shoot', 0),
@@ -168,7 +174,11 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
     return atStage(boardTasks, 'full')
-  if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return boardTasks
+  if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return atStage(boardTasks, 'full')
+  if (method === 'GET' && path === '/tasks/bundles') return atStage(bundlesFx, 'partial')
+  if (method === 'POST' && path === '/tasks/bundles') return { id: uid(0xd8) }
+  if (method === 'DELETE' && path.startsWith('/tasks/bundles/')) return {}
+  if (method === 'POST' && /\/tasks\/bundles\/[^/]+\/apply$/.test(path)) return { created: 4 }
   if (method === 'GET' && (path === '/shoots' || path.startsWith('/shoots?'))) return shootsFx
   if (method === 'POST' && path === '/shoots') return { id: uid(0x5c) }
   if (method === 'PATCH' && path.startsWith('/shoots/')) return {}
@@ -775,6 +785,27 @@ const members = [
   { user_id: uid(0xe3), name: 'Sana (Editor)', role: 'manager' },
 ]
 
+const bundlesFx = [
+  {
+    id: uid(0xd6),
+    name: 'Wedding editing',
+    items: [
+      { id: uid(0xd61), title: 'Cull and select', priority: 'high', sort_order: 0 },
+      { id: uid(0xd62), title: 'Colour grade', priority: 'medium', sort_order: 1 },
+      { id: uid(0xd63), title: 'Album layout', priority: 'medium', sort_order: 2 },
+      { id: uid(0xd64), title: 'Client review', priority: 'low', sort_order: 3 },
+    ],
+  },
+  {
+    id: uid(0xd7),
+    name: 'Shoot preparation',
+    items: [
+      { id: uid(0xd71), title: 'Confirm call sheet', priority: 'urgent', sort_order: 0 },
+      { id: uid(0xd72), title: 'Charge batteries and format cards', priority: 'high', sort_order: 1 },
+    ],
+  },
+]
+
 const shootsFx = [
   {
     id: uid(0x61),
@@ -990,16 +1021,20 @@ function boardTask(
   priority: string,
   project_name: string,
   sort_order: number,
+  over: { due_date?: string | null; description?: string | null; assignee_names?: string[] } = {},
 ) {
   return {
     id,
     title,
+    description: null,
     status,
     priority,
     due_date: null,
     project_id: PROJ.p1,
     project_name,
+    assignee_names: ['Rahul Sharma'],
     sort_order,
+    ...over,
   }
 }
 

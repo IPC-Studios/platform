@@ -198,14 +198,18 @@ body {
     }
   }
 
+  /* Centring is done with the `translate` property (Tailwind v4), so this
+     animates `scale` — an independent property — rather than `transform`.
+     A transform here composes with that translate and the dialog flies in
+     from the corner before settling. */
   @keyframes ipc-dialog-enter {
     from {
       opacity: 0;
-      transform: translate(-50%, -48%) scale(0.97);
+      scale: 0.97;
     }
     to {
       opacity: 1;
-      transform: translate(-50%, -50%) scale(1);
+      scale: 1;
     }
   }
 

@@ -64,6 +64,7 @@ async function freshDb() {
   await db.exec(mig('0028_crm_followups.sql'))
   await db.exec(mig('0029_lead_sources.sql'))
   await db.exec(mig('0030_attendance_ops.sql'))
+  await db.exec(mig('0031_task_bundles.sql'))
   return db
 }
 
@@ -1753,5 +1754,88 @@ describe('attendance check-out and fence (0030)', () => {
   it('keeps the fence out once it is set', async () => {
     // Same coordinates the fence was just moved away from.
     await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow()
+  })
+})
+
+describe('task bundles (0031)', () => {
+  let db: PGlite
+  const owner = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+  let bundle: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@bundle.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Bundle Studio','Owner');`)
+
+    const b = await db.query<{ id: string }>(
+      `insert into task_bundles (company_id, name)
+       values (get_current_company_id(), 'Wedding editing') returning id;`,
+    )
+    bundle = b.rows[0]!.id
+    for (const [i, title] of ['Cull and select', 'Colour grade', 'Album layout'].entries()) {
+      await db.exec(
+        `insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order)
+         values ('${bundle}', get_current_company_id(), '${title}', 'medium', ${i});`,
+      )
+    }
+  })
+
+  it('stamps out one task per item, keeping the checklist order', async () => {
+    const count = (
+      await db.query<{ n: number }>(`select apply_task_bundle('${bundle}', null, '{}') as n;`)
+    ).rows[0]!.n
+    expect(count).toBe(3)
+
+    const tasks = await db.query<{ title: string; status: string }>(
+      `select title, status from tasks order by created_at, title;`,
+    )
+    expect(tasks.rows).toHaveLength(3)
+    expect(tasks.rows.every((t) => t.status === 'to_do')).toBe(true)
+  })
+
+  it('can raise the same checklist against a project', async () => {
+    const client = (
+      await db.query<{ id: string }>(
+        `insert into clients (company_id, name) values (get_current_company_id(), 'Sharma') returning id;`,
+      )
+    ).rows[0]!.id
+    const project = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name)
+         values (get_current_company_id(), '${client}', 'Sharma Wedding') returning id;`,
+      )
+    ).rows[0]!.id
+
+    await db.query(`select apply_task_bundle('${bundle}', '${project}', '{}');`)
+    const linked = await db.query<{ n: number }>(
+      `select count(*)::int as n from tasks where project_id = '${project}';`,
+    )
+    expect(linked.rows[0]!.n).toBe(3)
+  })
+
+  it('refuses a bundle or project belonging to someone else', async () => {
+    // SECURITY DEFINER bypassed RLS to get here, so the function has to do the
+    // tenant check itself — an id alone must not reach across studios.
+    await expect(
+      db.query(`select apply_task_bundle('${owner}'::uuid, null, '{}');`),
+    ).rejects.toThrow()
+    await expect(
+      db.query(`select apply_task_bundle('${bundle}', '${owner}'::uuid, '{}');`),
+    ).rejects.toThrow()
+  })
+
+  it('writes bundles through the admin/manager policy 0007 set', async () => {
+    // The tables were always policied; only a way to use them was missing.
+    const policies = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies
+        where tablename in ('task_bundles', 'task_bundle_items');`,
+    )
+    expect(policies.rows.map((p) => p.policyname).sort()).toEqual([
+      'task_bundle_items_select',
+      'task_bundle_items_write',
+      'task_bundles_select',
+      'task_bundles_write',
+    ])
   })
 })

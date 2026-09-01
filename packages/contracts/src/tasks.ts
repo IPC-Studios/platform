@@ -11,11 +11,13 @@ export type TaskPriority = z.infer<typeof taskPriority>
 export const taskListItem = z.object({
   id: uuid,
   title: z.string(),
+  description: z.string().nullable().default(null),
   status: taskStatus,
   priority: taskPriority,
   due_date: isoDate.nullable(),
   project_id: uuid.nullable(),
   project_name: z.string().nullable(),
+  assignee_names: z.array(z.string()).default([]),
   sort_order: z.number().int().default(0),
 })
 export type TaskListItem = z.infer<typeof taskListItem>
@@ -24,6 +26,7 @@ export const createTaskRequest = z.object({
   project_id: uuid.nullable().default(null),
   deliverable_id: uuid.nullable().default(null),
   title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
   status: taskStatus.default('to_do'),
   priority: taskPriority.default('medium'),
   due_date: isoDate.optional(),
@@ -47,3 +50,39 @@ export const setBoardOrderRequest = z.object({
   task_ids: z.array(uuid),
 })
 export type SetBoardOrderRequest = z.infer<typeof setBoardOrderRequest>
+
+/** A reusable checklist: the same tasks a studio raises every wedding. */
+export const taskBundleItem = z.object({
+  id: uuid,
+  title: z.string(),
+  priority: taskPriority,
+  sort_order: z.number().int(),
+})
+export type TaskBundleItem = z.infer<typeof taskBundleItem>
+
+export const taskBundle = z.object({
+  id: uuid,
+  name: z.string(),
+  items: z.array(taskBundleItem),
+})
+export type TaskBundle = z.infer<typeof taskBundle>
+
+export const createBundleRequest = z.object({
+  name: z.string().trim().min(2).max(120),
+  items: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(200),
+        priority: taskPriority.default('medium'),
+      }),
+    )
+    .min(1)
+    .max(50),
+})
+export type CreateBundleRequest = z.infer<typeof createBundleRequest>
+
+export const applyBundleRequest = z.object({
+  project_id: uuid.nullable().default(null),
+  assignees: z.array(uuid).default([]),
+})
+export type ApplyBundleRequest = z.infer<typeof applyBundleRequest>
