@@ -137,6 +137,15 @@ const boardTasks = [
  * refetches, so a hard-coded reply would snap the selection back and make the
  * palette impossible to try in preview mode.
  */
+/** Mirrors the theme fixture: a write here has to survive the refetch. */
+const profileFx = {
+  name: 'Demo Owner',
+  email: 'owner@demostudio.in',
+  phone: '9800000000',
+  role: 'super_admin',
+  status: 'active',
+}
+
 const themeState = { preset_key: 'ipc_classic', font_key: null as string | null, color_scheme: 'light' }
 
 export function mockResponse(path: string, method: string, body?: unknown): unknown {
@@ -208,6 +217,11 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
       token_type: 'bearer',
       expires_in: 1800,
     }
+  if (method === 'GET' && path === '/settings/profile') return profileFx
+  if (method === 'PATCH' && path === '/settings/profile') {
+    Object.assign(profileFx, body as Record<string, unknown>)
+    return { ...profileFx }
+  }
   if (method === 'GET' && path === '/settings/company') return companyFx
   if (method === 'PATCH' && path === '/settings/company') return companyFx
   if (method === 'GET' && path === '/settings/theme') return { ...themeState }

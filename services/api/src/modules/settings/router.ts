@@ -1,5 +1,12 @@
 import { Hono } from 'hono'
-import { companyProfile, companyTheme, updateCompanyRequest, updateThemeRequest } from '@ipc/contracts'
+import {
+  companyProfile,
+  companyTheme,
+  myProfile,
+  updateCompanyRequest,
+  updateMyProfileRequest,
+  updateThemeRequest,
+} from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireOwner } from '../../middleware/permissions'
@@ -33,6 +40,34 @@ export const settingsRouter = new Hono<AppEnv>()
     }).catch(() => null)
     if (!row) fail(400, 'We could not save your changes.')
     return c.json(companyProfile.parse(row))
+  })
+
+  // Your own row, not the studio's. No owner gate: everyone may edit their own
+  // name and phone, and RLS scopes the write to the caller either way.
+  .get('/profile', async (c) => {
+    const auth = c.get('auth')
+    const row = await withUser(c.env, auth.userId, async (sql) => {
+      const rows = await sql`
+        select name, email, phone, role, status from users where user_id = ${auth.userId}`
+      return rows[0]
+    }).catch(() => null)
+    if (!row) fail(404, 'We could not load your profile.')
+    return c.json(myProfile.parse(row))
+  })
+
+  .patch('/profile', async (c) => {
+    const parsed = updateMyProfileRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check your details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const auth = c.get('auth')
+    const row = await withUser(c.env, auth.userId, async (sql) => {
+      const rows = await sql`
+        update users set ${sql(parsed.data)} where user_id = ${auth.userId}
+        returning name, email, phone, role, status`
+      return rows[0]
+    }).catch(() => null)
+    if (!row) fail(400, 'We could not save your changes.')
+    return c.json(myProfile.parse(row))
   })
 
   .get('/theme', async (c) => {

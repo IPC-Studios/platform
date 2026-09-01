@@ -5,6 +5,7 @@ import { cn } from '@/shared/ui/cn'
 
 const TABS: ReadonlyArray<{ to: string; label: string; module: ModuleKey }> = [
   { to: '/settings/company', label: 'Company', module: 'settings' },
+  { to: '/settings/roles', label: 'Roles & Access', module: 'team_roles' },
   { to: '/settings/appearance', label: 'Theme & Branding', module: 'settings' },
   { to: '/settings/subscription', label: 'Subscription', module: 'settings_subscription' },
 ]
@@ -21,13 +22,13 @@ export function SettingsTabs() {
   if (visible.length < 2) return null
 
   return (
-    <div className="mb-6 flex gap-1 rounded-xl border border-border bg-card p-1.5">
+    <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
       {visible.map((t) => (
         <Link
           key={t.to}
           to={t.to}
           className={cn(
-            'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+            'whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors',
             pathname === t.to
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground',

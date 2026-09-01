@@ -25,6 +25,27 @@ export const updateCompanyRequest = z.object({
 export type UpdateCompanyRequest = z.infer<typeof updateCompanyRequest>
 
 /**
+ * The signed-in person's own profile.
+ *
+ * Email is read-only: it is the login, and changing it is an identity move that
+ * belongs with verification, not a settings form.
+ */
+export const myProfile = z.object({
+  name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  role: z.string(),
+  status: z.string(),
+})
+export type MyProfile = z.infer<typeof myProfile>
+
+export const updateMyProfileRequest = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  phone: z.string().trim().max(20).nullable().optional(),
+})
+export type UpdateMyProfileRequest = z.infer<typeof updateMyProfileRequest>
+
+/**
  * The allow-listed theme presets. The palette itself lives in the web app; this
  * is the shared key list so the server can refuse a preset that does not exist
  * instead of persisting arbitrary strings into company_theme_settings.

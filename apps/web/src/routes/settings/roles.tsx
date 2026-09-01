@@ -3,6 +3,7 @@ import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import type { DirectoryMember, EmployeeRole } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
@@ -52,6 +53,7 @@ function RolesAccess() {
         description="The job roles your studio books people for, and who holds them."
         actions={isOwner ? <RoleDialog /> : undefined}
       />
+      <SettingsTabs />
 
       <HowToUse
         title="Two kinds of role"
