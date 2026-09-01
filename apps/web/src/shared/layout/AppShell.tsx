@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
-import { Menu, Moon, Sun, LogOut, ChevronDown, ChevronsLeft, ChevronsRight, X } from 'lucide-react'
-import type { ModuleKey } from '@ipc/permissions'
+import { Menu, Moon, Sun, LogOut, ChevronDown, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { useAccess } from '../auth/useAccess'
 import { useTheme } from '../theme/ThemeProvider'
 import { Button } from '../ui/button'
 import { cn } from '../ui/cn'
-import { NAV, type NavEntry, type NavGroup, type NavLeaf } from './nav'
+import { NAV, type NavEntry, type NavGroup, type NavLeaf, filterNav } from './nav'
+import { CommandPalette, openCommandPalette, paletteShortcutHint } from './CommandPalette'
 
-type Access = ReturnType<typeof useAccess>
 
 const COLLAPSE_KEY = 'ipc.sidebar.collapsed'
 const GROUPS_KEY = 'ipc.sidebar.groups'
@@ -35,34 +34,6 @@ function readOpenGroups(): Record<string, boolean> {
 
 /** How far the nav was scrolled, so a remount doesn't jump back to the top. */
 let navScrollTop = 0
-
-function leafVisible(leaf: NavLeaf, role: string, access: Access, isPlatformAdmin: boolean): boolean {
-  if (leaf.platformOnly) return isPlatformAdmin
-  if (leaf.roles && !leaf.roles.includes(role as never)) return false
-  if (leaf.module && !access.hasModule(leaf.module as ModuleKey)) return false
-  return true
-}
-
-/** Drop entries failing role/module/platform checks; drop groups left empty. */
-function filterNav(
-  entries: NavEntry[],
-  role: string,
-  access: Access,
-  isPlatformAdmin: boolean,
-): NavEntry[] {
-  const out: NavEntry[] = []
-  for (const e of entries) {
-    if (e.kind === 'leaf') {
-      if (leafVisible(e, role, access, isPlatformAdmin)) out.push(e)
-    } else {
-      if (e.platformOnly && !isPlatformAdmin) continue
-      if (e.roles && !e.roles.includes(role as never)) continue
-      const children = e.children.filter((c) => leafVisible(c, role, access, isPlatformAdmin))
-      if (children.length) out.push({ ...e, children })
-    }
-  }
-  return out
-}
 
 const matches = (pathname: string, to: string) =>
   pathname === to || pathname.startsWith(to + '/')
@@ -157,7 +128,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="md:hidden">
             <Brand />
           </span>
-          <div className="ml-auto flex items-center gap-1">
+
+          {/* A shortcut nobody can see is a shortcut nobody uses, so the
+              trigger sits in the bar and names its own key. */}
+          <button
+            type="button"
+            onClick={openCommandPalette}
+            className="ml-auto flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64"
+          >
+            <Search className="size-4 shrink-0" aria-hidden />
+            <span className="hidden flex-1 text-left sm:inline">Search…</span>
+            <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline">
+              {paletteShortcutHint()}
+            </kbd>
+          </button>
+
+          <div className="ml-2 flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
               {scheme === 'dark' ? <Sun /> : <Moon />}
             </Button>
@@ -172,6 +158,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             Your plan is in its grace period. Renew soon to avoid interruption.
           </div>
         )}
+
+        <CommandPalette />
 
         <main
           key={pathname}

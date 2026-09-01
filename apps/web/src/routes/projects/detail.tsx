@@ -38,7 +38,7 @@ export function ProjectDetailPage() {
 }
 
 function ProjectDetail() {
-  const { id } = useParams({ from: '/projects/$id' })
+  const { id } = useParams({ from: '/authed/projects/$id' })
   const { data, isLoading, isError, refetch } = useProject(id)
   const access = useAccess()
   const canEdit = access.hasAction('projects', 'edit')

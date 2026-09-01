@@ -1,4 +1,5 @@
 import type { ModuleKey } from '@ipc/permissions'
+import type { useAccess } from '../auth/useAccess'
 import type { AppRole } from '@ipc/permissions'
 import {
   LayoutDashboard,
@@ -50,6 +51,8 @@ export interface NavGroup {
 }
 
 export type NavEntry = NavLeaf | NavGroup
+
+type Access = ReturnType<typeof useAccess>
 
 const leaf = (
   label: string,
@@ -145,3 +148,45 @@ export const NAV: NavEntry[] = [
     ],
   },
 ]
+
+function leafVisible(leaf: NavLeaf, role: string, access: Access, isPlatformAdmin: boolean): boolean {
+  if (leaf.platformOnly) return isPlatformAdmin
+  if (leaf.roles && !leaf.roles.includes(role as never)) return false
+  if (leaf.module && !access.hasModule(leaf.module as ModuleKey)) return false
+  return true
+}
+
+/** Drop entries failing role/module/platform checks; drop groups left empty. */
+export function filterNav(
+  entries: NavEntry[],
+  role: string,
+  access: Access,
+  isPlatformAdmin: boolean,
+): NavEntry[] {
+  const out: NavEntry[] = []
+  for (const e of entries) {
+    if (e.kind === 'leaf') {
+      if (leafVisible(e, role, access, isPlatformAdmin)) out.push(e)
+    } else {
+      if (e.platformOnly && !isPlatformAdmin) continue
+      if (e.roles && !e.roles.includes(role as never)) continue
+      const children = e.children.filter((c) => leafVisible(c, role, access, isPlatformAdmin))
+      if (children.length) out.push({ ...e, children })
+    }
+  }
+  return out
+}
+
+/** Every destination this user can actually open, flattened for searching. */
+export function navDestinations(
+  role: string,
+  access: Access,
+  isPlatformAdmin: boolean,
+): NavLeaf[] {
+  const out: NavLeaf[] = []
+  for (const e of filterNav(NAV, role, access, isPlatformAdmin)) {
+    if (e.kind === 'leaf') out.push(e)
+    else out.push(...e.children)
+  }
+  return out
+}

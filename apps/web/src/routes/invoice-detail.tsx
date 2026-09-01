@@ -23,7 +23,7 @@ export function InvoiceDetailPage() {
 }
 
 function InvoiceDoc() {
-  const { id } = useParams({ from: '/billing/invoices/$id' })
+  const { id } = useParams({ from: '/authed/billing/invoices/$id' })
   const { data, isLoading, isError, refetch } = useInvoice(id)
   const { data: company } = useQuery({
     queryKey: ['settings', 'company'],
