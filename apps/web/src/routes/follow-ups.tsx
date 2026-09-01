@@ -20,6 +20,9 @@ import { Input, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
+import { Avatar } from '@/shared/ui/avatar'
+import { CountUp } from '@/shared/ui/count-up'
+import { SkeletonTable } from '@/shared/ui/skeleton'
 import { useDistribution, useLeads } from '@/features/crm/api'
 import { AddLeadDialog } from '@/features/crm/AddLeadDialog'
 import { LeadDrawer } from '@/features/crm/LeadDrawer'
@@ -139,7 +142,7 @@ function Crm() {
 
       <div className="mt-4">
         {isLoading ? (
-          <LoadingState />
+          <SkeletonTable rows={5} columns={5} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : tab === 'inbox' ? (
@@ -195,7 +198,9 @@ function SummaryStrip({
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           {stats.map(([label, value, tone]) => (
             <span key={label} className="flex items-baseline gap-1.5">
-              <span className={cn('text-lg font-semibold tabular-nums', tone)}>{value}</span>
+              <span className={cn('text-lg font-semibold tabular-nums', tone)}>
+                <CountUp value={value} />
+              </span>
               <span className="text-sm text-muted-foreground">{label}</span>
             </span>
           ))}
@@ -525,7 +530,14 @@ function LeadTable({
                 <StatusBadge tone={SOURCE_TONE[l.source] ?? 'neutral'}>{l.source}</StatusBadge>
               </td>
               <td className="px-4 py-2 text-muted-foreground">
-                {l.assignee_name ?? <span className="text-warning">Unassigned</span>}
+                {l.assignee_name ? (
+                  <span className="flex items-center gap-2">
+                    <Avatar name={l.assignee_name} size="sm" />
+                    <span className="truncate">{l.assignee_name}</span>
+                  </span>
+                ) : (
+                  <span className="text-warning">Unassigned</span>
+                )}
               </td>
               <td className="px-4 py-2">
                 <DueBadge lead={l} now={now} />

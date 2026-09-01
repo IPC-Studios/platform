@@ -1,4 +1,4 @@
-import { KeyRound, Search, Trash2, UserCheck, UserX, Users } from 'lucide-react'
+import { KeyRound, Search, Trash2, UserCheck, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DirectoryMember, EmployeeRole } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -7,6 +7,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
+import { Avatar } from '@/shared/ui/avatar'
 import { useRemoveMember, useSendReset, useUpdateMember } from './api'
 import type { DirectoryFilters, SortKey } from './filters'
 
@@ -134,11 +135,14 @@ export function DirectoryTable({
         {rows.map((m) => (
           <div key={m.user_id} className="rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <Avatar name={m.name} size="sm" />
+                <div className="min-w-0">
                 <p className="truncate font-medium">{m.name}</p>
                 <p className="truncate text-sm text-muted-foreground">
                   {[m.email, m.phone].filter(Boolean).join(' · ') || '—'}
                 </p>
+                </div>
               </div>
               <StatusBadge tone={STATUS_TONE[m.status] ?? 'neutral'}>{humanize(m.status)}</StatusBadge>
             </div>
@@ -182,7 +186,7 @@ export function DirectoryTable({
             <tr key={m.user_id} className="border-t border-border hover:bg-muted/30">
               <td className="px-4 py-2 font-medium">
                 <span className="flex items-center gap-2">
-                  <Users className="size-4 shrink-0 text-muted-foreground" />
+                  <Avatar name={m.name} size="sm" />
                   <span>{m.name}</span>
                   {!m.login_enabled && (
                     <span className="whitespace-nowrap text-xs font-normal text-muted-foreground">

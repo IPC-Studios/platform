@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from '@tanstack/react-router'
 import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import type { DirectoryMember, EmployeeRole } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -114,7 +115,15 @@ function RolesAccess() {
           ) : directory.isError ? (
             <ErrorState onRetry={() => void directory.refetch()} />
           ) : !directory.data || directory.data.length === 0 ? (
-            <EmptyState title="No team members yet" description="Add someone first, then assign roles." />
+            <EmptyState
+              title="No team members yet"
+              description="Job roles are assigned to people, so there is nobody to assign them to yet."
+              action={
+                <Button variant="outline" asChild>
+                  <Link to="/employees">Go to team directory</Link>
+                </Button>
+              }
+            />
           ) : (
             <ul className="divide-y divide-border">
               {directory.data.map((m) => (

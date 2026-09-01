@@ -9,7 +9,6 @@ import {
   LogOut,
   MapPin,
   RefreshCw,
-  Users,
 } from 'lucide-react'
 import {
   attendanceDayRow,
@@ -36,6 +35,9 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
+import { Avatar } from '@/shared/ui/avatar'
+import { SkeletonTable } from '@/shared/ui/skeleton'
+import { CountUp } from '@/shared/ui/count-up'
 import {
   EMPTY_FILTERS,
   STATUS_LABEL,
@@ -285,7 +287,7 @@ function TeamDashboard() {
 
       <div className="mt-4">
         {isLoading ? (
-          <LoadingState />
+          <SkeletonTable rows={5} columns={5} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : shown.length === 0 ? (
@@ -336,7 +338,9 @@ function Tile({
     <Card>
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={cn('mt-1 text-2xl font-semibold tabular-nums', toneClass)}>{value}</p>
+        <p className={cn('mt-1 text-2xl font-semibold tabular-nums', toneClass)}>
+          {typeof value === 'number' ? <CountUp value={value} /> : value}
+        </p>
       </CardContent>
     </Card>
   )
@@ -386,7 +390,7 @@ function RosterTable({ rows }: { rows: readonly AttendanceDayRow[] }) {
               <tr key={r.user_id} className="border-t border-border hover:bg-muted/30">
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2 font-medium">
-                    <Users className="size-4 shrink-0 text-muted-foreground" />
+                    <Avatar name={r.name} size="sm" />
                     {r.name}
                   </span>
                   <span className="text-xs text-muted-foreground">

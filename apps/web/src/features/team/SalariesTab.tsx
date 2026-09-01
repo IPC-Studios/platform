@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { IndianRupee, Lock } from 'lucide-react'
 import type { DirectoryMember } from '@ipc/contracts'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -50,7 +51,12 @@ export function SalariesTab() {
         <CardContent className="py-4">
           <EmptyState
             title="Nobody on payroll yet"
-            description="Add a team member and their salary appears here."
+            description="Salaries are set per person, so this fills in as you add your team."
+            action={
+              <Button variant="outline" asChild>
+                <Link to="/employees">Go to team directory</Link>
+              </Button>
+            }
           />
         </CardContent>
       </Card>

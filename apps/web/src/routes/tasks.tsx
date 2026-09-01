@@ -11,7 +11,6 @@ import {
   Plus,
   Sparkles,
   Trash2,
-  Users,
 } from 'lucide-react'
 import type { TaskListItem, TaskPriority, TaskStatus } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -27,6 +26,9 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
+import { AvatarGroup } from '@/shared/ui/avatar'
+import { CountUp } from '@/shared/ui/count-up'
+import { SkeletonTable } from '@/shared/ui/skeleton'
 import { useProjects } from '@/features/projects/api'
 import {
   useApplyBundle,
@@ -165,7 +167,7 @@ function Tasks() {
 
       <div className="mt-4">
         {isLoading ? (
-          <LoadingState />
+          <SkeletonTable rows={6} columns={6} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : rows.length === 0 ? (
@@ -226,7 +228,9 @@ function Tile({
           <Icon className="size-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-xl font-semibold tabular-nums">{value}</p>
+          <p className="text-xl font-semibold tabular-nums">
+            <CountUp value={value} />
+          </p>
           <p className="truncate text-xs text-muted-foreground">{label}</p>
         </div>
       </CardContent>
@@ -330,9 +334,9 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
               <td className="px-4 py-2 text-muted-foreground">{t.project_name ?? '—'}</td>
               <td className="px-4 py-2 text-muted-foreground">
                 {t.assignee_names.length ? (
-                  <span className="flex items-center gap-1.5">
-                    <Users className="size-3.5 shrink-0" />
-                    {t.assignee_names.join(', ')}
+                  <span className="flex items-center gap-2">
+                    <AvatarGroup names={t.assignee_names} />
+                    <span className="truncate">{t.assignee_names.join(', ')}</span>
                   </span>
                 ) : (
                   <span className="text-warning">Unassigned</span>

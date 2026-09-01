@@ -84,7 +84,10 @@ function ProjectDetail() {
           </CardHeader>
           <CardContent>
             {data.deliverables.length === 0 ? (
-              <EmptyState title="No deliverables" />
+              <EmptyState
+                title="No deliverables yet"
+                description="List what the client receives — the album, the film, the reel. Chargeable ones add to the project total."
+              />
             ) : (
               <ul className="divide-y divide-border">
                 {data.deliverables.map((d) => (
@@ -119,7 +122,10 @@ function ProjectDetail() {
           </CardHeader>
           <CardContent>
             {data.payments.length === 0 ? (
-              <EmptyState title="No payments yet" />
+              <EmptyState
+                title="No payments yet"
+                description="Record an advance or a instalment and the balance updates here."
+              />
             ) : (
               <ul className="divide-y divide-border">
                 {data.payments.map((p) => (

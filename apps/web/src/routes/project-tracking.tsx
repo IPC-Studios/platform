@@ -24,7 +24,9 @@ import { cn } from '@/shared/ui/cn'
 import { Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
+import { CountUp } from '@/shared/ui/count-up'
+import { SkeletonCards, SkeletonTiles } from '@/shared/ui/skeleton'
 import {
   BAND_LABEL,
   BAND_TONE,
@@ -83,7 +85,10 @@ function ProjectTracking() {
       />
 
       {isLoading ? (
-        <LoadingState />
+        <div className="flex flex-col gap-4">
+          <SkeletonTiles count={6} />
+          <SkeletonCards count={4} />
+        </div>
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : (
@@ -181,7 +186,9 @@ function Tile({
           <Icon className="size-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-xl font-semibold tabular-nums">{value}</p>
+          <p className="text-xl font-semibold tabular-nums">
+            <CountUp value={value} />
+          </p>
           <p className="text-xs leading-tight text-muted-foreground">{label}</p>
         </div>
       </CardContent>

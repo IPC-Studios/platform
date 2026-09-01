@@ -1,6 +1,8 @@
+import { Link } from '@tanstack/react-router'
 import { TrendingUp, Wallet, IndianRupee } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { Button } from '@/shared/ui/button'
 import { StatCard } from '@/shared/ui/stat-card'
 import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
 import { formatINR } from '@/shared/ui/format'
@@ -23,7 +25,15 @@ function Financials() {
     return (
       <>
         <PageHeader title="Financials" />
-        <EmptyState title="No financial data yet" description="Create projects and log costs to see profit." />
+        <EmptyState
+          title="No financial data yet"
+          description="Profit is computed from project revenue and the costs booked against it. Create a project to start."
+          action={
+            <Button variant="outline" asChild>
+              <Link to="/projects">Go to projects</Link>
+            </Button>
+          }
+        />
       </>
     )
 
