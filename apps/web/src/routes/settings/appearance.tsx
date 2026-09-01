@@ -12,6 +12,7 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { DEFAULT_PRESET_KEY, THEME_PRESETS, presetFor, type ThemePreset } from '@/shared/theme/presets'
 import { FONT_OPTIONS, FONT_KEYS, fontOr, fontStack, loadFont } from '@/shared/theme/fonts'
 import { Button } from '@/shared/ui/button'
+import { TiltCard } from '@/shared/ui/tilt-card'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
@@ -200,7 +201,15 @@ function ThemeCard({
   const tokens = preset[scheme]
 
   return (
-    <Card className={cn('lift flex flex-col', applied && 'border-primary ring-1 ring-primary/30')}>
+    // A theme swatch is a showcase object, not something you read a row out
+    // of, so it is one of the few places a tilt belongs.
+    <TiltCard className="flex">
+      <Card
+        className={cn(
+          'flex flex-1 flex-col',
+          applied && 'border-primary ring-1 ring-primary/30',
+        )}
+      >
       <CardContent className="flex flex-1 flex-col p-5">
         <div className="flex items-center gap-2">
           <h3 className="font-semibold tracking-tight">{preset.label}</h3>
@@ -250,7 +259,8 @@ function ThemeCard({
           Font can be changed anytime from Customize → Typography.
         </p>
       </CardContent>
-    </Card>
+      </Card>
+    </TiltCard>
   )
 }
 

@@ -11,6 +11,30 @@
   overflow: hidden;
   pointer-events: none;
   color: var(--foreground);
+  /* A shallow scene. The layers below sit on their own planes within it. */
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  /* Centre until the pointer says otherwise, so the first frame is not offset. */
+  --cb-x: 0.5;
+  --cb-y: 0.5;
+}
+
+/*
+ * One parallax plane. `--d` is its depth: 1 is nearest the viewer and travels
+ * furthest, 0 is pinned to the far wall. The offset lives HERE and the
+ * animation lives on the child, because two transforms on one element replace
+ * each other rather than adding up.
+ */
+.cb-layer {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(
+    calc((var(--cb-x) - 0.5) * 2 * var(--d) * 26px),
+    calc((var(--cb-y) - 0.5) * 2 * var(--d) * 26px),
+    calc(var(--d) * 60px)
+  );
+  transition: transform 400ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
 }
 
 /* ── Aperture ─────────────────────────────────────────────────────── */
@@ -110,5 +134,11 @@
   .cb-diaphragm,
   .cb-bokeh {
     animation: none;
+  }
+  /* The parallax listener is not attached in this case, but the depth offset
+     is declarative — flatten it so nothing is left pushed off-centre. */
+  .cb-layer {
+    transform: none;
+    transition: none;
   }
 }

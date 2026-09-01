@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pointOnCircle, polygonPoints } from './CameraBackdrop'
+import { layerOffset, pointOnCircle, polygonPoints } from './CameraBackdrop'
 
 describe('pointOnCircle', () => {
   it('puts 0° straight up, not to the right', () => {
@@ -48,5 +48,34 @@ describe('polygonPoints', () => {
 
   it('honours rotation', () => {
     expect(polygonPoints(4, 100, 45).split(' ')[0]).not.toBe('0,-100')
+  })
+})
+
+describe('layerOffset', () => {
+  it('is centred when the pointer is centred', () => {
+    expect(layerOffset(0.5, 1, 26)).toBe(0)
+  })
+
+  it('moves a near layer further than a far one', () => {
+    // This difference IS the depth. If every layer moved the same amount the
+    // backdrop would read as one flat picture sliding about.
+    const near = layerOffset(1, 1, 26)
+    const far = layerOffset(1, 0.18, 26)
+    expect(Math.abs(near)).toBeGreaterThan(Math.abs(far))
+    expect(near).toBe(26)
+  })
+
+  it('shifts opposite ways either side of centre', () => {
+    expect(layerOffset(0, 1, 26)).toBe(-26)
+    expect(layerOffset(1, 1, 26)).toBe(26)
+  })
+
+  it('clamps a pointer that has left the viewport', () => {
+    expect(layerOffset(3, 1, 26)).toBe(26)
+    expect(layerOffset(-2, 1, 26)).toBe(-26)
+  })
+
+  it('stays put for a value that is not a number', () => {
+    expect(layerOffset(NaN, 1, 26)).toBe(0)
   })
 })

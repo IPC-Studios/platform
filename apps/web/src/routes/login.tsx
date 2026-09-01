@@ -19,6 +19,7 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
+import { TiltCard } from '@/shared/ui/tilt-card'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 
 type Mode = 'signin' | 'register' | 'forgot'
@@ -227,7 +228,7 @@ export function LoginPage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/40 p-4">
       <CameraBackdrop />
 
-      <div className="relative w-full max-w-md">
+      <TiltCard className="relative w-full max-w-md" max={3} sheen={false}>
         <h1 className="mb-6 text-center text-2xl font-bold tracking-tight">
           <span className="text-brand">IPC</span> Studios
         </h1>
@@ -534,7 +535,7 @@ export function LoginPage() {
             </p>
           </>
         )}
-      </div>
+      </TiltCard>
     </div>
   )
 }

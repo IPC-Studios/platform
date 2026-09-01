@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+import { prefersReducedMotion } from '../ui/motion'
 import './camera-backdrop.css'
 
 /** A point on a circle of `radius` at `degrees`, with 0 pointing straight up. */
@@ -37,12 +39,26 @@ const BLADES = Array.from({ length: 6 }, (_, i) => {
 
 /** Defocused highlights: position, size and which drift timing to use. */
 const BOKEH = [
-  { top: '12%', left: '8%', size: 190, variant: '' },
-  { top: '62%', left: '18%', size: 130, variant: 'cb-bokeh--slow' },
-  { top: '22%', left: '78%', size: 160, variant: 'cb-bokeh--slower' },
-  { top: '72%', left: '68%', size: 220, variant: 'cb-bokeh--slow' },
-  { top: '44%', left: '46%', size: 110, variant: 'cb-bokeh--slower' },
+  { top: '12%', left: '8%', size: 190, variant: '', depth: 0.9 },
+  { top: '62%', left: '18%', size: 130, variant: 'cb-bokeh--slow', depth: 0.55 },
+  { top: '22%', left: '78%', size: 160, variant: 'cb-bokeh--slower', depth: 0.75 },
+  { top: '72%', left: '68%', size: 220, variant: 'cb-bokeh--slow', depth: 1 },
+  { top: '44%', left: '46%', size: 110, variant: 'cb-bokeh--slower', depth: 0.35 },
 ]
+
+/** How far the nearest layer travels, corner to corner, in pixels. */
+const PARALLAX_RANGE = 26
+
+/**
+ * How far a layer at `depth` shifts for a pointer at `pct` (0-1) across the
+ * viewport. Near layers (depth 1) move most; the iris sits far back and barely
+ * stirs — which is what sells the separation between them.
+ */
+export function layerOffset(pct: number, depth: number, range = PARALLAX_RANGE): number {
+  if (!Number.isFinite(pct)) return 0
+  const centred = Math.min(1, Math.max(0, pct)) - 0.5
+  return Number((centred * 2 * depth * range).toFixed(2))
+}
 
 /**
  * Sign-in background: an aperture iris breathing open and shut behind drifting
@@ -53,30 +69,91 @@ const BOKEH = [
  * Decorative: aria-hidden, pointer-events-none, and completely still when the
  * visitor prefers reduced motion.
  */
+/**
+ * Track the pointer across the viewport as two 0-1 custom properties, so the
+ * layers can be moved in CSS. Written straight to the node inside a rAF: this
+ * fires on every pointer move and React state here would re-render the tree
+ * dozens of times a second for a decoration.
+ */
+function useParallax(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || prefersReducedMotion()) return
+    // No pointer to follow on a touchscreen, and matchMedia is the same gate
+    // the CSS uses.
+    if (!window.matchMedia('(hover: hover)').matches) return
+
+    let frame = 0
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return
+      cancelAnimationFrame(frame)
+      const { clientX, clientY } = e
+      frame = requestAnimationFrame(() => {
+        el.style.setProperty('--cb-x', String(clientX / window.innerWidth))
+        el.style.setProperty('--cb-y', String(clientY / window.innerHeight))
+      })
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('pointermove', onMove)
+    }
+  }, [ref])
+}
+
+/**
+ * Sign-in background: an aperture iris breathing open and shut behind drifting
+ * bokeh, on separate planes of a shallow 3D scene. Moving the pointer shifts
+ * the near highlights further than the far iris, which is what reads as depth
+ * rather than as a picture that wobbles.
+ *
+ * Each moving part is wrapped in its own parallax layer instead of having the
+ * offset added to its animation: the bokeh already animate `transform`, and a
+ * second transform on the same element replaces the first rather than adding
+ * to it.
+ *
+ * Drawn in `currentColor` at very low alpha, so it reads on both light and
+ * dark surfaces without introducing a colour of its own.
+ *
+ * Decorative: aria-hidden, pointer-events-none, and completely still when the
+ * visitor prefers reduced motion.
+ */
 export function CameraBackdrop() {
+  const ref = useRef<HTMLDivElement>(null)
+  useParallax(ref)
+
   return (
-    <div className="cb-root" aria-hidden>
+    <div className="cb-root" ref={ref} aria-hidden>
       {BOKEH.map((b) => (
         <span
           key={`${b.top}-${b.left}`}
-          className={`cb-bokeh ${b.variant}`}
-          style={{ top: b.top, left: b.left, width: b.size, height: b.size }}
-        />
+          className="cb-layer"
+          style={{ '--d': b.depth } as React.CSSProperties}
+        >
+          <span
+            className={`cb-bokeh ${b.variant}`}
+            style={{ top: b.top, left: b.left, width: b.size, height: b.size }}
+          />
+        </span>
       ))}
 
-      <svg className="cb-iris" viewBox="-120 -120 240 240" fill="none">
-        {/* Barrel rings — the fixed part of the lens. */}
-        <circle r="116" className="cb-ring" />
-        <circle r={BARREL} className="cb-ring cb-ring--faint" />
+      {/* The iris sits furthest back, so it barely moves. */}
+      <span className="cb-layer cb-layer--iris" style={{ '--d': 0.18 } as React.CSSProperties}>
+        <svg className="cb-iris" viewBox="-120 -120 240 240" fill="none">
+          {/* Barrel rings — the fixed part of the lens. */}
+          <circle r="116" className="cb-ring" />
+          <circle r={BARREL} className="cb-ring cb-ring--faint" />
 
-        {/* The diaphragm: the opening, plus the blades that stop it down. */}
-        <g className="cb-diaphragm">
-          <polygon points={polygonPoints(6, OPENING)} className="cb-blade-edge" />
-          {BLADES.map((b) => (
-            <line key={b.key} x1={b.x1} y1={b.y1} x2={b.x2} y2={b.y2} className="cb-blade" />
-          ))}
-        </g>
-      </svg>
+          {/* The diaphragm: the opening, plus the blades that stop it down. */}
+          <g className="cb-diaphragm">
+            <polygon points={polygonPoints(6, OPENING)} className="cb-blade-edge" />
+            {BLADES.map((b) => (
+              <line key={b.key} x1={b.x1} y1={b.y1} x2={b.x2} y2={b.y2} className="cb-blade" />
+            ))}
+          </g>
+        </svg>
+      </span>
     </div>
   )
 }
