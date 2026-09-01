@@ -216,7 +216,7 @@ function Sidebar({
     <aside
       className={cn(
         'shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar text-sidebar-foreground transition-[width] duration-200',
-        collapsed ? 'w-[4.5rem]' : 'w-72',
+        collapsed ? 'w-[4.5rem]' : 'w-64',
         className,
       )}
     >
@@ -258,7 +258,7 @@ function Sidebar({
       </div>
 
       {!collapsed && (
-        <p className="px-4 pb-1 pt-4 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <p className="px-4 pb-1 pt-3 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           Menu
         </p>
       )}
@@ -268,7 +268,7 @@ function Sidebar({
         onScroll={(e) => {
           navScrollTop = e.currentTarget.scrollTop
         }}
-        className={cn('flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3', collapsed && 'px-2 pt-3')}
+        className={cn('flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-2', collapsed && 'px-2 pt-2')}
       >
         {entries.map((e) =>
           e.kind === 'leaf' ? (
@@ -294,13 +294,13 @@ function Sidebar({
         )}
       </nav>
 
-      <div className={cn('border-t border-border p-3', collapsed && 'px-2')}>
+      <div className={cn('border-t border-border p-2', collapsed && 'px-2')}>
         <button
           type="button"
           onClick={onSignOut}
           title={collapsed ? 'Log out' : undefined}
           className={cn(
-            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
+            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
             collapsed && 'justify-center px-0',
           )}
         >
@@ -333,7 +333,7 @@ function Group({
   // Collapsed: the group icon is a stub — clicking it reopens the rail with the
   // group expanded, so no child route is stranded behind the collapse.
   return (
-    <div className={cn(!collapsed && 'mt-1')}>
+    <div className={cn(!collapsed && 'mt-0.5')}>
       <button
         type="button"
         onClick={() => {
@@ -346,7 +346,7 @@ function Group({
         }}
         title={collapsed ? group.label : undefined}
         className={cn(
-          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-brand hover:text-brand-foreground',
+          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-brand hover:text-brand-foreground',
           hasActive ? 'text-foreground' : 'text-muted-foreground',
           collapsed && 'justify-center px-0',
         )}
@@ -360,7 +360,7 @@ function Group({
         )}
       </button>
       {open && !collapsed && (
-        <div className="mt-1 ml-[1.4rem] space-y-1 border-l border-border pl-3">
+        <div className="ml-[1.4rem] space-y-0.5 border-l border-border pl-3">
           {group.children.map((c) => (
             <NavItem
               key={c.to}
@@ -395,7 +395,7 @@ function NavItem({
       to={to}
       title={collapsed ? label : undefined}
       className={cn(
-        'flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+        'flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors',
         active
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-brand hover:text-brand-foreground',
