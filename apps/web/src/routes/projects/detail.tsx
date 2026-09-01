@@ -124,7 +124,7 @@ function ProjectDetail() {
             {data.payments.length === 0 ? (
               <EmptyState
                 title="No payments yet"
-                description="Record an advance or a instalment and the balance updates here."
+                description="Record an advance or an instalment and the balance updates here."
               />
             ) : (
               <ul className="divide-y divide-border">
