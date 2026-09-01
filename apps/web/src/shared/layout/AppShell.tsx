@@ -63,7 +63,7 @@ function activeTarget(entries: NavEntry[], pathname: string): string | null {
 
 function Brand({ compact }: { compact?: boolean }) {
   return (
-    <span className="whitespace-nowrap text-lg font-bold tracking-tight">
+    <span className="whitespace-nowrap text-base font-bold tracking-tight">
       <span className="text-brand">IPC</span>
       {!compact && ' Studios'}
     </span>
@@ -201,7 +201,7 @@ function Sidebar({
       </div>
 
       {!collapsed && (
-        <p className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <p className="px-4 pb-1 pt-4 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           Menu
         </p>
       )}
@@ -235,11 +235,11 @@ function Sidebar({
           onClick={onSignOut}
           title={collapsed ? 'Log out' : undefined}
           className={cn(
-            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
+            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
             collapsed && 'justify-center px-0',
           )}
         >
-          <LogOut className="size-[18px] shrink-0" />
+          <LogOut className="size-4 shrink-0" />
           {!collapsed && 'Log out'}
         </button>
       </div>
@@ -278,12 +278,12 @@ function Group({
         }}
         title={collapsed ? group.label : undefined}
         className={cn(
-          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium transition-colors hover:bg-brand hover:text-brand-foreground',
+          'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-brand hover:text-brand-foreground',
           hasActive ? 'text-foreground' : 'text-muted-foreground',
           collapsed && 'justify-center px-0',
         )}
       >
-        {Icon && <Icon className="size-[18px] shrink-0" />}
+        {Icon && <Icon className="size-4 shrink-0" />}
         {!collapsed && (
           <>
             <span className="flex-1 text-left">{group.label}</span>
@@ -327,14 +327,14 @@ function NavItem({
       to={to}
       title={collapsed ? label : undefined}
       className={cn(
-        'flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-[15px] font-medium transition-colors',
+        'flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
         active
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-brand hover:text-brand-foreground',
         collapsed && 'justify-center px-0',
       )}
     >
-      {Icon && <Icon className="size-[18px] shrink-0" />}
+      {Icon && <Icon className="size-4 shrink-0" />}
       {!collapsed && label}
     </Link>
   )

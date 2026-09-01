@@ -109,6 +109,13 @@
     color: #000;
   }
 }
+/* The app's base size. Tailwind's rem scale hangs off this, so it is the one
+   place to adjust density — 15px reads tighter than the browser's 16px default
+   without dropping any surface below a comfortable reading size. */
+html {
+  font-size: 15px;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
