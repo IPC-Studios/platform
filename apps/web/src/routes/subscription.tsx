@@ -16,7 +16,7 @@ const plans = plan.array()
 
 export function SubscriptionPage() {
   return (
-    <AuthedPage module="settings_subscription" allowExpired>
+    <AuthedPage module="settings_subscription">
       <Subscription />
     </AuthedPage>
   )

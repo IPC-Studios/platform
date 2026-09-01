@@ -40,22 +40,84 @@ import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { comingSoon } from '@/routes/coming-soon'
+import { RequireAuth } from '@/shared/auth/guards'
+import { AppShell } from '@/shared/layout/AppShell'
 
 const rootRoute = createRootRoute({
   component: Outlet,
   notFoundComponent: NotFound,
 })
 
-const route = (path: string, component: () => ReactNode): AnyRoute =>
+/**
+ * The signed-in shell, mounted once.
+ *
+ * Every authed page used to render its own <RequireAuth><AppShell>, so a
+ * navigation tore the whole sidebar down and rebuilt it — resetting anything it
+ * held and re-running every mount effect. As a pathless layout route the shell
+ * stays put and only the <Outlet/> swaps.
+ */
+function AuthedShell() {
+  return (
+    <RequireAuth>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </RequireAuth>
+  )
+}
+
+/**
+ * The same shell with the plan gate lifted — the renewal page has to stay
+ * reachable precisely when the plan has lapsed, or the recovery path is behind
+ * the thing it recovers from.
+ */
+function RenewalShell() {
+  return (
+    <RequireAuth allowExpired>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </RequireAuth>
+  )
+}
+
+const authedLayout = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'authed',
+  component: AuthedShell,
+})
+
+const renewalLayout = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'renewal',
+  component: RenewalShell,
+})
+
+/** Public: no session, no shell. */
+const publicRoute = (path: string, component: () => ReactNode): AnyRoute =>
   createRoute({ getParentRoute: () => rootRoute, path, component })
 
+/** Signed in: the shell is already around it. */
+const route = (path: string, component: () => ReactNode): AnyRoute =>
+  createRoute({ getParentRoute: () => authedLayout, path, component })
+
 const routeTree = rootRoute.addChildren([
+  publicRoute('/login', LoginPage),
+  publicRoute('/verify', VerifyEmailPage),
+  publicRoute('/reset-password', ResetPasswordPage),
+  publicRoute('/accept-invite', AcceptInvitePage),
+  publicRoute('/terms/acknowledge', TermsAcknowledgePage),
+
+  renewalLayout.addChildren([
+    createRoute({
+      getParentRoute: () => renewalLayout,
+      path: '/settings/subscription',
+      component: SubscriptionPage,
+    }),
+  ]),
+
+  authedLayout.addChildren([
   route('/', DashboardPage),
-  route('/login', LoginPage),
-  route('/verify', VerifyEmailPage),
-  route('/reset-password', ResetPasswordPage),
-  route('/accept-invite', AcceptInvitePage),
-  route('/terms/acknowledge', TermsAcknowledgePage),
   route('/dashboard', DashboardPage),
 
   route('/projects', ProjectsListPage),
@@ -88,9 +150,9 @@ const routeTree = rootRoute.addChildren([
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
   route('/settings/appearance', AppearancePage),
-  route('/settings/subscription', SubscriptionPage),
   route('/platform/studios', PlatformStudiosPage),
   route('/platform/usage', PlatformUsagePage),
+  ]),
 ])
 
 export const router = createRouter({ routeTree })

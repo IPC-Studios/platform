@@ -162,6 +162,42 @@ body {
   background: transparent;
 }
 
+/* ── Tables ────────────────────────────────────────────────────
+   A long directory or billing table loses its headings the moment you
+   scroll, and then every column is a guess. `position: sticky` on the header
+   cells (not the row) is what actually holds inside a scrolling container. */
+.table-wrap {
+  overflow: auto;
+  /* A sticky header sticks to its nearest scrolling ancestor. `overflow-x: auto`
+     alone makes this div that ancestor in BOTH axes (the spec computes the other
+     axis to `auto`), but with no height it never scrolls — so the header would
+     glue itself to a box that scrolls off the page, and stick to nothing. The
+     bound is what makes the header real. */
+  max-height: 70vh;
+}
+
+.table-sticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* The body scrolls underneath, so the header needs its own opaque ground. */
+  background-color: color-mix(in oklch, var(--color-card) 92%, var(--color-foreground));
+  backdrop-filter: blur(4px);
+}
+
+/* Row actions are clutter on every row at once and invisible on none. They
+   appear on hover, and for anyone tabbing through, on focus. */
+@media (hover: hover) {
+  .row-actions {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  tr:hover .row-actions,
+  .row-actions:focus-within {
+    opacity: 1;
+  }
+}
+
 /* ── Motion ────────────────────────────────────────────────────
    Every animation here is opt-in per surface and short enough to read as
    feedback rather than choreography. Nothing loops, nothing blocks input, and

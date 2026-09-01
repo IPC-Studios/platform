@@ -2,8 +2,6 @@ import { Link } from '@tanstack/react-router'
 import { FolderKanban, Users, Receipt, Contact, Plus, ArrowRight } from 'lucide-react'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
-import { RequireAuth } from '@/shared/auth/guards'
-import { AppShell } from '@/shared/layout/AppShell'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
@@ -21,13 +19,7 @@ import { buildJourney } from '@/features/onboarding/journey'
 import { SetupJourney } from '@/features/onboarding/SetupJourney'
 
 export function DashboardPage() {
-  return (
-    <RequireAuth>
-      <AppShell>
-        <DashboardInner />
-      </AppShell>
-    </RequireAuth>
-  )
+  return <DashboardInner />
 }
 
 const STATUS_TONE = {

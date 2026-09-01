@@ -163,8 +163,8 @@ export function DirectoryTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm">
+    <div className="table-wrap rounded-lg border border-border">
+      <table className="table-sticky w-full text-sm">
         <thead className="bg-muted/50 text-left text-muted-foreground">
           <tr>
             <th className="min-w-56 px-4 py-2 font-medium">Name</th>
@@ -254,7 +254,7 @@ function RowActions({ member }: { member: DirectoryMember }) {
   if (isOwnerRow) return <span className="text-xs text-muted-foreground">Owner</span>
 
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div className="row-actions flex items-center justify-end gap-1">
       {member.login_enabled && member.email && (
         <Button
           size="sm"
