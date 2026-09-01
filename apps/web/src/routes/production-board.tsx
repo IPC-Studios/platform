@@ -19,7 +19,8 @@ import type { TaskListItem, TaskStatus } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState } from '@/shared/ui/states'
+import { SkeletonCards } from '@/shared/ui/skeleton'
+import { ErrorState } from '@/shared/ui/states'
 import { useBoard, useSetBoardOrder, useUpdateTaskStatus } from '@/features/tasks/api'
 
 const LANES: { key: TaskStatus; label: string }[] = [
@@ -121,7 +122,7 @@ function Board() {
     })
   }
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonCards count={3} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
 
   return (

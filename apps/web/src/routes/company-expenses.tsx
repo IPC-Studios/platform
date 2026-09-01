@@ -4,10 +4,11 @@ import type { CreateExpenseRequest } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
@@ -37,7 +38,7 @@ function Expenses() {
         actions={<AddExpenseDialog />}
       />
       {isLoading ? (
-        <LoadingState />
+        <SkeletonList rows={5} columns={5} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : !data || data.length === 0 ? (

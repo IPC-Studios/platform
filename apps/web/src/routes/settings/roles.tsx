@@ -7,12 +7,13 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { cn } from '@/shared/ui/cn'
 import { useConfirm } from '@/shared/ui/confirm'
 import {
@@ -73,7 +74,7 @@ function RolesAccess() {
         </CardHeader>
         <CardContent>
           {roles.isLoading ? (
-            <LoadingState />
+            <SkeletonCards count={3} />
           ) : roles.isError ? (
             <ErrorState onRetry={() => void roles.refetch()} />
           ) : !roles.data || roles.data.length === 0 ? (
@@ -111,7 +112,7 @@ function RolesAccess() {
         </CardHeader>
         <CardContent>
           {directory.isLoading ? (
-            <LoadingState />
+            <SkeletonCards count={3} />
           ) : directory.isError ? (
             <ErrorState onRetry={() => void directory.refetch()} />
           ) : !directory.data || directory.data.length === 0 ? (

@@ -8,9 +8,10 @@ import { SectionTabs } from '@/shared/layout/section-tabs'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useDirectory, useEmployeeRoles } from '@/features/team/api'
 import { AddMemberWizard } from '@/features/team/AddMemberWizard'
 import { DirectoryFiltersBar, DirectoryTable } from '@/features/team/DirectoryTable'
@@ -150,7 +151,7 @@ function Directory({ onAdd }: { onAdd: () => void }) {
 
       <div className="mt-4">
         {isLoading ? (
-          <LoadingState />
+          <SkeletonList rows={5} columns={6} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : rows.length === 0 ? (

@@ -27,13 +27,14 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { SectionTabs } from '@/shared/layout/section-tabs'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { Avatar } from '@/shared/ui/avatar'
 import { SkeletonTable } from '@/shared/ui/skeleton'
@@ -421,7 +422,7 @@ function MyAttendance() {
     staleTime: 15_000,
   })
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonList rows={5} columns={6} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
   if (!data || data.length === 0) {
     return (

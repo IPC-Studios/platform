@@ -17,13 +17,14 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { AvatarGroup } from '@/shared/ui/avatar'
@@ -532,7 +533,7 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
           <div>
             <p className="mb-2 text-sm font-medium">Your bundles</p>
             {isLoading ? (
-              <LoadingState />
+              <SkeletonList rows={5} columns={7} />
             ) : !bundles || bundles.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
                 No bundles yet. Create one below.

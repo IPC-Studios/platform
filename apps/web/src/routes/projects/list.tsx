@@ -6,8 +6,9 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { useProjects } from '@/features/projects/api'
@@ -67,7 +68,7 @@ function ProjectsList() {
       />
 
       {isLoading ? (
-        <LoadingState />
+        <SkeletonList rows={5} columns={5} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : rows.length === 0 ? (

@@ -5,11 +5,12 @@ import type { DirectoryMember } from '@ipc/contracts'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Card, CardContent } from '@/shared/ui/card'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { Input } from '@/shared/ui/input'
 import { Button } from '@/shared/ui/button'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { formatINR, humanize } from '@/shared/ui/format'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useDirectory, useUpdateMember } from './api'
 
 /**
@@ -37,7 +38,7 @@ export function SalariesTab() {
     )
   }
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonList rows={5} columns={6} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
 
   const rows = (data ?? []).filter((m) => m.role !== 'super_admin')

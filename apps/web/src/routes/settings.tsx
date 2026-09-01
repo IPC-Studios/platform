@@ -18,11 +18,12 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState } from '@/shared/ui/states'
+
 import { humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 
@@ -187,7 +188,7 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
     return (
       <Card className={className}>
         <CardContent className="p-6">
-          <LoadingState />
+          <SkeletonCards count={3} />
         </CardContent>
       </Card>
     )

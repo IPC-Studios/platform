@@ -6,8 +6,9 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 
 const list = notification.array()
 
@@ -47,7 +48,7 @@ function Notifications() {
     <>
       <PageHeader title="Alerts" description={unread > 0 ? `${unread} unread` : 'All caught up.'} />
       {isLoading ? (
-        <LoadingState />
+        <SkeletonCards count={4} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : !data || data.length === 0 ? (

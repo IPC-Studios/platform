@@ -7,11 +7,12 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 
 const list = workSubmission.array()
 const TONE = { submitted: 'warning', approved: 'success', rejected: 'danger' } as const
@@ -57,7 +58,7 @@ function MyWork() {
         actions={<SubmitDialog />}
       />
       {isLoading ? (
-        <LoadingState />
+        <SkeletonCards count={3} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : !data || data.length === 0 ? (

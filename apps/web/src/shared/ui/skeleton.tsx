@@ -1,4 +1,5 @@
 import { cn } from './cn'
+import { useIsMobile } from '../hooks/use-mobile'
 
 /**
  * A placeholder shaped like the thing that is coming.
@@ -19,7 +20,7 @@ export function SkeletonTable({
 }: {
   rows?: number
   columns?: number
-  className?: string
+  className?: string | undefined
 }) {
   return (
     <div
@@ -44,7 +45,7 @@ export function SkeletonTable({
 }
 
 /** Stacked cards — the mobile shape of most of these lists. */
-export function SkeletonCards({ count = 3, className }: { count?: number; className?: string }) {
+export function SkeletonCards({ count = 3, className }: { count?: number; className?: string | undefined }) {
   return (
     <div className={cn('flex flex-col gap-3', className)} role="status" aria-label="Loading">
       {Array.from({ length: count }, (_, i) => (
@@ -72,5 +73,30 @@ export function SkeletonTiles({ count = 4, className }: { count?: number; classN
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * The placeholder for a list that renders as a table on a wide screen and as
+ * cards on a narrow one.
+ *
+ * The skeleton has to make the same choice the real content will, or it
+ * promises a table and then delivers cards — which is the jump skeletons exist
+ * to prevent.
+ */
+export function SkeletonList({
+  rows = 5,
+  columns = 4,
+  className,
+}: {
+  rows?: number
+  columns?: number
+  className?: string
+}) {
+  const isMobile = useIsMobile()
+  return isMobile ? (
+    <SkeletonCards count={Math.min(rows, 4)} className={className} />
+  ) : (
+    <SkeletonTable rows={rows} columns={columns} className={className} />
   )
 }

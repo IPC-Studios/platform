@@ -7,9 +7,10 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState } from '@/shared/ui/states'
+
 import { formatINR, humanize } from '@/shared/ui/format'
 
 const plans = plan.array()
@@ -66,7 +67,7 @@ function Subscription() {
       {msg && <p className="mb-4 rounded-md bg-success/10 px-3 py-2 text-sm text-success">{msg}</p>}
 
       {isLoading ? (
-        <LoadingState />
+        <SkeletonCards count={3} />
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
           {(data ?? []).map((p) => (

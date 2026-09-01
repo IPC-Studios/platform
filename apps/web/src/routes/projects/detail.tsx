@@ -12,10 +12,11 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useConfirm } from '@/shared/ui/confirm'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
@@ -44,7 +45,7 @@ function ProjectDetail() {
   const del = useDeleteDeliverable(id)
   const confirm = useConfirm()
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
   const received = data.payments.reduce((s, p) => s + p.amount, 0)

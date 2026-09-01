@@ -18,13 +18,14 @@ import { useAccess } from '@/shared/auth/useAccess'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states'
+import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 
 const list = leadSourceRow.array()
@@ -86,7 +87,7 @@ function LeadSources() {
 
       <div className="mt-6">
         {isLoading ? (
-          <LoadingState />
+          <SkeletonCards count={3} />
         ) : isError ? (
           <ErrorState onRetry={() => void refetch()} />
         ) : !data || data.length === 0 ? (

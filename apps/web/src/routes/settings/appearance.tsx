@@ -12,9 +12,10 @@ import { useTheme } from '@/shared/theme/ThemeProvider'
 import { DEFAULT_PRESET_KEY, THEME_PRESETS, presetFor, type ThemePreset } from '@/shared/theme/presets'
 import { FONT_OPTIONS, FONT_KEYS, fontOr, fontStack, loadFont } from '@/shared/theme/fonts'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
-import { LoadingState } from '@/shared/ui/states'
+
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
 
@@ -91,7 +92,7 @@ function Appearance() {
       <>
         <PageHeader title="Theme & Branding" description="How your studio's dashboard looks." />
         <SettingsTabs />
-        <LoadingState />
+        <SkeletonCards count={3} />
       </>
     )
   }

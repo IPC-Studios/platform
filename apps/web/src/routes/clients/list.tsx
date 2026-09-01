@@ -1,7 +1,8 @@
 import { Users } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { useClients } from '@/features/clients/api'
 import { ClientFormDialog } from '@/features/clients/ClientFormDialog'
@@ -27,7 +28,7 @@ function ClientsList() {
       />
 
       {isLoading ? (
-        <LoadingState />
+        <SkeletonList rows={5} columns={5} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : !data || data.length === 0 ? (

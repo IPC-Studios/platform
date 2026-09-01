@@ -6,8 +6,9 @@ import { companyProfile } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Button } from '@/shared/ui/button'
+import { SkeletonCards } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState } from '@/shared/ui/states'
+import { ErrorState } from '@/shared/ui/states'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { useInvoice } from '@/features/billing/api'
 
@@ -29,7 +30,7 @@ function InvoiceDoc() {
     queryFn: () => callApi('/settings/company', { responseSchema: companyProfile }),
   })
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
   const intraState = data.items.some((i) => i.cgst > 0 || i.sgst > 0)

@@ -3,7 +3,8 @@ import type { PlanGate, PlatformStudio } from '@ipc/contracts'
 import { PlatformPage } from '@/shared/layout/PlatformPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { SkeletonList } from '@/shared/ui/skeleton'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { Button } from '@/shared/ui/button'
 import { useConfirm } from '@/shared/ui/confirm'
 import { humanize } from '@/shared/ui/format'
@@ -42,7 +43,7 @@ function Studios() {
     if (okToExpire) planAction.mutate({ studioId: s.id, action: 'expire' })
   }
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonList rows={5} columns={6} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
   if (!data || data.length === 0)
     return (

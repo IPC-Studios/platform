@@ -3,10 +3,11 @@ import { TrendingUp, Wallet, IndianRupee } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
-import { LoadingState, ErrorState, EmptyState } from '@/shared/ui/states'
+import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR } from '@/shared/ui/format'
@@ -24,7 +25,7 @@ function Financials() {
   const { data, isLoading, isError, refetch } = useProjectFinancials()
   const isMobile = useIsMobile()
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <SkeletonList rows={5} columns={5} />
   if (isError) return <ErrorState onRetry={() => void refetch()} />
   if (!data || data.length === 0)
     return (
