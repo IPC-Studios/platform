@@ -75,3 +75,34 @@ export const distributionRule = z.object({
   lead_count: z.number().int(),
 })
 export type DistributionRule = z.infer<typeof distributionRule>
+
+/**
+ * A place leads arrive from. The key is the credential the webhook is called
+ * with, so it is minted server-side and only ever shown to the studio.
+ */
+export const leadSourceKind = z.enum(['webform', 'meta'])
+export type LeadSourceKind = z.infer<typeof leadSourceKind>
+
+export const leadSourceRow = z.object({
+  id: uuid,
+  label: z.string().nullable(),
+  source_key: z.string(),
+  kind: leadSourceKind,
+  is_active: z.boolean(),
+  created_at: isoDateTime,
+  lead_count: z.number().int(),
+  last_lead_at: isoDateTime.nullable(),
+})
+export type LeadSourceRow = z.infer<typeof leadSourceRow>
+
+export const createLeadSourceRequest = z.object({
+  label: z.string().trim().min(2).max(80),
+  kind: leadSourceKind.default('webform'),
+})
+export type CreateLeadSourceRequest = z.infer<typeof createLeadSourceRequest>
+
+export const updateLeadSourceRequest = z.object({
+  label: z.string().trim().min(2).max(80).optional(),
+  is_active: z.boolean().optional(),
+})
+export type UpdateLeadSourceRequest = z.infer<typeof updateLeadSourceRequest>

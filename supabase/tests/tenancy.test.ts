@@ -62,6 +62,7 @@ async function freshDb() {
   await db.exec(mig('0026_team_directory.sql'))
   await db.exec(mig('0027_theme_fonts.sql'))
   await db.exec(mig('0028_crm_followups.sql'))
+  await db.exec(mig('0029_lead_sources.sql'))
   return db
 }
 
@@ -1627,6 +1628,67 @@ describe('CRM manual lead entry (0028)', () => {
     expect(r.rows[0]!.status).toBe('proposal_sent')
     await expect(
       db.exec(`update crm_leads set status = 'ghosted' where id = '${id}';`),
+    ).rejects.toThrow()
+  })
+})
+
+describe('lead sources (0029)', () => {
+  let db: PGlite
+  const owner = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@src.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Source Studio','Owner');`)
+  })
+
+  it('mints a key nobody chose, scoped to the calling company', async () => {
+    const r = await db.query<{ source_key: string; kind: string; label: string; company_id: string }>(
+      `select * from create_lead_source('Website contact form', 'webform');`,
+    )
+    const row = r.rows[0]!
+    expect(row.label).toBe('Website contact form')
+    expect(row.kind).toBe('webform')
+    // Long enough that guessing one is not worth anybody's afternoon.
+    expect(row.source_key.length).toBeGreaterThan(50)
+    expect(row.company_id).toBe(
+      (await db.query<{ id: string }>(`select get_current_company_id() as id;`)).rows[0]!.id,
+    )
+  })
+
+  it('refuses a kind the webhook cannot serve', async () => {
+    await expect(db.query(`select * from create_lead_source('Carrier pigeon', 'pigeon');`)).rejects.toThrow()
+  })
+
+  it('records which source a captured lead came through', async () => {
+    // 'facebook' vs 'webform' cannot tell two campaigns apart, and "which
+    // campaign is working" is the only question this page exists to answer.
+    const a = (
+      await db.query<{ source_key: string }>(`select * from create_lead_source('Campaign A', 'meta');`)
+    ).rows[0]!.source_key
+    const b = (
+      await db.query<{ source_key: string }>(`select * from create_lead_source('Campaign B', 'meta');`)
+    ).rows[0]!.source_key
+
+    await db.query(`select capture_lead('${a}', 'From A', '9000000011', null, '{}'::jsonb);`)
+    await db.query(`select capture_lead('${b}', 'From B', '9000000012', null, '{}'::jsonb);`)
+
+    const rows = await db.query<{ name: string; source: string; source_key: string }>(
+      `select name, source, source_key from crm_leads where source_key in ('${a}', '${b}') order by name;`,
+    )
+    expect(rows.rows.map((r) => r.source)).toEqual(['facebook', 'facebook'])
+    expect(rows.rows[0]!.source_key).toBe(a)
+    expect(rows.rows[1]!.source_key).toBe(b)
+  })
+
+  it('stops accepting leads once a source is paused', async () => {
+    const key = (
+      await db.query<{ source_key: string }>(`select * from create_lead_source('Old form', 'webform');`)
+    ).rows[0]!.source_key
+    await db.exec(`update crm_webhook_sources set is_active = false where source_key = '${key}';`)
+    await expect(
+      db.query(`select capture_lead('${key}', 'Late', '9000000013', null, '{}'::jsonb);`),
     ).rejects.toThrow()
   })
 })

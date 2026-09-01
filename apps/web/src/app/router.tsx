@@ -16,6 +16,7 @@ import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
 import { ProjectDetailPage } from '@/routes/projects/detail'
 import { ProjectTrackingPage } from '@/routes/project-tracking'
+import { LeadSourcesPage } from '@/routes/lead-sources'
 import { ShootsPage } from '@/routes/shoots'
 import { ClientsListPage } from '@/routes/clients/list'
 import { ProductionBoardPage } from '@/routes/production-board'
@@ -72,7 +73,10 @@ const routeTree = rootRoute.addChildren([
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),
   route('/follow-ups', FollowUpsPage),
-  route('/facebook', comingSoon('Lead sources', 'lead_sources', 'Phase 11')),
+  route('/lead-sources', LeadSourcesPage),
+  // The permissions matrix has declared /facebook as this module's path since
+  // Phase 2; keep it working rather than breaking anyone's bookmark.
+  route('/facebook', LeadSourcesPage),
   route('/employees', EmployeesPage),
   route('/attendance', AttendancePage),
   route('/billing', BillingPage),

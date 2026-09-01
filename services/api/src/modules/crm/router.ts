@@ -1,5 +1,13 @@
 import { Hono } from 'hono'
-import { createLeadRequest, crmLead, distributionRule, updateLeadRequest } from '@ipc/contracts'
+import {
+  createLeadRequest,
+  createLeadSourceRequest,
+  crmLead,
+  distributionRule,
+  leadSourceRow,
+  updateLeadRequest,
+  updateLeadSourceRequest,
+} from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
@@ -112,4 +120,74 @@ export const crmRouter = new Hono<AppEnv>()
     ).catch(() => null)
     if (!rows) fail(400, 'We could not load the distribution rota.')
     return c.json(distributionRule.array().parse(rows))
+  })
+
+  // ── Lead sources ────────────────────────────────────────────
+  // Each row is an inbox: a key a web form or Meta posts to. The counts come
+  // from the leads that actually arrived through it, which is the only way to
+  // answer "is this campaign worth paying for".
+  .get('/sources', async (c) => {
+    const rows = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql`
+        select s.id, s.label, s.source_key, s.kind, s.is_active, s.created_at,
+               coalesce(l.total, 0)::int as lead_count,
+               l.last_lead_at
+        from crm_webhook_sources s
+        left join lateral (
+          select count(*) as total, max(created_at) as last_lead_at
+          from crm_leads where source_key = s.source_key
+        ) l on true
+        order by s.is_active desc, s.created_at desc`,
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not load your lead sources.')
+    return c.json(leadSourceRow.array().parse(rows))
+  })
+
+  .post('/sources', async (c) => {
+    const parsed = createLeadSourceRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the source.')
+    const { label, kind } = parsed.data
+
+    // The key is generated in SQL and never accepted from the client — it is
+    // the one credential that lets an unauthenticated caller write leads here.
+    const row = await withUser(c.env, c.get('auth').userId, async (sql) => {
+      const [created] = await sql`select * from create_lead_source(${label}, ${kind})`
+      return created ?? null
+    }).catch(() => null)
+    if (!row) fail(400, 'We could not create this lead source.')
+
+    return c.json(leadSourceRow.parse({ ...row, lead_count: 0, last_lead_at: null }), 201)
+  })
+
+  .patch('/sources/:id', async (c) => {
+    const parsed = updateLeadSourceRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the details.')
+    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
+
+    const rows = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql<{ id: string }[]>`
+        update crm_webhook_sources set ${sql(parsed.data)}
+        where id = ${c.req.param('id')!} returning id`,
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not update this lead source.')
+    if (!rows.length) fail(404, 'We could not find that lead source.')
+    return c.body(null, 204)
+  })
+
+  // Deleting a source stops the key working. Leads it already brought in stay —
+  // they belong to the studio, not to the form that delivered them.
+  .delete('/sources/:id', async (c) => {
+    const rows = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql<{ id: string }[]>`
+        delete from crm_webhook_sources where id = ${c.req.param('id')!} returning id`,
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not delete this lead source.')
+    if (!rows.length) fail(404, 'We could not find that lead source.')
+    return c.body(null, 204)
   })

@@ -248,6 +248,17 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/projects') return projectFin
   if (method === 'GET' && path === '/crm/leads') return atStage(leads, 'partial')
   if (method === 'GET' && path === '/crm/distribution') return atStage(distributionFx, 'partial')
+  if (method === 'GET' && path === '/crm/sources') return atStage(sourcesFx, 'partial')
+  if (method === 'POST' && path === '/crm/sources')
+    return {
+      ...sourcesFx[0],
+      id: uid(0xc7),
+      ...(body as Record<string, unknown>),
+      source_key: 'wf_' + '0'.repeat(29) + 'new',
+      lead_count: 0,
+      last_lead_at: null,
+    }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/sources/')) return {}
   if (method === 'POST' && path === '/crm/leads')
     return {
       ...leads[3],
@@ -511,6 +522,29 @@ const leads = [
     converted_at: daysFromNow(-6),
     is_hot: false,
     created_at: '2026-06-20T08:00:00Z',
+  },
+]
+
+const sourcesFx = [
+  {
+    id: uid(0xc5),
+    label: 'Website contact form',
+    source_key: 'wf_9f2c41ba7e5d4a1b8c3e6f0d2a4b7c91',
+    kind: 'webform',
+    is_active: true,
+    created_at: '2026-06-01T10:00:00Z',
+    lead_count: 2,
+    last_lead_at: '2026-07-04T08:00:00Z',
+  },
+  {
+    id: uid(0xc6),
+    label: 'Meta — Wedding campaign',
+    source_key: 'mt_3a7e91c05b2d4e6f8a1c3b5d7e9f0a2c',
+    kind: 'meta',
+    is_active: false,
+    created_at: '2026-05-12T10:00:00Z',
+    lead_count: 1,
+    last_lead_at: '2026-07-05T08:00:00Z',
   },
 ]
 
