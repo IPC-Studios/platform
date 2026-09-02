@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
-import { Menu, Moon, Sun, LogOut, ChevronDown, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react'
+import { Menu, Moon, Sun, ChevronDown, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { useAccess } from '../auth/useAccess'
 import { useTheme } from '../theme/ThemeProvider'
@@ -8,6 +8,7 @@ import { Button } from '../ui/button'
 import { cn } from '../ui/cn'
 import { NAV, type NavEntry, type NavGroup, type NavLeaf, filterNav } from './nav'
 import { CommandPalette, openCommandPalette, paletteShortcutHint } from './CommandPalette'
+import { AccountMenu } from './AccountMenu'
 
 
 const COLLAPSE_KEY = 'ipc.sidebar.collapsed'
@@ -102,7 +103,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background print:block print:h-auto print:overflow-visible">
       <Sidebar
         entries={entries}
-        onSignOut={() => void signOut()}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((c) => !c)}
         openGroups={openGroups}
@@ -115,7 +115,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} />
           <Sidebar
             entries={entries}
-            onSignOut={() => void signOut()}
             collapsed={false}
             onClose={() => setMobileOpen(false)}
             openGroups={openGroups}
@@ -152,9 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
               {scheme === 'dark' ? <Sun /> : <Moon />}
             </Button>
-            <span className="hidden px-2 text-sm text-muted-foreground sm:inline">
-              {session?.display_name}
-            </span>
+            <AccountMenu onSignOut={() => void signOut()} />
           </div>
         </header>
 
@@ -179,7 +176,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function Sidebar({
   entries,
-  onSignOut,
   collapsed,
   onToggleCollapse,
   onClose,
@@ -188,7 +184,6 @@ function Sidebar({
   className,
 }: {
   entries: NavEntry[]
-  onSignOut: () => void
   collapsed: boolean
   onToggleCollapse?: () => void
   onClose?: () => void
@@ -286,21 +281,6 @@ function Sidebar({
           ),
         )}
       </nav>
-
-      <div className={cn('border-t border-border p-2', collapsed && 'px-2')}>
-        <button
-          type="button"
-          onClick={onSignOut}
-          title={collapsed ? 'Log out' : undefined}
-          className={cn(
-            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
-            collapsed && 'justify-center px-0',
-          )}
-        >
-          <LogOut className="size-4 shrink-0" />
-          {!collapsed && 'Log out'}
-        </button>
-      </div>
     </aside>
   )
 }
