@@ -83,16 +83,19 @@ HMAC verification is runtime-agnostic; `RAZORPAY_WEBHOOK_SECRET` must match.
 ## Operating notes
 
 - **Logs**: `docker compose logs -f api` / `... db`
-- **Backups**: `docker compose exec db pg_dump -U postgres ipc > backup.sql`
+- **Backups**: the `backup` service dumps nightly (02:30 UTC by default) into the
+  `db_backups` volume and, once `BACKUP_S3_*` is set in `.env`, copies each dump
+  off the box. It reports unhealthy if backups go stale. Restore drill and
+  commands: see `docs/RUNBOOK.md` → "Backups & restore".
 - **Migrations**: the `migrate` service runs bootstrap + pending migrations on every
   deploy (idempotent, tracked in `schema_migrations`); an already-migrated DB is
-  baselined on first run so nothing re-applies.
-  To apply new migrations to a live DB, `psql` them in manually or run them via a
-  one-off, then restart the API. (A dedicated migrate step can be added later.)
+  baselined on first run so nothing re-applies. New migration files ship
+  automatically — no manual `psql`.
 - **Cron**: the `cron` service POSTs `/cron/reminders` hourly with `x-cron-secret`
   (idempotent, supports `?dry=1`).
-- **Auth**: HS256 JWT, 7-day token, no refresh yet. Rotating `JWT_SECRET` logs
-  everyone out. Password reset / email confirmation are not implemented.
+- **Auth**: HS256 JWT, 30-minute access token + rotating 30-day refresh token.
+  Rotating `JWT_SECRET` logs everyone out. Email verification and password reset
+  are live (both need `RESEND_API_KEY` + `EMAIL_FROM` + `APP_URL`).
 - **Rate limiting**: the in-process sliding window is a real limiter now (single
   long-lived process); multi-replica needs a shared store (Redis).
 

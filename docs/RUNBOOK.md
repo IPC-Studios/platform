@@ -2,16 +2,20 @@
 
 ## Environments & secrets
 
-Secrets are set via `wrangler secret put` (API) and Cloudflare Pages env (web).
-Never commit them. `.env.example` lists every variable.
+Backend secrets live in the repo-root `.env` on the VPS (gitignored); the web
+app's are Cloudflare Pages env vars. Never commit them. `deploy/.env.example`
+lists every variable.
 
 | Secret | Where | Rotation |
 |---|---|---|
-| `SUPABASE_SERVICE_ROLE_KEY` | API worker | Rotate in Supabase → update secret → redeploy |
-| `SUPABASE_ANON_KEY` | API + web | Public; rotate with project keys |
-| `CRON_SECRET` | API + cron scheduler | Rotate both sides together |
-| `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | API | Rotate in Razorpay dashboard → update secret |
-| `ALLOWED_ORIGINS` | API | Comma-separated prod origins; empty = allow-all (dev only) |
+| `POSTGRES_PASSWORD` | `.env` (db superuser) | Change in Postgres, then `.env`, then `up -d` |
+| `DB_AUTHENTICATOR_PASSWORD` | `.env` (role the API logs in as) | The `migrate` service re-applies it on every deploy |
+| `JWT_SECRET` | `.env` | Rotating it logs **everyone** out (all access + refresh tokens) |
+| `CRON_SECRET` | `.env` (API + cron service, same file) | Rotate both sides together |
+| `RESEND_API_KEY` | `.env` | Rotate in Resend → `up -d api` |
+| `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | `.env` | Rotate in Razorpay dashboard → `up -d api` |
+| `BACKUP_S3_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | `.env` | Scoped to the backup bucket; rotate in the storage provider |
+| `ALLOWED_ORIGINS` | `.env` | Comma-separated prod origins; empty = allow-all (dev only) |
 
 ## Cron
 
@@ -23,40 +27,81 @@ is safe.
 
 ## Rate limiting
 
-`services/api/src/middleware/security.ts` applies a best-effort per-IP sliding
-window to `/auth`, `/public`, `/webhooks`. **This is per-isolate only.** For
-real multi-instance limiting, back it with Cloudflare KV or a Durable Object
-keyed on `IP:path`.
+`services/api/src/middleware/security.ts` applies a per-IP sliding window to
+`/auth`, `/public`, `/webhooks`. On the single long-lived Bun process this is a
+real limiter. Running more than one API replica needs a shared store (Redis) —
+until then the window is per-process.
 
 ## RLS is the primary enforcement (Fork 1 = B)
 
 Every tenant table has `company_id` and an RLS policy scoped to
-`get_current_company_id()`. **RLS enforcement is validated by the pglite suite
-for logic, but pglite runs as superuser and cannot prove enforcement.** Before
-production, run the RLS suite against a real Postgres/Supabase with the
-`authenticated` role (see "DB verification" below).
+`get_current_company_id()`. The API connects as the unprivileged `authenticator`
+role and `SET ROLE`s to `authenticated` per request with the caller's id in a
+GUC, so the database — not application code — is what keeps studios apart.
 
 ## DB verification
 
-Migrations are logic-tested via `@electric-sql/pglite` in
-`supabase/tests/tenancy.test.ts` (36 tests).
+Two layers:
 
-**RLS enforcement is VERIFIED on the real hosted Postgres** by
-`supabase/tests/rls-live.mjs` — it registers two throwaway studios and asserts
-studio A cannot read studio B's company / clients / users (direct PostgREST
-with each JWT, and end-to-end through the API). Re-run anytime:
+- **Logic**: `@electric-sql/pglite` in `supabase/tests/tenancy.test.ts` and the
+  other pglite suites. pglite runs as superuser, so it proves SQL correctness but
+  **cannot** prove RLS enforcement.
+- **Enforcement**: `supabase/tests/rls-live.mjs` against a real Postgres. It
+  registers two throwaway studios over HTTP and asserts studio A cannot read
+  studio B's company / clients / users, plus the auth and password-reset paths.
+  The CI `e2e` job runs it on every push against a `postgres:16` service, so this
+  is verified continuously rather than as a pre-launch ritual.
+
+Run it against any environment:
 
 ```bash
-cd apps/web && \
-SUPABASE_URL=https://<ref>.supabase.co \
-SUPABASE_ANON_KEY=sb_publishable_... \
-API_URL=https://<worker>/ \
-bun ../../supabase/tests/rls-live.mjs
+API_URL=https://api.yourstudio.in bun supabase/tests/rls-live.mjs
 ```
 
 It creates two disposable tenants each run — clean them up periodically. The
 GiST double-booking constraint applies automatically on real Postgres (pglite
 lacks `btree_gist`, so its overlap trigger is the fallback there).
+
+## Backups & restore
+
+The `backup` service (`deploy/backup/`) runs `pg_dump -Fc` once at container
+start and then daily at `BACKUP_AT_UTC` (default 02:30 UTC). Each dump is
+verified with `pg_restore --list` before it counts as a success; local copies are
+pruned after `BACKUP_KEEP_DAYS` (7).
+
+**Off-box copies are opt-in and you want them on.** Set `BACKUP_S3_BUCKET` and
+the rest of the `BACKUP_S3_*` block in `.env` (any S3-compatible bucket — R2, B2,
+S3, MinIO) and each dump is uploaded with rclone and pruned after
+`BACKUP_OFFSITE_KEEP_DAYS` (30). Without it every backup sits on the same disk as
+the database it is protecting.
+
+The container goes **unhealthy** if there has been no successful local backup in
+26h (or no off-box copy in 72h, when configured), so a backup path that quietly
+breaks shows up in `docker compose ps` and fails the next deploy's `--wait`.
+
+```bash
+docker compose logs backup                       # what it has been doing
+docker compose run --rm backup once              # take one right now
+docker compose run --rm backup restore list      # what exists, here + off-box
+```
+
+### Restore
+
+Destructive — it drops and recreates the database, so stop the API first.
+
+```bash
+docker compose stop api cron
+docker compose run --rm -e RESTORE_CONFIRM=yes backup restore latest
+docker compose up -d migrate api cron
+```
+
+Without `RESTORE_CONFIRM=yes` it prints what it would do and stops. Pass a dump
+filename instead of `latest` to pick one; a name that isn't on this box is pulled
+from off-box storage automatically.
+
+**Do a restore drill on a scratch VPS before you need one.** An untested backup
+is a hope. What to check afterwards: `/health` is green, a studio owner can log
+in, and a project's invoices and payments still add up.
 
 ## Incident response
 

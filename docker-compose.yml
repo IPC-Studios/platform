@@ -1,4 +1,5 @@
-# Self-hosted VPS BACKEND: Postgres + Bun API + Caddy (TLS) + cron ticker.
+# Self-hosted VPS BACKEND: Postgres + Bun API + Caddy (TLS) + cron ticker
+# + nightly database backups.
 # No Supabase. The web frontend deploys separately to Cloudflare Pages.
 #
 #   cp deploy/.env.example .env   # fill in secrets + domains
@@ -73,6 +74,32 @@ services:
       retries: 3
       start_period: 10s
 
+  # Nightly pg_dump -> the db_backups volume -> optional off-box S3/R2 copy.
+  # Runs once at container start (so every deploy leaves a fresh snapshot and a
+  # broken backup path surfaces immediately), then daily at BACKUP_AT_UTC.
+  # Reports UNHEALTHY when the newest backup goes stale, so backups that quietly
+  # stop happening show up in `docker compose ps` instead of at restore time.
+  backup:
+    build:
+      context: deploy/backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: [.env]
+    environment:
+      PGHOST: db
+    volumes:
+      - db_backups:/backups
+    healthcheck:
+      # Cheap (a stat on a marker file), so poll often — that keeps `up --wait`
+      # from blocking a deploy while it waits for the first probe.
+      test: ["CMD", "sh", "/backup/backup.sh", "health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 5m
+
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -106,5 +133,6 @@ services:
 
 volumes:
   db_data:
+  db_backups:
   caddy_data:
   caddy_config:
