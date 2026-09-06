@@ -256,6 +256,16 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/timeline/.test(path)) return crmTimelineFx
+  if (method === 'GET' && /^\/crm\/activities\/[^/]+\/ics$/.test(path)) return NOT_MOCKED
+  if (method === 'POST' && path === '/crm/activities/call') return { activity: crmActivitiesFx[0], placed: false, provider: 'manual', call_sid: null, dial_url: 'tel:+919876500001' }
+  if (method === 'POST' && path === '/crm/activities/meeting') return { activity: crmActivitiesFx[2], ics_url: '/crm/activities/x/ics' }
+  if (method === 'POST' && path === '/crm/activities/email/sync') return { status: 'not_configured', provider: null, fetched: 0, imported: 0, unmatched: 0, message: 'Mailbox sync is not configured in preview.' }
+  if (method === 'GET' && path.startsWith('/crm/activities')) return path.includes('open_tasks=1') ? crmActivitiesFx.filter((x) => x.type === 'task' && !x.done_at) : crmActivitiesFx
+  if (method === 'POST' && path === '/crm/activities') return { ...crmActivitiesFx[0], id: uid(0xe9), ...(body as Record<string, unknown>) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/activities/')) return {}
+  if (method === 'GET' && path === '/crm/integrations') return crmIntegrationsFx
+  if (method === 'PUT' && path.startsWith('/crm/integrations/')) return {}
   if (method === 'GET' && path === '/crm/pipelines') return crmPipelinesFx
   if (method === 'POST' && path === '/crm/pipelines') return { ...crmPipelinesFx[0], id: uid(0xd8), name: String((body as { name?: string }).name ?? 'Pipeline'), is_default: false }
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/pipelines/') && !path.endsWith('/stages')) return {}
@@ -1291,6 +1301,49 @@ const crmForecastFx = {
     { month: '2026-10', count: 1, total_value: 90000, weighted: 90000 },
   ],
 }
+
+const activityFx = (id: string, over: Partial<Record<string, unknown>>) => ({
+  id,
+  lead_id: uid(0xb1),
+  lead_name: 'Priya & Arjun',
+  contact_id: uid(0xdf),
+  type: 'note',
+  direction: 'none',
+  subject: null,
+  body: null,
+  outcome: null,
+  started_at: '2026-09-04T09:00:00Z',
+  ended_at: null,
+  duration_s: null,
+  due_at: null,
+  done_at: null,
+  assigned_to: uid(1),
+  assignee_name: 'Demo Owner',
+  actor_id: uid(1),
+  actor_name: 'Demo Owner',
+  provider: 'manual',
+  external_id: null,
+  created_at: '2026-09-04T09:00:00Z',
+  ...over,
+})
+const crmActivitiesFx = [
+  activityFx(uid(0xe2), { type: 'call', direction: 'out', outcome: 'answered', duration_s: 660, body: 'Wants two photographers and a drone.' }),
+  activityFx(uid(0xe3), { type: 'task', subject: 'Send the album mock-up', due_at: '2026-09-05T04:30:00Z', created_at: '2026-09-03T09:00:00Z' }),
+  activityFx(uid(0xe4), { type: 'meeting', direction: 'out', subject: 'Venue recce', started_at: '2026-09-10T04:30:00Z', ended_at: '2026-09-10T05:30:00Z', created_at: '2026-09-02T09:00:00Z' }),
+  activityFx(uid(0xe5), { type: 'whatsapp', direction: 'in', subject: 'Yes, Sunday works', provider: 'whatsapp', created_at: '2026-09-01T12:00:00Z', lead_id: uid(0xb2), lead_name: 'Meera' }),
+]
+const crmTimelineFx = {
+  items: [
+    ...crmActivitiesFx.filter((a) => a.lead_id === uid(0xb1)).map((a) => ({ kind: 'activity', at: a.created_at, activity: a })),
+    { kind: 'event', at: '2026-08-01T09:00:00Z', event: { id: uid(0xe0), lead_id: uid(0xb1), from_status: null, to_status: 'new', actor_id: null, actor_name: null, note: 'arrived via facebook', created_at: '2026-08-01T09:00:00Z' } },
+  ],
+  next_cursor: null,
+}
+const crmIntegrationsFx = [
+  { provider: 'gmail', status: 'not_configured', credentials_present: false, config: {}, last_error: null, last_sync_at: null, connected_by: null, updated_at: null },
+  { provider: 'o365', status: 'not_configured', credentials_present: false, config: {}, last_error: null, last_sync_at: null, connected_by: null, updated_at: null },
+  { provider: 'twilio', status: 'connected', credentials_present: true, config: {}, last_error: null, last_sync_at: null, connected_by: uid(1), updated_at: '2026-09-01T09:00:00Z' },
+]
 
 const crmEventsFx = [
   {

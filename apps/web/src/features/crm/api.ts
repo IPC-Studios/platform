@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   automationRule,
@@ -11,9 +11,15 @@ import {
   createAutomationRequest,
   createCadenceRequest,
   createLeadRequest,
+  crmActivity,
   crmCompany,
   crmContact,
   crmForecast,
+  crmIntegration,
+  emailSyncResponse,
+  placeCallResponse,
+  scheduleMeetingResponse,
+  timelineResponse,
   crmLead,
   crmSettings,
   crmStats,
@@ -38,6 +44,7 @@ import {
   type BulkLeadPatch,
   type BulkUndoRequest,
   type ConvertLeadRequest,
+  type CreateActivityRequest,
   type CreateAutomationRequest,
   type CreateCadenceRequest,
   type CreateContactRequest,
@@ -53,13 +60,17 @@ import {
   type CsvImportCommitRequest,
   type MergeLeadsRequest,
   type MoveStageRequest,
+  type PlaceCallRequest,
+  type ScheduleMeetingRequest,
   type SendTemplateRequest,
+  type UpdateActivityRequest,
   type UpdateAutomationRequest,
   type UpdateCadenceRequest,
   type UpdateContactRequest,
   type UpdateCrmCompanyRequest,
   type UpdateCrmSettingsRequest,
   type UpdateDistributionRequest,
+  type UpdateIntegrationRequest,
   type UpdateLeadRequest,
   type UpdateLostReasonRequest,
   type UpdatePipelineRequest,
@@ -593,5 +604,87 @@ export function useDealsFor(filter: { contactId?: string; companyId?: string }) 
 export function useForecast(range: CrmStatsQuery) {
   return useCrmQuery(['forecast', range.from, range.to], () =>
     callApi(`/crm/forecast?from=${range.from}&to=${range.to}`, { responseSchema: crmForecast }),
+  )
+}
+
+// ── activities ────────────────────────────────────────────────
+export function useActivities(opts: { leadId?: string; contactId?: string; type?: string; assignedTo?: string; openTasks?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (opts.leadId) params.set('lead_id', opts.leadId)
+  if (opts.contactId) params.set('contact_id', opts.contactId)
+  if (opts.type) params.set('type', opts.type)
+  if (opts.assignedTo) params.set('assigned_to', opts.assignedTo)
+  if (opts.openTasks) params.set('open_tasks', '1')
+  const qs = params.toString()
+  return useCrmQuery(['activities', qs], () => callApi(`/crm/activities${qs ? `?${qs}` : ''}`, { responseSchema: crmActivity.array() }))
+}
+
+/** The deal's stage trail and activities, newest first, a page at a time. */
+export function useTimeline(leadId: string) {
+  const { session } = useAuth()
+  return useInfiniteQuery({
+    queryKey: ['crm', 'timeline', leadId],
+    queryFn: ({ pageParam }) =>
+      callApi(`/crm/leads/${leadId}/timeline?limit=40${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ''}`, {
+        responseSchema: timelineResponse,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    enabled: !!session && !!leadId,
+  })
+}
+
+export function useLogActivity() {
+  return useCrmMutation(
+    (input: CreateActivityRequest) => callApi('/crm/activities', { method: 'POST', body: input, responseSchema: crmActivity }),
+    (a) => (a.type === 'task' ? 'Task added' : 'Logged'),
+  )
+}
+
+export function useUpdateActivity() {
+  return useCrmMutation(({ id, patch }: { id: string; patch: UpdateActivityRequest }) =>
+    callApi(`/crm/activities/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+  )
+}
+
+export function useDeleteActivity() {
+  return useCrmMutation((id: string) => callApi(`/crm/activities/${id}`, { method: 'DELETE', responseSchema: noContent }), 'Removed')
+}
+
+/** Rings the agent then the lead when Twilio is connected; otherwise logs a manual call and hands back tel:. */
+export function usePlaceCall() {
+  return useCrmMutation((input: PlaceCallRequest) =>
+    callApi('/crm/activities/call', { method: 'POST', body: input, responseSchema: placeCallResponse }),
+  )
+}
+
+export function useScheduleMeeting() {
+  return useCrmMutation(
+    (input: ScheduleMeetingRequest) =>
+      callApi('/crm/activities/meeting', { method: 'POST', body: input, responseSchema: scheduleMeetingResponse }),
+    'Meeting scheduled',
+  )
+}
+
+export function useEmailSync() {
+  return useCrmMutation(
+    (sinceDays: number) =>
+      callApi('/crm/activities/email/sync', { method: 'POST', body: { since_days: sinceDays }, responseSchema: emailSyncResponse }),
+    (r) =>
+      r.status === 'ok'
+        ? `Synced ${r.imported} new message${r.imported === 1 ? '' : 's'}${r.unmatched ? ` · ${r.unmatched} unmatched` : ''}`
+        : (r.message ?? 'Mailbox sync is not configured.'),
+  )
+}
+
+export function useIntegrations() {
+  return useCrmQuery(['integrations'], () => callApi('/crm/integrations', { responseSchema: crmIntegration.array() }), 60_000)
+}
+
+export function useUpdateIntegration() {
+  return useCrmMutation(
+    ({ provider, patch }: { provider: string; patch: UpdateIntegrationRequest }) =>
+      callApi(`/crm/integrations/${provider}`, { method: 'PUT', body: patch, responseSchema: noContent }),
+    'Integration updated',
   )
 }

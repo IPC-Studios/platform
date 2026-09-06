@@ -24,13 +24,15 @@ import { TeamTab } from '@/features/crm/tabs/TeamTab'
 import { ImportsTab } from '@/features/crm/tabs/ImportsTab'
 import { DuplicatesTab } from '@/features/crm/tabs/DuplicatesTab'
 import { CrmSettingsTab } from '@/features/crm/tabs/SettingsTab'
+import { ActivitiesTab } from '@/features/crm/tabs/ActivitiesTab'
 
-/** Every tab of the CRM. All eleven are built. */
+/** Every tab of the CRM. All twelve are built. */
 const TABS = [
   { key: 'inbox', label: 'Lead Inbox' },
   { key: 'today', label: "Today's Work" },
   { key: 'board', label: 'Follow-up Board' },
   { key: 'pipeline', label: 'Pipeline View' },
+  { key: 'activities', label: 'Activities' },
   { key: 'distribution', label: 'Distribution Rules' },
   { key: 'templates', label: 'Templates' },
   { key: 'reports', label: 'Reports' },
@@ -139,6 +141,8 @@ function Crm() {
           <FollowUpBoardTab leads={leads} now={now} onOpen={setOpenLead} />
         ) : tab === 'pipeline' ? (
           <PipelineTab leads={leads} onOpen={setOpenLead} />
+        ) : tab === 'activities' ? (
+          <ActivitiesTab leads={leads} onOpen={setOpenLead} />
         ) : tab === 'distribution' ? (
           <DistributionTab />
         ) : tab === 'templates' ? (

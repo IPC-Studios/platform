@@ -63,6 +63,7 @@ import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 import { sendWhatsAppText, whatsappConfigured, whatsappLink } from '../../lib/whatsapp'
 import { crmObjectsRouter } from './objects'
+import { crmActivitiesRouter } from './activities'
 
 const list = crmLead.array()
 const edit = requireAction('crm', 'edit')
@@ -521,6 +522,11 @@ export const crmRouter = new Hono<AppEnv>()
           insert into crm_lead_events (company_id, lead_id, from_status, to_status, actor_id, note)
           values (get_current_company_id(), ${leadId}, null, null, ${c.get('auth').userId},
                   ${`sent "${result.templateName}" via ${channel}${delivery === 'api' ? ' (delivered)' : ''}`})`
+        // The message itself is an activity on the timeline.
+        await sql`
+          insert into crm_activities (company_id, lead_id, type, direction, subject, body, provider, started_at)
+          values (get_current_company_id(), ${leadId}, ${channel}, 'out', ${result.templateName}, ${result.rendered},
+                  ${delivery === 'api' ? 'whatsapp' : 'manual'}, now())`
       }),
     )
     await audit(c, { action: 'lead.send_template', entityType: 'crm_lead', entityId: leadId, after: { template_id, channel, delivery } })
@@ -1016,3 +1022,5 @@ export const crmRouter = new Hono<AppEnv>()
 
   // Pipelines, stages, contacts, companies, lost reasons, forecast.
   .route('/', crmObjectsRouter)
+  // Activities, timeline, calls, meetings, mailbox sync, integrations.
+  .route('/', crmActivitiesRouter)

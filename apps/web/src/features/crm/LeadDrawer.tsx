@@ -31,7 +31,6 @@ import {
   useConvertLead,
   useCrmCompanies,
   useLeadCadence,
-  useLeadEvents,
   useMoveStage,
   usePipelines,
   useSendTemplate,
@@ -41,6 +40,7 @@ import {
   useUpdateLead,
 } from './api'
 import { LostReasonDialog } from './LostReasonDialog'
+import { Timeline } from './Timeline'
 import { STAGE_LABEL, dueBucket } from './leads'
 
 /** A datetime-local value from an ISO string, in the viewer's own timezone. */
@@ -70,7 +70,6 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const send = useSendTemplate()
   const { data: members } = useMembers()
   const { data: templates } = useTemplates()
-  const { data: events } = useLeadEvents(lead.id)
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
   const [notes, setNotes] = useState(lead.notes ?? '')
@@ -379,22 +378,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 
           {canEdit && !lead.converted_project_id && lead.status !== 'lost' && <ConvertPanel lead={lead} onDone={onClose} />}
 
-          {events && events.length > 0 && (
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">History</p>
-              <ul className="mt-2 flex flex-col gap-1.5">
-                {events.slice(0, 12).map((e) => (
-                  <li key={e.id} className="text-xs text-muted-foreground">
-                    <span className="tabular-nums">{when.format(new Date(e.created_at))}</span>
-                    {' — '}
-                    {e.to_status ? `${e.from_status ? STAGE_LABEL[e.from_status] : 'Arrived'} → ${STAGE_LABEL[e.to_status]}` : (e.note ?? 'note')}
-                    {e.to_status && e.note ? ` · ${e.note}` : ''}
-                    {e.actor_name ? ` · ${e.actor_name}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <Timeline lead={lead} />
 
           {canEdit && (
             <div className="flex justify-end border-t border-border pt-3">

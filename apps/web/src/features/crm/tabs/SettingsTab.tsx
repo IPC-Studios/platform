@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Archive, ArrowDown, ArrowUp, KanbanSquare, Megaphone, Plus, Timer, Trash2, XCircle } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, Timer, Trash2, XCircle } from 'lucide-react'
 import type { CrmLead, PipelineStage, StageRequiredField } from '@ipc/contracts'
 import { REQUIRED_FIELD_LABEL, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
@@ -20,10 +20,13 @@ import {
   useDeleteLostReason,
   useDeletePipeline,
   useDeleteStage,
+  useEmailSync,
+  useIntegrations,
   useLostReasons,
   usePipelines,
   useReorderStages,
   useUpdateCrmSettings,
+  useUpdateIntegration,
   useUpdateLostReason,
   useUpdatePipeline,
   useUpdateStage,
@@ -53,6 +56,7 @@ export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[];
     <div className="grid gap-4 md:grid-cols-2">
       <PipelinesCard />
       <LostReasonsCard />
+      <IntegrationsCard />
       <SlaCard />
       <Card>
         <CardContent className="flex flex-col gap-3 p-5">
@@ -346,6 +350,65 @@ function LostReasonsCard() {
               <Plus /> Add
             </Button>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const PROVIDER_LABEL: Record<string, string> = { gmail: 'Gmail', o365: 'Microsoft 365', twilio: 'Twilio calling' }
+const PROVIDER_HINT: Record<string, string> = {
+  gmail: 'Files sent and received mail under the matching deal. Needs EMAIL_SYNC_PROVIDER=gmail, a token and the mailbox on the API.',
+  o365: 'Same as Gmail, for a Microsoft 365 mailbox (EMAIL_SYNC_PROVIDER=o365).',
+  twilio: '“Call now” rings you first, then the lead. Needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER on the API.',
+}
+
+/** What the studio has connected. Credentials live on the server; this shows whether they are there and lets the owner switch each one on. */
+function IntegrationsCard() {
+  const { session } = useAuth()
+  const isOwner = !!session?.is_owner
+  const { data, isLoading } = useIntegrations()
+  const update = useUpdateIntegration()
+  const sync = useEmailSync()
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-5">
+        <p className="flex items-center gap-2 font-medium">
+          <Plug className="size-4 text-muted-foreground" /> Integrations
+        </p>
+        <p className="text-sm text-muted-foreground">Email and calling, wired to the timeline. See the runbook for the credentials each one needs.</p>
+        {isLoading ? (
+          <Skeleton className="h-24" />
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {(data ?? []).map((i) => {
+              const on = i.status === 'connected'
+              return (
+                <li key={i.provider} className="flex flex-col gap-1 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{PROVIDER_LABEL[i.provider] ?? i.provider}</span>
+                    <StatusBadge tone={i.status === 'error' ? 'danger' : on ? 'success' : 'neutral'}>{i.status === 'error' ? 'Error' : on ? 'On' : 'Off'}</StatusBadge>
+                    <StatusBadge tone={i.credentials_present ? 'info' : 'warning'}>{i.credentials_present ? 'Credentials on server' : 'No credentials'}</StatusBadge>
+                    <span className="ml-auto flex gap-1">
+                      {i.provider !== 'twilio' && on && (
+                        <Button size="sm" variant="ghost" disabled={sync.isPending || !i.credentials_present} onClick={() => sync.mutate(7)}>
+                          <RefreshCw /> Sync now
+                        </Button>
+                      )}
+                      {isOwner && (
+                        <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => update.mutate({ provider: i.provider, patch: { status: on ? 'not_configured' : 'connected' } })}>
+                          {on ? 'Switch off' : 'Switch on'}
+                        </Button>
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{PROVIDER_HINT[i.provider]}</p>
+                  {i.last_error && <p className="text-xs text-destructive">{i.last_error}</p>}
+                  {i.last_sync_at && <p className="text-xs text-muted-foreground">Last sync {new Date(i.last_sync_at).toLocaleString('en-IN')}</p>}
+                </li>
+              )
+            })}
+          </ul>
         )}
       </CardContent>
     </Card>

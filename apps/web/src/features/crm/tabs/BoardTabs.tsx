@@ -19,7 +19,10 @@ import { SkeletonCards } from '@/shared/ui/skeleton'
 import { ErrorState } from '@/shared/ui/states'
 import { formatINR } from '@/shared/ui/format'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useMoveStage, usePipelines } from '../api'
+import { useActivities, useMoveStage, usePipelines, useUpdateActivity } from '../api'
+import { taskDueBy } from '@ipc/domain'
+import { Check, ClipboardList } from 'lucide-react'
+import { Button } from '@/shared/ui/button'
 import { LostReasonDialog } from '../LostReasonDialog'
 import { DUE_COLUMNS, boardColumns } from '../leads'
 import { BoardColumn, LeadCard, LeadTable, stageTone } from './shared'
@@ -28,9 +31,47 @@ import { BoardColumn, LeadCard, LeadTable, stageTone } from './shared'
 export function TodayTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; now: Date; onOpen: (id: string) => void }) {
   const columns = boardColumns(leads, now)
   const due = [...columns.overdue, ...columns.today]
+  const tasks = useActivities({ openTasks: true })
+  const update = useUpdateActivity()
+  const access = useAccess()
+  const canEdit = access.hasAction('crm', 'edit')
+  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
+  const dueTasks = (tasks.data ?? []).filter((t) => taskDueBy(t, endOfDay))
 
   return (
     <div className="flex flex-col gap-4">
+      {dueTasks.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="flex items-center gap-2 font-medium">
+            <ClipboardList className="size-4 text-muted-foreground" /> Tasks due today
+          </p>
+          <ul className="mt-2 divide-y divide-border">
+            {dueTasks.map((t) => (
+              <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{t.subject ?? 'Task'}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {t.lead_id ? (
+                      <button type="button" className="hover:underline" onClick={() => onOpen(t.lead_id!)}>
+                        {t.lead_name ?? 'Open deal'}
+                      </button>
+                    ) : (
+                      'Contact'
+                    )}
+                    {t.due_at && new Date(t.due_at).getTime() < now.getTime() ? ' · overdue' : ''}
+                    {t.assignee_name ? ` · ${t.assignee_name}` : ''}
+                  </span>
+                </span>
+                {canEdit && (
+                  <Button size="sm" variant="outline" disabled={update.isPending} onClick={() => update.mutate({ id: t.id, patch: { done: true } })}>
+                    <Check /> Done
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
         {due.length === 0
           ? 'Nothing is due today and nothing is late. '

@@ -851,3 +851,178 @@ export const crmForecast = z.object({
   by_month: z.array(forecastBucket.extend({ month: z.string().regex(/^\d{4}-\d{2}$/) })),
 })
 export type CrmForecast = z.infer<typeof crmForecast>
+
+// ── activities ────────────────────────────────────────────────
+export const activityType = z.enum(['call', 'email', 'meeting', 'note', 'task', 'whatsapp', 'sms'])
+export type ActivityType = z.infer<typeof activityType>
+export const activityDirection = z.enum(['in', 'out', 'none'])
+export type ActivityDirection = z.infer<typeof activityDirection>
+export const activityProvider = z.enum(['manual', 'twilio', 'gmail', 'o365', 'whatsapp'])
+export type ActivityProvider = z.infer<typeof activityProvider>
+
+export const crmActivity = z.object({
+  id: uuid,
+  lead_id: uuid.nullable(),
+  lead_name: z.string().nullable().default(null),
+  contact_id: uuid.nullable(),
+  type: activityType,
+  direction: activityDirection,
+  subject: z.string().nullable(),
+  body: z.string().nullable(),
+  outcome: z.string().nullable(),
+  started_at: isoDateTime.nullable(),
+  ended_at: isoDateTime.nullable(),
+  duration_s: z.number().int().nullable(),
+  due_at: isoDateTime.nullable(),
+  done_at: isoDateTime.nullable(),
+  assigned_to: uuid.nullable(),
+  assignee_name: z.string().nullable().default(null),
+  actor_id: uuid.nullable(),
+  actor_name: z.string().nullable().default(null),
+  provider: activityProvider,
+  external_id: z.string().nullable().default(null),
+  created_at: isoDateTime,
+})
+export type CrmActivity = z.infer<typeof crmActivity>
+
+export const activitiesQuery = z.object({
+  lead_id: uuid.optional(),
+  contact_id: uuid.optional(),
+  type: activityType.optional(),
+  assigned_to: uuid.optional(),
+  /** Only tasks still open, oldest due first. */
+  open_tasks: z
+    .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
+})
+export type ActivitiesQuery = z.infer<typeof activitiesQuery>
+
+export const createActivityRequest = z
+  .object({
+    lead_id: uuid.optional(),
+    contact_id: uuid.optional(),
+    type: activityType,
+    direction: activityDirection.default('none'),
+    subject: z.string().trim().max(200).optional(),
+    body: z.string().max(8000).optional(),
+    outcome: z.string().trim().max(60).optional(),
+    started_at: isoDateTime.optional(),
+    ended_at: isoDateTime.optional(),
+    duration_s: z.number().int().min(0).max(86400).optional(),
+    due_at: isoDateTime.optional(),
+    assigned_to: uuid.nullable().optional(),
+  })
+  .refine((v) => !!v.lead_id || !!v.contact_id, { message: 'An activity belongs to a deal or a contact.', path: ['lead_id'] })
+  .refine((v) => v.type !== 'task' || !!v.subject, { message: 'Say what the task is.', path: ['subject'] })
+export type CreateActivityRequest = z.infer<typeof createActivityRequest>
+
+export const updateActivityRequest = z.object({
+  subject: z.string().trim().max(200).nullable().optional(),
+  body: z.string().max(8000).nullable().optional(),
+  outcome: z.string().trim().max(60).nullable().optional(),
+  started_at: isoDateTime.nullable().optional(),
+  ended_at: isoDateTime.nullable().optional(),
+  duration_s: z.number().int().min(0).max(86400).nullable().optional(),
+  due_at: isoDateTime.nullable().optional(),
+  /** true stamps done_at now; false clears it. */
+  done: z.boolean().optional(),
+  assigned_to: uuid.nullable().optional(),
+})
+export type UpdateActivityRequest = z.infer<typeof updateActivityRequest>
+
+/** GET /crm/leads/:id/timeline — the stage trail and the activities, merged. */
+export const timelineItem = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('event'), at: isoDateTime, event: leadEvent }),
+  z.object({ kind: z.literal('activity'), at: isoDateTime, activity: crmActivity }),
+])
+export type TimelineItem = z.infer<typeof timelineItem>
+
+export const timelineQuery = z.object({
+  before: isoDateTime.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+})
+export type TimelineQuery = z.infer<typeof timelineQuery>
+
+export const timelineResponse = z.object({
+  items: z.array(timelineItem),
+  /** Pass back as ?before= for the next page; null when there is no more. */
+  next_cursor: isoDateTime.nullable(),
+})
+export type TimelineResponse = z.infer<typeof timelineResponse>
+
+// ── calls, meetings, email sync ───────────────────────────────
+export const placeCallRequest = z.object({
+  lead_id: uuid,
+  /** The agent's own number, rung first. Defaults to the caller's profile phone. */
+  agent_phone: z.string().trim().min(6).max(30).optional(),
+})
+export type PlaceCallRequest = z.infer<typeof placeCallRequest>
+
+export const placeCallResponse = z.object({
+  activity: crmActivity,
+  /** true = Twilio is ringing; false = logged as a manual call, open dial_url. */
+  placed: z.boolean(),
+  provider: z.enum(['twilio', 'manual']),
+  call_sid: z.string().nullable(),
+  dial_url: z.string().nullable(),
+})
+export type PlaceCallResponse = z.infer<typeof placeCallResponse>
+
+export const scheduleMeetingRequest = z
+  .object({
+    lead_id: uuid,
+    subject: z.string().trim().min(1).max(200),
+    starts_at: isoDateTime,
+    ends_at: isoDateTime,
+    location: z.string().trim().max(200).optional(),
+    notes: z.string().max(4000).optional(),
+    /** Invite the lead by email when they have one. */
+    invite_lead: z.boolean().default(true),
+  })
+  .refine((v) => v.ends_at > v.starts_at, { message: 'The meeting must end after it starts.', path: ['ends_at'] })
+export type ScheduleMeetingRequest = z.infer<typeof scheduleMeetingRequest>
+
+export const scheduleMeetingResponse = z.object({
+  activity: crmActivity,
+  /** GET this for the .ics file. */
+  ics_url: z.string(),
+})
+export type ScheduleMeetingResponse = z.infer<typeof scheduleMeetingResponse>
+
+export const emailSyncRequest = z.object({ since_days: z.number().int().min(1).max(90).default(7) })
+export type EmailSyncRequest = z.infer<typeof emailSyncRequest>
+
+export const emailSyncResponse = z.object({
+  status: z.enum(['not_configured', 'ok', 'error']),
+  provider: z.enum(['gmail', 'o365']).nullable(),
+  fetched: z.number().int(),
+  imported: z.number().int(),
+  /** Messages whose counterpart matched no contact or lead by email. */
+  unmatched: z.number().int(),
+  message: z.string().nullable().default(null),
+})
+export type EmailSyncResponse = z.infer<typeof emailSyncResponse>
+
+export const integrationProvider = z.enum(['gmail', 'o365', 'twilio'])
+export type IntegrationProvider = z.infer<typeof integrationProvider>
+
+export const crmIntegration = z.object({
+  provider: integrationProvider,
+  status: z.enum(['not_configured', 'connected', 'error']),
+  /** Whether this deployment carries the credentials for it. */
+  credentials_present: z.boolean(),
+  config: z.record(z.unknown()).default({}),
+  last_error: z.string().nullable().default(null),
+  last_sync_at: isoDateTime.nullable().default(null),
+  connected_by: uuid.nullable().default(null),
+  updated_at: isoDateTime.nullable().default(null),
+})
+export type CrmIntegration = z.infer<typeof crmIntegration>
+
+export const updateIntegrationRequest = z.object({
+  status: z.enum(['connected', 'not_configured']).optional(),
+  config: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
+})
+export type UpdateIntegrationRequest = z.infer<typeof updateIntegrationRequest>

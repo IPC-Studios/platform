@@ -72,6 +72,7 @@ async function freshDb() {
   await db.exec(mig('0036_crm_v4.sql'))
   await db.exec(mig('0037_truly_amazing.sql'))
   await db.exec(mig('0038_crm_objects.sql'))
+  await db.exec(mig('0039_crm_activities.sql'))
   return db
 }
 
@@ -2720,5 +2721,115 @@ describe('CRM objects — pipelines, stages, contacts, forecast, SLA sweep (0038
     await asUser(db, member)
     await expect(db.query(`select crm_set_sla_hours(8);`)).rejects.toThrow(/not allowed/)
     await asUser(db, owner)
+  })
+})
+
+describe('CRM activities — timeline, replies, tasks, integrations (0039)', () => {
+  let db: PGlite
+  const owner = '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a'
+  const member = '8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm6.test'),('${member}','member@crm6.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM6 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm6.test');`,
+    )
+  })
+
+  it('an activity takes its actor, contact and task owner from context', async () => {
+    const lead = await add('Activity lead', '9876950001')
+    await db.exec(`update crm_leads set assigned_to = '${member}' where id = '${lead}';`)
+    const a = await db.query<{ actor_id: string; contact_id: string; assigned_to: string; duration_s: number }>(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject, started_at, ended_at)
+       values (get_current_company_id(), '${lead}', 'call', 'out', 'Intro call', now() - interval '10 minutes', now())
+       returning actor_id, contact_id, assigned_to, duration_s;`,
+    )
+    expect(a.rows[0]!.actor_id).toBe(owner)
+    expect(a.rows[0]!.contact_id).not.toBeNull()
+    expect(a.rows[0]!.duration_s).toBe(600)
+    const t = await db.query<{ assigned_to: string }>(
+      `insert into crm_activities (company_id, lead_id, type, subject, due_at)
+       values (get_current_company_id(), '${lead}', 'task', 'Send quote', now() + interval '1 day') returning assigned_to;`,
+    )
+    expect(t.rows[0]!.assigned_to).toBe(member)
+    // An outbound call is the first contact.
+    const l = await db.query<{ last_contacted_at: string | null }>(`select last_contacted_at from crm_leads where id = '${lead}';`)
+    expect(l.rows[0]!.last_contacted_at).not.toBeNull()
+  })
+
+  it('an inbound reply stops the cadence and notes it on the trail', async () => {
+    const cad = (
+      await db.query<{ id: string }>(
+        `insert into crm_cadences (company_id, name) values (get_current_company_id(), 'Reply test') returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(
+      `insert into crm_cadence_steps (cadence_id, company_id, step_no, day_offset, note) values ('${cad}', get_current_company_id(), 1, 0, 'Call');`,
+    )
+    const lead = await add('Replies', '9876950002')
+    await db.query(`select start_lead_cadence('${lead}', '${cad}');`)
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject) values (get_current_company_id(), '${lead}', 'whatsapp', 'in', 'Yes please');`,
+    )
+    const lc = await db.query<{ stopped_at: string | null }>(`select stopped_at from crm_lead_cadences where lead_id = '${lead}';`)
+    expect(lc.rows[0]!.stopped_at).not.toBeNull()
+    const ev = await db.query<{ note: string }>(
+      `select note from crm_lead_events where lead_id = '${lead}' and note like 'replied via whatsapp%';`,
+    )
+    expect(ev.rows[0]!.note).toContain('cadence stopped: Reply test')
+  })
+
+  it('a due task notifies its owner once a day through the hourly tick', async () => {
+    const lead = await add('Task lead', '9876950003')
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, subject, due_at, assigned_to)
+       values (get_current_company_id(), '${lead}', 'task', 'Call back', now() - interval '1 hour', '${member}');`,
+    )
+    const first = await db.query<{ s: { tasks: { due: number; notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(first.rows[0]!.s.tasks).toMatchObject({ due: 1, notified: 1 })
+    const again = await db.query<{ s: { tasks: { notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(again.rows[0]!.s.tasks.notified).toBe(0)
+    const n = await db.query<{ title: string }>(
+      `select title from notifications where recipient_uid = '${member}' and type = 'crm_task';`,
+    )
+    expect(n.rows[0]!.title).toBe('Task due: Call back')
+    // Done tasks are not chased.
+    await db.exec(`update crm_activities set done_at = now() where type = 'task' and lead_id = '${lead}';`)
+    const dry = await db.query<{ s: { tasks: { due: number } } }>(`select run_crm_followup_cron(true) as s;`)
+    expect(dry.rows[0]!.s.tasks.due).toBe(0)
+  })
+
+  it('a synced message is filed once per provider id', async () => {
+    const lead = await add('Synced', '9876950004')
+    const ins = `insert into crm_activities (company_id, lead_id, type, direction, subject, provider, external_id)
+       values (get_current_company_id(), '${lead}', 'email', 'in', 'Re: quote', 'gmail', 'msg-1')
+       on conflict (company_id, provider, external_id) where external_id is not null do nothing returning id;`
+    expect((await db.query(ins)).rows).toHaveLength(1)
+    expect((await db.query(ins)).rows).toHaveLength(0)
+  })
+
+  it('one integration row per provider', async () => {
+    await asUser(db, owner)
+    await db.exec(
+      `insert into crm_integrations (company_id, provider, status, connected_by) values (get_current_company_id(), 'twilio', 'connected', '${owner}');`,
+    )
+    const r = await db.query<{ status: string }>(`select status from crm_integrations where provider = 'twilio';`)
+    expect(r.rows[0]!.status).toBe('connected')
+    await expect(
+      db.exec(`insert into crm_integrations (company_id, provider, status) values (get_current_company_id(), 'twilio', 'error');`),
+    ).rejects.toThrow()
   })
 })
