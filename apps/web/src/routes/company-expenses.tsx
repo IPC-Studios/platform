@@ -190,7 +190,11 @@ function AddExpenseDialog() {
             <input type="checkbox" checked={overhead} onChange={(e) => setOverhead(e.target.checked)} />
             Fixed overhead (allocated across projects)
           </label>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

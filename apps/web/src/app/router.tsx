@@ -39,7 +39,9 @@ import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
-import { comingSoon } from '@/routes/coming-soon'
+import { SystemPage } from '@/routes/settings/system'
+import { MyTasksPage } from '@/routes/tasks/my'
+import { MyShootsPage } from '@/routes/shoots/my'
 import { RequireAuth } from '@/shared/auth/guards'
 import { AppShell } from '@/shared/layout/AppShell'
 
@@ -126,11 +128,10 @@ const routeTree = rootRoute.addChildren([
   route('/project-tracking', ProjectTrackingPage),
   route('/clients', ClientsListPage),
 
-  // Nav destinations whose feature phase isn't built yet.
   route('/shoots', ShootsPage),
+  route('/shoots/my', MyShootsPage),
   route('/tasks', TasksPage),
-  route('/tasks/my', comingSoon('My tasks', 'tasks', 'Phase 12')),
-  route('/shoots/my', comingSoon('My shoots', 'projects', 'a later phase')),
+  route('/tasks/my', MyTasksPage),
   route('/my-work', MyWorkPage),
   route('/production-board', ProductionBoardPage),
   route('/data-management', DataManagementPage),
@@ -150,6 +151,7 @@ const routeTree = rootRoute.addChildren([
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
   route('/settings/appearance', AppearancePage),
+  route('/settings/system', SystemPage),
   route('/platform/studios', PlatformStudiosPage),
   route('/platform/usage', PlatformUsagePage),
   ]),

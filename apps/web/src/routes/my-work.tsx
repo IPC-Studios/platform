@@ -137,7 +137,11 @@ function SubmitDialog() {
             <Label>Notes</Label>
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What is this?" />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="mt-2 flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

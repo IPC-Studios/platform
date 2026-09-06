@@ -2,74 +2,169 @@
 
 ## Environments & secrets
 
-Secrets are set via `wrangler secret put` (API) and Cloudflare Pages env (web).
-Never commit them. `.env.example` lists every variable.
+Backend secrets live in the repo-root `.env` on the VPS (consumed by Docker
+Compose); the web app's build-time vars live in Cloudflare Workers Builds. Never commit
+them. `deploy/.env.example` lists every variable.
 
-| Secret | Where | Rotation |
+| Variable | Where | Notes |
 |---|---|---|
-| `SUPABASE_SERVICE_ROLE_KEY` | API worker | Rotate in Supabase → update secret → redeploy |
-| `SUPABASE_ANON_KEY` | API + web | Public; rotate with project keys |
-| `CRON_SECRET` | API + cron scheduler | Rotate both sides together |
-| `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | API | Rotate in Razorpay dashboard → update secret |
-| `ALLOWED_ORIGINS` | API | Comma-separated prod origins; empty = allow-all (dev only) |
+| `JWT_SECRET` | API | HS256 signing key. Rotating it signs everyone out. |
+| `CRON_SECRET` | API + scheduler | Compared in constant time. Rotate both sides together. |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | API | With the key pair set, `/subscription/order` creates a Razorpay order and `/subscription/activate` **requires** the Checkout signature. Without it, activation is only allowed when `ENVIRONMENT` is `development`, `test`, `ci` or `local`. |
+| `META_VERIFY_TOKEN` / `META_APP_SECRET` / `META_PAGE_ACCESS_TOKEN` | API | Handshake token, post signature secret, Graph API page token (see "Meta lead ads and WhatsApp"). |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | API | Optional. Templates are delivered by the WhatsApp Cloud API when both are set. |
+| `AUTH_COOKIE` / `AUTH_COOKIE_SAMESITE` / `AUTH_COOKIE_DOMAIN` | API | Optional. `AUTH_COOKIE=1` keeps the refresh token in an HttpOnly cookie (see "Refresh-token cookie mode"). |
+| `ALLOWED_ORIGINS` | API | Comma-separated prod origins. Empty in production = deny all. |
+| `CLIENT_IP_HEADER` | API | Which header carries the real client address. `X-Forwarded-For` (default, last hop; Caddy/nginx) or `CF-Connecting-IP` (behind Cloudflare). Trusting the wrong one lets callers pick their own rate-limit bucket. |
+| `SENTRY_DSN` | API | Optional. Unexpected failures are posted as Sentry events. Unset = logs only. |
+| `LOG_LEVEL` | API | `debug` / `info` / `warn` / `error`. |
+| `APP_VERSION` | API | Release id shown by `/health` and stamped on error reports. |
+| `ENVIRONMENT` | API | `production` fails closed everywhere (token echo, demo activation, CORS). |
+
+## Logging, request ids, error tracking
+
+- Every request gets an `X-Request-Id` (an inbound one from a trusted proxy is
+  kept). It is echoed on the response, stamped on every log line the request
+  produces, and written into `audit_logs.correlation_id`.
+- Logs are JSON lines on stdout (pino-shaped: `level`, `time`, `msg`, fields).
+  `docker compose logs api | grep <request-id>` finds everything about one call.
+- Any failing operation goes through `attempt()` (`services/api/src/lib/attempt.ts`):
+  it logs the Postgres code and message, sets `X-Correlation-Id`, reports to
+  Sentry when configured, and maps `42501`→403, `23505`/`23503`→409,
+  `22023`/`P0001`→422, connection loss→503 instead of a blanket 400. There are no
+  swallowed `.catch(() => null)` calls left in the API.
+- The web client shows the id under any failed panel as "Reference: …" — ask
+  the user for it.
+
+## Audit trail
+
+`audit_logs` records who did what to which row (`action`, `entity_type`,
+`entity_id`, `before`, `after`, `ip`, `correlation_id`). Writes go through
+`audit_log_write()` (SECURITY DEFINER, stamps the caller's own studio). The
+owner reads it at **Settings → System**, or via `GET /settings/audit`.
+Domain-specific trails remain: `access_audit_logs`, `billing_events`,
+`crm_lead_events`, `razorpay_webhook_events`.
 
 ## Cron
 
-`pg_cron` (or an external scheduler) calls `POST /cron/reminders` with header
-`x-cron-secret: $CRON_SECRET`. The secret is compared in **constant time**.
-Add `?dry=1` for a no-op dry run. Every run is recorded in `cron_runs`
-(queryable for idempotency + observability). Generators de-dupe, so re-running
-is safe.
+The `cron` service (or any scheduler) calls `POST /cron/reminders` hourly with
+`x-cron-secret: $CRON_SECRET`. One tick runs `run_reminder_cron()`,
+`run_crm_followup_cron()` (overdue follow-ups → notifications + automation
+rules) and sweeps expired refresh tokens. `?dry=1` is a no-op run. Every run
+lands in `cron_runs`; read it at **Settings → System** or `GET /cron/runs`
+(owner or platform admin). A row with no `finished_at` did not complete.
 
 ## Rate limiting
 
-`services/api/src/middleware/security.ts` applies a best-effort per-IP sliding
-window to `/auth`, `/public`, `/webhooks`. **This is per-isolate only.** For
-real multi-instance limiting, back it with Cloudflare KV or a Durable Object
-keyed on `IP:path`.
+`services/api/src/middleware/security.ts`. Sign-in surfaces (`/auth/login`,
+register, verify, reset, invite) share one bucket of 10/min per address;
+session upkeep (`/auth/session`, `/auth/refresh`, sign-out) has its own
+120/min bucket so an office NAT is never locked out of the app. The store is
+in-process and bounded (stale keys swept, LRU-evicted past 10k keys). It is
+per process: before running more than one API replica, move the store behind
+something shared (Postgres unlogged table or Redis) — the `HitStore` interface
+is the seam.
 
-## RLS is the primary enforcement (Fork 1 = B)
+## Health
+
+`GET /health` → `{ ok, service, version, uptime_s, db, db_latency_ms }`. `db` is
+`ok`, `unreachable` (503) or `not_configured`. It names no environment and
+repeats no driver error text. Point uptime monitors at it.
+
+## RLS is the primary enforcement
 
 Every tenant table has `company_id` and an RLS policy scoped to
-`get_current_company_id()`. **RLS enforcement is validated by the pglite suite
-for logic, but pglite runs as superuser and cannot prove enforcement.** Before
-production, run the RLS suite against a real Postgres/Supabase with the
-`authenticated` role (see "DB verification" below).
+`get_current_company_id()`. Since 0034 that oracle resolves for any live
+member **regardless of plan**; the plan gate lives in `is_current_user_active()`,
+which feature tables use. That is what keeps the subscription page reachable
+when the plan has lapsed — the recovery path must not sit behind the thing it
+recovers from.
 
 ## DB verification
 
-Migrations are logic-tested via `@electric-sql/pglite` in
-`supabase/tests/tenancy.test.ts` (36 tests).
-
-**RLS enforcement is VERIFIED on the real hosted Postgres** by
-`supabase/tests/rls-live.mjs` — it registers two throwaway studios and asserts
-studio A cannot read studio B's company / clients / users (direct PostgREST
-with each JWT, and end-to-end through the API). Re-run anytime:
+Migrations are logic-tested against pglite in `supabase/tests/tenancy.test.ts`
+(0001–0036 applied in order; ~130 tests). pglite runs as superuser, so RLS
+*enforcement* is proven on real Postgres by `supabase/tests/rls-live.mjs` and by
+the CI `e2e` job.
 
 ```bash
-cd apps/web && \
-SUPABASE_URL=https://<ref>.supabase.co \
-SUPABASE_ANON_KEY=sb_publishable_... \
-API_URL=https://<worker>/ \
-bun ../../supabase/tests/rls-live.mjs
+API_URL=https://api.yourstudio.in bun supabase/tests/rls-live.mjs
 ```
 
-It creates two disposable tenants each run — clean them up periodically. The
-GiST double-booking constraint applies automatically on real Postgres (pglite
-lacks `btree_gist`, so its overlap trigger is the fallback there).
+## Payments
+
+Checkout: `POST /subscription/order` prices the plan in SQL (+18% GST) and,
+with Razorpay configured, registers the order with Razorpay and returns
+`razorpay_order_id` + `key_id`. The browser opens Razorpay Checkout; on success
+it posts `{order_id, payment_id, signature}` to `/subscription/activate`, which
+verifies the HMAC before touching the plan. The webhook (`/webhooks/razorpay`)
+is the belt-and-braces path: signature-checked, replay-proof
+(`razorpay_webhook_events`), and activates by the provider order id.
+
+## Web app (Cloudflare Workers static assets)
+
+`apps/web/public/_redirects` rewrites every path to `index.html` (deep links
+survive a refresh). `apps/web/public/_headers` sets HSTS, frame denial and a
+CSP that permits only the app's own scripts plus Razorpay Checkout. Its
+`connect-src` is `https:` because the build cannot template the API origin —
+tighten it to `'self' https://api.<your-domain>` once known.
 
 ## Incident response
 
-- 500s carry an `X-Correlation-Id` header + a structured JSON log line — grep
-  logs for the id the user reports.
+- Start from the reference id the user quotes. It is the request id: grep the
+  API logs for it, then `select * from audit_logs where correlation_id = '…'`.
 - Payment disputes: `payment_orders`, `payment_transactions`,
-  `razorpay_webhook_events` (replay-proof), `billing_events` are the audit trail.
-- Access disputes: `access_audit_logs` records every `set_user_access`.
+  `razorpay_webhook_events`, `billing_events`, plus `audit_logs` rows with
+  `entity_type = 'payment_order'`.
+- Access disputes: `access_audit_logs` (profile/override changes) and
+  `audit_logs` (`member.*`, `role.*`, `access.set`).
+- A member removed from a studio loses their session at the next refresh
+  (0034 `rotate_refresh_token`), and `revoke_all_sessions` is called on removal.
 
 ## Security posture notes
 
-- No plaintext credentials are stored (the original's `employees.shared_password`
-  was intentionally dropped in the rebuild).
-- Provider tokens: encrypt at rest before storing (not yet holding any).
-- Client links (`work_delivery`, `terms_ack`) store only a **sha256 hash** of
-  the token; the raw value is returned once.
+- No plaintext credentials are stored. Passwords are argon2id (Bun.password).
+- Tokens: 30-minute access JWT + 30-day rotating refresh family; a reused
+  refresh token revokes its family. Change-password and sign-out-everywhere
+  bump `password_version`, stranding every earlier access token.
+- Client links (`work_delivery`, `terms_ack`, invitations, resets) store only a
+  sha256 hash of the token.
+- Meta lead ads: signature-verified posts, lead fields fetched by `leadgen_id`
+  (see below). Any plain JSON form can still post to the same source URL.
+
+## Refresh-token cookie mode
+
+`AUTH_COOKIE=1` moves the 30-day refresh token into an `HttpOnly; Secure`
+cookie named `ipc_refresh`, scoped to `/auth` on the API origin. The response
+body then carries `refresh_token: ""`; the SPA keeps only the 30-minute access
+token (in memory, mirrored to sessionStorage per tab) and sends the cookie on
+`/auth/*` calls. Turn it on when the app and the API share a registrable domain
+(`app.studio.in` + `api.studio.in`, with `AUTH_COOKIE_SAMESITE=lax` and
+optionally `AUTH_COOKIE_DOMAIN=.studio.in`). On split sites use
+`AUTH_COOKIE_SAMESITE=none` (HTTPS only); Safari may still refuse the cookie
+as third-party, so prefer a shared domain. Off (default), the body token is used
+as before; the client handles both.
+
+## Meta lead ads and WhatsApp
+
+- `META_VERIFY_TOKEN` completes the subscription handshake; `META_APP_SECRET`
+  verifies `X-Hub-Signature-256` on every post (a Meta-shaped post without one
+  is refused once the secret is set); `META_PAGE_ACCESS_TOKEN` fetches the
+  lead's fields by `leadgen_id` from the Graph API (v21.0). With the page token
+  unset, Meta notifications are acknowledged and logged but not imported.
+- `WHATSAPP_PHONE_NUMBER_ID` + `WHATSAPP_ACCESS_TOKEN` make "send template"
+  deliver through the WhatsApp Cloud API (text messages). Unset, the API hands
+  back a `wa.me` link and the person's own WhatsApp opens with the text.
+
+## CRM cadences and the hourly sweep
+
+A cadence is a sequence of follow-up steps (day offsets, optional template,
+note). `start_lead_cadence()` puts a lead on one (also via the automation
+action `start_cadence`); the hourly `/cron/reminders` tick calls
+`run_crm_followup_cron()`, which advances due steps (next follow-up on the
+lead, notification to its owner, history event), then handles overdue
+follow-ups and their rules. Winning or losing a lead stops its cadence. There
+is no `pg_cron`; the `cron` compose container is the scheduler.
+
+Saved CRM views live in `crm_saved_views` per person; views saved in a browser
+before this are pushed up the first time the inbox loads.

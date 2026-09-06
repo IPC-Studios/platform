@@ -5,6 +5,13 @@ import { authToken } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { setTokens } from '@/shared/auth/token'
+import { markCookieSession } from '@/shared/api/client'
+
+/** Store the pair; an empty refresh token means the API keeps it in its cookie. */
+function rememberSession(pair: { access_token: string; refresh_token: string }) {
+  setTokens(pair)
+  markCookieSession(!pair.refresh_token)
+}
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -36,7 +43,7 @@ export function ResetPasswordPage() {
     }
     setBusy(true)
     try {
-      setTokens(
+      rememberSession(
         await callApi('/auth/reset-password', {
           method: 'POST',
           body: { token, password },
@@ -109,7 +116,9 @@ export function ResetPasswordPage() {
                   </div>
 
                   {error && (
-                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+                    <p id="form-error" role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {error}
+                    </p>
                   )}
 
                   <Button type="submit" disabled={busy} className="mt-1 w-full">

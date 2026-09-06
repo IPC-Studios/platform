@@ -258,7 +258,11 @@ function NewInvoiceDialog() {
             </div>
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
@@ -310,7 +314,11 @@ function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: num
             <Label>Mode</Label>
             <Input value={mode} onChange={(e) => setMode(e.target.value)} placeholder="upi / cash / bank" />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

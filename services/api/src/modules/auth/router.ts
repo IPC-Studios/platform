@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type { TransactionSql } from 'postgres'
 import {
   registerRequest,
@@ -9,6 +9,7 @@ import {
   forgotPasswordRequest,
   forgotPasswordResult,
   resetPasswordRequest,
+  changePasswordRequest,
   refreshRequest,
   logoutRequest,
   acceptInvitationRequest,
@@ -22,7 +23,11 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
 import { withService } from '../../lib/db'
+import { attempt } from '../../lib/attempt'
+import { audit } from '../../lib/audit'
+import { isDevLike } from '../../lib/env'
 import { issueToken, hashPassword, verifyPassword, TTL_SECONDS } from '../../lib/auth-token'
+import { clearRefreshCookie, cookieMode, readRefreshCookie, setRefreshCookie } from '../../lib/session-cookie'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
 
 /**
@@ -47,15 +52,27 @@ async function passwordVersion(sql: TransactionSql, uid: string): Promise<number
  * returns this pair: a short access token stamped with the caller's current
  * password_version, and a fresh refresh-token family.
  */
-async function signIn(env: AppEnv['Bindings'], uid: string): Promise<AuthToken> {
+async function signIn(c: Context<AppEnv>, uid: string): Promise<AuthToken> {
+  const env = c.env
   const { pwv, refresh } = await withService(env, async (sql) => {
     const pwv = await passwordVersion(sql, uid)
     const [r] = await sql<{ token: string }[]>`select issue_refresh_token(${uid}) as token`
     return { pwv, refresh: r!.token }
   })
+  return pair(c, await issueToken(env, uid, pwv), refresh)
+}
+
+/**
+ * The wire shape of a session. In cookie mode the refresh token goes into the
+ * HttpOnly cookie and the body carries an empty string in its place, so no
+ * script on the page ever sees the 30-day credential.
+ */
+function pair(c: Context<AppEnv>, accessToken: string, refresh: string): AuthToken {
+  const viaCookie = cookieMode(c.env)
+  if (viaCookie) setRefreshCookie(c, refresh)
   return authToken.parse({
-    access_token: await issueToken(env, uid, pwv),
-    refresh_token: refresh,
+    access_token: accessToken,
+    refresh_token: viaCookie ? '' : refresh,
     token_type: 'bearer',
     expires_in: TTL_SECONDS,
   })
@@ -64,11 +81,9 @@ async function signIn(env: AppEnv['Bindings'], uid: string): Promise<AuthToken> 
 /**
  * Whether it is safe to hand a raw token back in the response body, which the
  * automated suites rely on. Fails CLOSED: an unset or unrecognised ENVIRONMENT
- * withholds the token. The old `!== 'production'` test returned live reset
- * tokens to anonymous callers on any deployment that simply forgot the var.
+ * withholds the token (see lib/env.ts).
  */
-const TOKEN_ECHO_ENVIRONMENTS = new Set(['development', 'test', 'ci', 'local'])
-const echoesTokens = (env: AppEnv['Bindings']) => TOKEN_ECHO_ENVIRONMENTS.has(env.ENVIRONMENT ?? '')
+const echoesTokens = isDevLike
 
 const verifyLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/verify?token=${raw}`
 const resetLink = (env: AppEnv['Bindings'], raw: string) => `${env.APP_URL}/reset-password?token=${raw}`
@@ -85,35 +100,35 @@ export const authRouter = new Hono<AppEnv>()
 
     const pwHash = await hashPassword(password)
 
-    let token: string
-    try {
-      // One transaction: create the auth user, bootstrap the studio, mint a
-      // verification token. Rolls back together on any failure.
-      token = await withService(c.env, async (sql) => {
-        const [u] = await sql<{ id: string }[]>`
-          insert into auth.users (email, encrypted_password)
-          values (${email}, ${pwHash})
-          returning id`
-        await sql`select set_config('request.jwt.claim.sub', ${u!.id}, true)`
-        await sql`select register_company_and_admin(${company_name}, ${admin_name}, ${phone ?? null})`
-        const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u!.id}) as token`
-        return t!.token
-      })
-    } catch (e) {
-      if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
-        fail(409, 'An account with this email already exists.')
-      }
-      fail(409, 'We could not create your studio. Please try again.')
-    }
+    // One transaction: create the auth user, bootstrap the studio, mint a
+    // verification token. Rolls back together on any failure.
+    const token = await attempt(
+      c,
+      'auth.register',
+      () =>
+        withService(c.env, async (sql) => {
+          const [u] = await sql<{ id: string }[]>`
+            insert into auth.users (email, encrypted_password)
+            values (${email}, ${pwHash})
+            returning id`
+          await sql`select set_config('request.jwt.claim.sub', ${u!.id}, true)`
+          await sql`select register_company_and_admin(${company_name}, ${admin_name}, ${phone ?? null})`
+          const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u!.id}) as token`
+          return t!.token
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (token === 'taken') fail(409, 'An account with this email already exists.')
+    if (!token) fail(400, 'We could not create your studio. Please try again.')
 
-    await sendVerificationEmail(c.env, email, verifyLink(c.env, token!))
+    await sendVerificationEmail(c.env, email, verifyLink(c.env, token))
 
     return c.json(
       registerResult.parse({
         verification_required: true,
         email,
         // Expose the token in test environments so automated suites can verify.
-        ...(echoesTokens(c.env) ? { verification_token: token! } : {}),
+        ...(echoesTokens(c.env) ? { verification_token: token } : {}),
       }),
     )
   })
@@ -122,28 +137,32 @@ export const authRouter = new Hono<AppEnv>()
     const parsed = verifyEmailRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid verification link.')
 
-    const uid = await withService(c.env, async (sql) => {
-      const [r] = await sql<{ uid: string | null }[]>`
-        select consume_email_verification(${parsed.data.token}) as uid`
-      return r?.uid ?? null
-    })
+    const uid = await attempt(c, 'auth.verify', () =>
+      withService(c.env, async (sql) => {
+        const [r] = await sql<{ uid: string | null }[]>`
+          select consume_email_verification(${parsed.data.token}) as uid`
+        return r?.uid ?? null
+      }),
+    )
     if (!uid) fail(400, 'This verification link is invalid or has expired.')
 
     // Verified → sign them straight in.
-    return c.json(await signIn(c.env, uid))
+    return c.json(await signIn(c, uid))
   })
 
   .post('/resend-verification', async (c) => {
     const parsed = resendVerificationRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please enter your email.')
 
-    const raw = await withService(c.env, async (sql) => {
-      const [u] = await sql<{ id: string; email_verified: boolean }[]>`
-        select id, email_verified from auth.users where email = ${parsed.data.email}`
-      if (!u || u.email_verified) return null
-      const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u.id}) as token`
-      return t!.token
-    })
+    const raw = await attempt(c, 'auth.resend_verification', () =>
+      withService(c.env, async (sql) => {
+        const [u] = await sql<{ id: string; email_verified: boolean }[]>`
+          select id, email_verified from auth.users where email = ${parsed.data.email}`
+        if (!u || u.email_verified) return null
+        const [t] = await sql<{ token: string }[]>`select issue_email_verification(${u.id}) as token`
+        return t!.token
+      }),
+    )
     // Dispatched, not awaited: waiting on the mail provider only when the
     // account exists turns the uniform 200 into a timing oracle.
     if (raw) void sendVerificationEmail(c.env, parsed.data.email, verifyLink(c.env, raw))
@@ -156,12 +175,16 @@ export const authRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please enter your email and password.')
     const { email, password } = parsed.data
 
-    const [row] = await withService(
-      c.env,
-      (sql) =>
-        sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
-          select id, encrypted_password, email_verified from auth.users where email = ${email}`,
+    const rows = await attempt(c, 'auth.login', () =>
+      withService(
+        c.env,
+        (sql) =>
+          sql<{ id: string; encrypted_password: string | null; email_verified: boolean }[]>`
+            select id, encrypted_password, email_verified from auth.users where email = ${email}`,
+      ),
     )
+    if (!rows) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+    const row = rows[0]
     // Always spend a verification, even for an unknown address: short-circuiting
     // here made a miss answer an order of magnitude faster than a hit, which
     // enumerates the customer base by latency alone.
@@ -173,20 +196,22 @@ export const authRouter = new Hono<AppEnv>()
       fail(403, 'Please verify your email before signing in. Check your inbox for the link.')
     }
 
-    return c.json(await signIn(c.env, row.id))
+    return c.json(await signIn(c, row.id))
   })
 
   .post('/forgot-password', async (c) => {
     const parsed = forgotPasswordRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please enter your email.')
 
-    const raw = await withService(c.env, async (sql) => {
-      const [u] = await sql<{ id: string }[]>`
-        select id from auth.users where email = ${parsed.data.email}`
-      if (!u) return null
-      const [t] = await sql<{ token: string }[]>`select issue_password_reset(${u.id}) as token`
-      return t!.token
-    })
+    const raw = await attempt(c, 'auth.forgot_password', () =>
+      withService(c.env, async (sql) => {
+        const [u] = await sql<{ id: string }[]>`
+          select id from auth.users where email = ${parsed.data.email}`
+        if (!u) return null
+        const [t] = await sql<{ token: string }[]>`select issue_password_reset(${u.id}) as token`
+        return t!.token
+      }),
+    )
     // Dispatched, not awaited: waiting on the mail provider only when the
     // account exists turns the uniform 200 into a timing oracle.
     if (raw) void sendPasswordResetEmail(c.env, parsed.data.email, resetLink(c.env, raw))
@@ -208,19 +233,59 @@ export const authRouter = new Hono<AppEnv>()
     // Hash first (Bun-side argon2id), then swap it in as the token is consumed —
     // one transaction, so a half-done reset can't leave the account unusable.
     const pwHash = await hashPassword(parsed.data.password)
-    const uid = await withService(c.env, async (sql) => {
-      const [r] = await sql<{ uid: string | null }[]>`
-        select consume_password_reset(${parsed.data.token}, ${pwHash}) as uid`
-      // Refresh tokens are revoked here, not in SQL: the reset RPC predates
-      // them and stays focused on the password.
-      if (r?.uid) await sql`select revoke_all_sessions(${r.uid})`
-      return r?.uid ?? null
-    })
+    const uid = await attempt(c, 'auth.reset_password', () =>
+      withService(c.env, async (sql) => {
+        const [r] = await sql<{ uid: string | null }[]>`
+          select consume_password_reset(${parsed.data.token}, ${pwHash}) as uid`
+        // Refresh tokens are revoked here, not in SQL: the reset RPC predates
+        // them and stays focused on the password.
+        if (r?.uid) await sql`select revoke_all_sessions(${r.uid})`
+        return r?.uid ?? null
+      }),
+    )
     if (!uid) fail(400, 'This reset link is invalid or has expired. Please request a new one.')
 
     // Reset proves mailbox control → sign them straight in. Every session issued
     // before it now carries a stale password_version and is refused.
-    return c.json(await signIn(c.env, uid))
+    return c.json(await signIn(c, uid))
+  })
+
+  // Change the password from inside a signed-in session. The current password
+  // is the proof; every other device is signed out, and this one gets a fresh
+  // pair so it is not stranded by its own version bump.
+  .post('/change-password', requireAuth, async (c) => {
+    const parsed = changePasswordRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Use at least 8 characters, and not the current password.')
+    const uid = c.get('auth').userId
+
+    const rows = await attempt(c, 'auth.change_password.lookup', () =>
+      withService(
+        c.env,
+        (sql) => sql<{ encrypted_password: string | null }[]>`
+          select encrypted_password from auth.users where id = ${uid}`,
+      ),
+    )
+    if (!rows) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+    const current = rows[0]?.encrypted_password
+    const ok = await verifyPassword(parsed.data.current_password, current ?? (await decoyHash()))
+    if (!current || !ok) fail(401, 'Your current password is incorrect.')
+
+    const pwHash = await hashPassword(parsed.data.new_password)
+    const done = await attempt(c, 'auth.change_password', () =>
+      withService(c.env, async (sql) => {
+        await sql`
+          update auth.users
+             set encrypted_password = ${pwHash}, password_changed_at = now()
+           where id = ${uid}`
+        // Bumps password_version and revokes every refresh family.
+        await sql`select revoke_all_sessions(${uid})`
+        return true
+      }),
+    )
+    if (!done) fail(400, 'We could not change your password. Please try again.')
+
+    await audit(c, { action: 'account.password_changed', entityType: 'user', entityId: uid })
+    return c.json(await signIn(c, uid))
   })
 
   // ── Invitations ─────────────────────────────────────────────
@@ -230,12 +295,17 @@ export const authRouter = new Hono<AppEnv>()
     const token = c.req.query('token')
     if (!token) fail(422, 'This invitation link is incomplete.')
 
-    const [row] = await withService(
-      c.env,
-      (sql) => sql<
-        { email: string; name: string; company_name: string; role: string; expires_at: string }[]
-      >`select * from peek_user_invitation(${token})`,
-    ).catch(() => [])
+    const rows = await attempt(c, 'auth.peek_invite', () =>
+      withService(
+        c.env,
+        (sql) => sql<
+          { email: string; name: string; company_name: string; role: string; expires_at: string }[]
+        >`select * from peek_user_invitation(${token})`,
+      ),
+    )
+    // A database failure is an outage, not a bad link.
+    if (!rows) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+    const row = rows[0]
     if (!row) fail(404, 'This invitation is invalid, revoked, or has expired.')
 
     return c.json(invitationPreview.parse(row))
@@ -248,56 +318,60 @@ export const authRouter = new Hono<AppEnv>()
     // Hash first, then consume: the SQL side creates the identity and the tenant
     // row in one transaction, so a failure leaves no half-built member behind.
     const pwHash = await hashPassword(parsed.data.password)
-    let uid: string | null
-    try {
-      uid = await withService(c.env, async (sql) => {
-        const [r] = await sql<{ uid: string | null }[]>`
-          select consume_user_invitation(${parsed.data.token}, ${pwHash}) as uid`
-        return r?.uid ?? null
-      })
-    } catch (e) {
-      if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
-        fail(409, 'An account with this email already exists. Please sign in instead.')
-      }
-      fail(400, 'We could not accept this invitation. Please ask for a new link.')
-    }
-    if (!uid!) fail(400, 'This invitation is invalid, revoked, or has expired.')
+    const uid = await attempt(
+      c,
+      'auth.accept_invite',
+      () =>
+        withService(c.env, async (sql) => {
+          const [r] = await sql<{ uid: string | null }[]>`
+            select consume_user_invitation(${parsed.data.token}, ${pwHash}) as uid`
+          return r?.uid ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (uid === 'taken') fail(409, 'An account with this email already exists. Please sign in instead.')
+    if (!uid) fail(400, 'This invitation is invalid, revoked, or has expired.')
 
     // Following the link proves mailbox control, so acceptance signs them in.
-    return c.json(await signIn(c.env, uid!))
+    return c.json(await signIn(c, uid))
   })
 
   .post('/refresh', async (c) => {
     const parsed = refreshRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Missing refresh token.')
+    // Body first (the client that holds one), else the HttpOnly cookie.
+    const presented = parsed.data.refresh_token ?? readRefreshCookie(c)
+    if (!presented) fail(422, 'Missing refresh token.')
 
-    const rotated = await withService(c.env, async (sql) => {
-      const [r] = await sql<{ user_id: string | null; token: string | null }[]>`
-        select * from rotate_refresh_token(${parsed.data.refresh_token})`
-      if (!r?.user_id || !r.token) return null
-      return { uid: r.user_id, refresh: r.token, pwv: await passwordVersion(sql, r.user_id) }
-    })
-    if (!rotated) fail(401, 'Your session has expired. Please sign in again.')
-
-    return c.json(
-      authToken.parse({
-        access_token: await issueToken(c.env, rotated.uid, rotated.pwv),
-        refresh_token: rotated.refresh,
-        token_type: 'bearer',
-        expires_in: TTL_SECONDS,
+    const rotated = await attempt(c, 'auth.refresh', () =>
+      withService(c.env, async (sql) => {
+        const [r] = await sql<{ user_id: string | null; token: string | null }[]>`
+          select * from rotate_refresh_token(${presented})`
+        if (!r?.user_id || !r.token) return 'refused' as const
+        return { uid: r.user_id, refresh: r.token, pwv: await passwordVersion(sql, r.user_id) }
       }),
     )
+    // An outage must not read as "session over" — the client would drop
+    // perfectly good tokens on a blip.
+    if (!rotated) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+    if (rotated === 'refused') {
+      if (cookieMode(c.env)) clearRefreshCookie(c)
+      fail(401, 'Your session has expired. Please sign in again.')
+    }
+
+    return c.json(pair(c, await issueToken(c.env, rotated.uid, rotated.pwv), rotated.refresh))
   })
 
   .post('/logout', async (c) => {
     const parsed = logoutRequest.safeParse(await c.req.json().catch(() => ({})))
     // Sign-out never fails: the client has already dropped its tokens.
-    if (parsed.success && parsed.data.refresh_token) {
-      await withService(
-        c.env,
-        (sql) => sql`select revoke_refresh_family(${parsed.data.refresh_token!})`,
-      ).catch(() => null)
+    const raw = (parsed.success ? parsed.data.refresh_token : undefined) ?? readRefreshCookie(c)
+    if (raw) {
+      await attempt(c, 'auth.logout', () =>
+        withService(c.env, (sql) => sql`select revoke_refresh_family(${raw})`),
+      )
     }
+    if (cookieMode(c.env)) clearRefreshCookie(c)
     return c.json({ ok: true })
   })
 
@@ -307,11 +381,12 @@ export const authRouter = new Hono<AppEnv>()
     const uid = c.get('auth').userId
     // Unlike /logout, the server-side revocation IS the feature — a swallowed
     // error here would tell the user every device was signed out when none was.
-    const revoked = await withService(
-      c.env,
-      (sql) => sql`select revoke_all_sessions(${uid})`,
-    ).catch(() => null)
+    const revoked = await attempt(c, 'auth.logout_all', () =>
+      withService(c.env, (sql) => sql`select revoke_all_sessions(${uid})`),
+    )
     if (!revoked) fail(400, 'We could not sign out your other devices. Please try again.')
+    if (cookieMode(c.env)) clearRefreshCookie(c)
+    await audit(c, { action: 'account.signed_out_everywhere', entityType: 'user', entityId: uid })
     return c.json({ ok: true })
   })
 

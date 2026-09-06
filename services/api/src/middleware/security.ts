@@ -1,13 +1,26 @@
 import type { Context, Next } from 'hono'
 import type { AppEnv } from '../context'
+import { resolveClientIp } from '../lib/client-ip'
 
-/** Baseline security response headers on every request. */
+const HEADERS: ReadonlyArray<[string, string]> = [
+  ['X-Content-Type-Options', 'nosniff'],
+  ['X-Frame-Options', 'DENY'],
+  ['Referrer-Policy', 'strict-origin-when-cross-origin'],
+  ['Permissions-Policy', 'geolocation=()'],
+  ['Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload'],
+  ['Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'"],
+  ['Cross-Origin-Opener-Policy', 'same-origin'],
+  ['Cross-Origin-Resource-Policy', 'same-origin'],
+]
+
+/**
+ * Baseline security response headers on every response — including ones a
+ * handler builds itself as a raw Response, which `c.header()` before `next()`
+ * would not reach. Set after the handler so nothing can drop them.
+ */
 export async function securityHeaders(c: Context<AppEnv>, next: Next) {
   await next()
-  c.header('X-Content-Type-Options', 'nosniff')
-  c.header('X-Frame-Options', 'DENY')
-  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
-  c.header('Permissions-Policy', 'geolocation=(self)')
+  for (const [name, value] of HEADERS) c.res.headers.set(name, value)
 }
 
 /**
@@ -26,25 +39,83 @@ export function slidingWindow(
   return { allowed: true, next: [...fresh, now] }
 }
 
-// Per-isolate store. Real multi-instance limiting needs KV/Durable Objects
-// (see docs/RUNBOOK.md); this is a best-effort in-isolate backstop.
-const buckets = new Map<string, number[]>()
+/**
+ * A bounded in-process hit store. Every unique key used to live forever, so
+ * the map grew by one entry per (address, path) pair for the life of the
+ * process. Now: expired entries are swept on a cadence, and if the map is
+ * still over capacity the oldest keys are evicted first.
+ *
+ * Single-process only — the API runs as one Bun process per VPS. Scale out
+ * with a shared store (docs/RUNBOOK.md) before running more than one replica.
+ */
+export class HitStore {
+  private readonly buckets = new Map<string, number[]>()
+  private ops = 0
 
-/** Best-effort per-IP rate limit for mutating routes. */
-export function rateLimit(opts: { windowMs: number; limit: number }) {
+  constructor(
+    private readonly maxKeys = 10_000,
+    private readonly sweepEvery = 500,
+  ) {}
+
+  get size(): number {
+    return this.buckets.size
+  }
+
+  /** Run the decision for `key`, persist the pruned window, return the outcome. */
+  hit(key: string, now: number, windowMs: number, limit: number): ReturnType<typeof slidingWindow> {
+    const r = slidingWindow(this.buckets.get(key) ?? [], now, windowMs, limit)
+    // Re-insert so the map's insertion order doubles as recency for eviction.
+    this.buckets.delete(key)
+    this.buckets.set(key, r.next)
+    if (++this.ops % this.sweepEvery === 0) this.sweep(now, windowMs)
+    if (this.buckets.size > this.maxKeys) this.evictOldest(this.buckets.size - this.maxKeys)
+    return r
+  }
+
+  sweep(now: number, windowMs: number): void {
+    for (const [key, hits] of this.buckets) {
+      if (hits.length === 0 || hits[hits.length - 1]! <= now - windowMs) this.buckets.delete(key)
+    }
+  }
+
+  private evictOldest(n: number): void {
+    for (const key of this.buckets.keys()) {
+      if (n-- <= 0) break
+      this.buckets.delete(key)
+    }
+  }
+}
+
+const store = new HitStore()
+
+export interface RateLimitOptions {
+  windowMs: number
+  limit: number
+  /**
+   * How the bucket key is built. 'ip' shares one bucket across every path
+   * under this limiter (sign-in surfaces); 'ip+path' gives each path its own.
+   */
+  scope?: 'ip' | 'ip+path'
+  /** Test seam. */
+  store?: HitStore
+}
+
+/** Best-effort per-IP rate limit. The client address comes from lib/client-ip. */
+export function rateLimit(opts: RateLimitOptions) {
+  const hits = opts.store ?? store
+  const scope = opts.scope ?? 'ip+path'
   return async (c: Context<AppEnv>, next: Next) => {
-    const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For') ?? 'unknown'
-    const key = `${ip}:${c.req.path}`
-    // Date.now is fine at runtime; only workflow scripts forbid it.
+    const ip = resolveClientIp(c.req.raw.headers, c.env.CLIENT_IP_HEADER)
+    const key = scope === 'ip' ? `${ip}` : `${ip}:${c.req.path}`
     const now = Date.now()
-    const { allowed, next: updated } = slidingWindow(
-      buckets.get(key) ?? [],
-      now,
-      opts.windowMs,
-      opts.limit,
-    )
-    buckets.set(key, updated)
-    if (!allowed) return c.json({ error: 'Too many requests. Please slow down.' }, 429)
+    const { allowed, next: updated } = hits.hit(key, now, opts.windowMs, opts.limit)
+    c.header('RateLimit-Limit', String(opts.limit))
+    if (!allowed) {
+      c.header('Retry-After', String(Math.ceil(opts.windowMs / 1000)))
+      c.header('RateLimit-Remaining', '0')
+      return c.json({ error: 'Too many requests. Please slow down.' }, 429)
+    }
+    c.header('RateLimit-Remaining', String(Math.max(0, opts.limit - updated.length)))
     await next()
   }
 }

@@ -5,6 +5,13 @@ import { authToken } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { setTokens } from '@/shared/auth/token'
+import { markCookieSession } from '@/shared/api/client'
+
+/** Store the pair; an empty refresh token means the API keeps it in its cookie. */
+function rememberSession(pair: { access_token: string; refresh_token: string }) {
+  setTokens(pair)
+  markCookieSession(!pair.refresh_token)
+}
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Card, CardContent } from '@/shared/ui/card'
 
@@ -23,7 +30,7 @@ export function VerifyEmailPage() {
     let active = true
     void (async () => {
       try {
-        setTokens(
+        rememberSession(
           await callApi('/auth/verify', {
             method: 'POST',
             body: { token },

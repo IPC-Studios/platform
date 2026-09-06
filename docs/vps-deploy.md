@@ -2,7 +2,7 @@
 
 The **backend** runs on your box: **self-hosted Postgres** + the Bun API + Caddy
 (auto-HTTPS) + an hourly cron ticker. No Supabase. The **web frontend** deploys
-separately to **Cloudflare Pages** (static SPA calling the VPS API). RLS is enforced
+separately to **Cloudflare Workers** (static SPA calling the VPS API). RLS is enforced
 on plain Postgres exactly as before — the API connects as an unprivileged
 `authenticator` role and `SET ROLE`s per request, binding `auth.uid()` from a JWT
 claim, so every existing RLS policy / RPC / trigger works unchanged.
@@ -16,12 +16,12 @@ claim, so every existing RLS policy / RPC / trigger works unchanged.
 | `docker-compose.yml` | `db` (postgres:16) + `api` (Bun) + `caddy` (TLS/proxy) + `cron`. |
 | `services/api/src/server.ts` | Bun entrypoint — `Bun.serve` passing `process.env` as Hono's `env`. |
 | `deploy/Caddyfile` / `deploy/.env.example` | API reverse-proxy config / all secrets. |
-| `.github/workflows/deploy.yml` | Push-to-main CD: `api` job (SSH → compose) + `web` job (build → Cloudflare Pages). |
+| `.github/workflows/deploy.yml` | Push-to-main CD: `api` job (SSH → compose). The web app deploys via Cloudflare Workers Builds. |
 
 ## One-time setup
 
 1. **DNS**: point `api.yourstudio.in` (A/AAAA) at the VPS IP. Ports 80 + 443 open.
-   (The `app.` domain is managed by Cloudflare Pages.)
+   (The `app.` domain is managed by the Cloudflare Worker that serves the SPA.)
 2. **Install Docker** (Engine + Compose plugin).
 3. **Clone + configure**:
    ```bash
@@ -30,7 +30,7 @@ claim, so every existing RLS policy / RPC / trigger works unchanged.
    # edit .env — API_DOMAIN, POSTGRES_PASSWORD, DB_AUTHENTICATOR_PASSWORD,
    #             JWT_SECRET, ALLOWED_ORIGINS, RAZORPAY_*, CRON_SECRET
    ```
-   `ALLOWED_ORIGINS` must include the Cloudflare Pages origin or the browser is CORS-blocked.
+   `ALLOWED_ORIGINS` must include the web app origin or the browser is CORS-blocked.
 4. **Launch** (the `migrate` service bootstraps + applies migrations):
    ```bash
    docker compose up -d --build
@@ -50,30 +50,71 @@ docker compose exec db psql -U postgres -d ipc \
   -c "insert into platform_admins (user_id) select id from auth.users where email = 'you@studio.in';"
 ```
 
-## The frontend (Cloudflare Pages)
+## The frontend (Cloudflare Workers static assets)
 
-The web SPA is a static build hosted on Cloudflare Pages, calling the VPS API.
-Build-time it needs `VITE_API_BASE_URL=https://api.yourstudio.in`. SPA history
-routing is handled by `apps/web/public/_redirects` (`/* /index.html 200`). Auth is
-a bearer token in `localStorage`; no Supabase client in the browser. Point the
-Pages custom domain (`app.yourstudio.in`) via Cloudflare, and add that origin to
+The web SPA is a static build served by a Cloudflare Worker
+(`apps/web/wrangler.jsonc`, `assets.directory = dist`,
+`not_found_handling = single-page-application`). It is built and deployed by
+**Cloudflare Workers Builds** from the connected GitHub repo on every push to
+`main` — not by GitHub Actions. In the Cloudflare dashboard the project needs:
+
+- build command `bun install && bun run --filter @ipc/web build`, deploy
+  command `wrangler deploy`, root directory `apps/web`
+- build variable `VITE_API_BASE_URL=https://api.yourstudio.in` (baked into the
+  bundle at build time; only `VITE_*` vars reach the browser)
+
+`apps/web/public/_headers` ships the SPA's security headers (HSTS, CSP, frame
+denial) and `_redirects` the history fallback; both are honoured by Workers
+static assets. Auth is a bearer token in `localStorage`. Add the app origin to
 the API's `ALLOWED_ORIGINS`.
 
 ## Continuous deploy (GitHub Actions)
 
-`deploy.yml` ships every push to `main` in two independent jobs:
-- **`api`** — SSHes into the VPS, `git reset --hard origin/main`, then
-  `docker compose up -d --build --wait` (blocks on the db + api healthchecks, so a
-  broken build fails the run).
-- **`web`** — builds the SPA with `VITE_API_BASE_URL` and `wrangler pages deploy`.
+Two workflows, both triggered by `main`:
 
-Arm it once (repo **variable** `DEPLOY_ENABLED=true`) with these **secrets**:
-- Backend: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PATH` (+ `VPS_PORT` if not 22).
-- Frontend: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `API_BASE_URL`.
+- **`ci.yml`** runs on every push and pull request: install, typecheck, lint,
+  unit tests (incl. the pglite migration suite), then an `e2e` job that applies
+  the bootstrap + every migration to a real Postgres 16, boots the API with
+  `ENVIRONMENT=ci`, and runs `supabase/tests/rls-live.mjs` (cross-tenant RLS,
+  refresh rotation, password reset). A red CI does not block the deploy on its
+  own — protect `main` in GitHub (require the `verify` and `e2e` checks) so a
+  PR cannot merge red.
+- **`deploy.yml`** runs on push to `main` (or manually via *Run workflow*) and
+  has one job, **`api`**: it SSHes into the VPS, checks out `origin/main`, and
+  runs `docker compose -f docker-compose.yml -f docker-compose.coolify.yml up
+  -d --build --wait --remove-orphans db migrate api cron`. `--wait` blocks on
+  the db + api healthchecks, so a broken build fails the run. The frontend is
+  deployed by Cloudflare Workers Builds (above), not by this workflow.
 
-The VPS repo needs a **deploy key** (private repo) and a `.env`. The `migrate`
-service applies bootstrap + any new migrations on every deploy (tracked in
-`schema_migrations`), so schema changes ship automatically.
+Arm the deploy once with the repo **variable** `DEPLOY_ENABLED=true` and the
+**secrets** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PATH` (+ `VPS_PORT` if
+not 22). These are the only values GitHub holds; application secrets never
+pass through Actions.
+
+### Where each environment variable lives
+
+| Kind | Lives in | Examples |
+|---|---|---|
+| Backend runtime (API, cron, migrate) | `.env` in the checkout on the VPS, read by `docker compose` via `env_file`. Never in git, never in GitHub. Template: `deploy/.env.example`. | `JWT_SECRET`, `DATABASE_URL` parts, `RAZORPAY_*`, `META_VERIFY_TOKEN`, `CRON_SECRET`, `ALLOWED_ORIGINS`, `CLIENT_IP_HEADER`, `SENTRY_DSN`, `LOG_LEVEL`, `APP_VERSION` |
+| Frontend build | Cloudflare Workers Builds → project settings → variables | `VITE_API_BASE_URL` |
+| CI only | Hard-coded in `ci.yml` (throwaway values against a throwaway database) | `JWT_SECRET=ci-test-secret`, `ENVIRONMENT=ci` |
+| Deploy plumbing | GitHub repo secrets / variables | `VPS_*`, `DEPLOY_ENABLED` |
+
+Adding a variable means: add it to `deploy/.env.example` (documentation), add it
+to `services/api/src/context.ts` (`Env`), then set it in the VPS `.env` and
+`docker compose up -d api` (or let the next deploy restart it). Every variable
+added in the 2026-09 audit is optional with a safe default, so a deploy before
+the `.env` is updated still works.
+
+### Migrations on deploy
+
+The `migrate` service runs on every `up`: bootstrap (idempotent), then every
+`supabase/migrations/*.sql` not yet recorded in `schema_migrations`, each in its
+own transaction. **Check the ledger before the first deploy that carries new
+migrations**: if `select count(*) from schema_migrations` is 0 on a database
+that already has the schema, the migrator *baselines* every file — marks it
+applied without running it — and the new ones would be skipped. In that case
+insert the already-applied filenames into the ledger by hand first, then deploy.
 
 ## Webhooks
 
@@ -84,17 +125,18 @@ HMAC verification is runtime-agnostic; `RAZORPAY_WEBHOOK_SECRET` must match.
 
 - **Logs**: `docker compose logs -f api` / `... db`
 - **Backups**: `docker compose exec db pg_dump -U postgres ipc > backup.sql`
-- **Migrations**: the `migrate` service runs bootstrap + pending migrations on every
-  deploy (idempotent, tracked in `schema_migrations`); an already-migrated DB is
-  baselined on first run so nothing re-applies.
-  To apply new migrations to a live DB, `psql` them in manually or run them via a
-  one-off, then restart the API. (A dedicated migrate step can be added later.)
+- **Migrations**: applied automatically by the `migrate` service on every deploy
+  (see above). Roll back by restoring the pre-deploy `pg_dump`.
 - **Cron**: the `cron` service POSTs `/cron/reminders` hourly with `x-cron-secret`
-  (idempotent, supports `?dry=1`).
-- **Auth**: HS256 JWT, 7-day token, no refresh yet. Rotating `JWT_SECRET` logs
-  everyone out. Password reset / email confirmation are not implemented.
-- **Rate limiting**: the in-process sliding window is a real limiter now (single
-  long-lived process); multi-replica needs a shared store (Redis).
+  (idempotent, supports `?dry=1`). History at Settings → System or `GET /cron/runs`.
+- **Auth**: 30-minute HS256 access token + 30-day rotating refresh token, email
+  verification, password reset and change-password. Rotating `JWT_SECRET` signs
+  everyone out.
+- **Rate limiting**: in-process, bounded, one bucket per client address as
+  resolved by `CLIENT_IP_HEADER` (behind Coolify/Traefik keep the default
+  `X-Forwarded-For`). Multi-replica needs a shared store first.
+- **Health**: `GET /health` returns 503 with `db: unreachable` when Postgres is
+  down; point the uptime monitor at it.
 
 ## What you now own (vs Supabase + Cloudflare)
 

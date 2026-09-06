@@ -56,8 +56,8 @@ function Studios() {
   return (
     <>
       <PageHeader title="Studios" description="Every tenant on the platform." />
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
+      <div className="table-wrap rounded-lg border border-border">
+        <table className="table-sticky w-full text-sm">
           <thead className="bg-muted/50 text-left text-muted-foreground">
             <tr>
               <th className="px-4 py-2 font-medium">Studio</th>

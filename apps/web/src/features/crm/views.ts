@@ -1,32 +1,45 @@
+import type { SavedViewQuery } from '@ipc/contracts'
 import type { LeadQuery, QuickFilter } from './leads'
-import { EMPTY_QUERY } from './leads'
+import { EMPTY_QUERY, QUICK_FILTERS } from './leads'
 
 /**
  * Saved views — a filter set someone reaches for every morning, kept under a
- * name.
+ * name. They are stored on the API per person (crm_saved_views), so the same
+ * views are there on every device.
  *
- * They live in this browser, like the project draft: a view is a personal
- * working habit ("my overdue quotes"), not studio configuration, and syncing
- * one person's habit onto everyone else's screen would be wrong.
+ * Views saved before that existed lived in this browser only; `takeLocalViews`
+ * hands them over once so they can be pushed up, then forgets them.
  */
-export interface SavedView {
-  name: string
-  query: LeadQuery
+const LEGACY_KEY = 'ipc.crm.views'
+
+const QUICK = new Set<string>(QUICK_FILTERS.map((f) => f.value))
+const isQuickFilter = (v: unknown): v is QuickFilter => typeof v === 'string' && QUICK.has(v)
+
+/** A query as stored on the API, narrowed to what the inbox understands. */
+export function toLeadQuery(q: SavedViewQuery): LeadQuery {
+  const status = q.status as LeadQuery['status']
+  return {
+    ...EMPTY_QUERY,
+    search: q.search,
+    filters: q.filters.filter(isQuickFilter),
+    status: status === 'all' || ['new', 'contacted', 'qualified', 'proposal_sent', 'converted', 'lost'].includes(status) ? status : 'all',
+    assignee: q.assignee || 'all',
+  }
 }
 
-const KEY = 'ipc.crm.views'
-
-function isQuickFilter(v: unknown): v is QuickFilter {
-  return typeof v === 'string'
+export function toSavedQuery(q: LeadQuery): SavedViewQuery {
+  return { search: q.search, filters: [...q.filters], status: q.status, assignee: q.assignee }
 }
 
-/** Read stored views, discarding anything that no longer parses. */
-export function loadViews(): SavedView[] {
+/** Read and clear the pre-API browser store. Empty when there is nothing to migrate. */
+export function takeLocalViews(): Array<{ name: string; query: SavedViewQuery }> {
   try {
-    const raw = globalThis.localStorage?.getItem(KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : null
+    const raw = globalThis.localStorage?.getItem(LEGACY_KEY)
+    if (!raw) return []
+    globalThis.localStorage?.removeItem(LEGACY_KEY)
+    const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((v): SavedView[] => {
+    return parsed.flatMap((v) => {
       if (!v || typeof v !== 'object') return []
       const { name, query } = v as { name?: unknown; query?: unknown }
       if (typeof name !== 'string' || !query || typeof query !== 'object') return []
@@ -34,12 +47,11 @@ export function loadViews(): SavedView[] {
       return [
         {
           name,
-          // Merge over the defaults so a view saved before a field existed
-          // still opens instead of throwing.
           query: {
-            ...EMPTY_QUERY,
-            ...q,
-            filters: Array.isArray(q.filters) ? q.filters.filter(isQuickFilter) : [],
+            search: typeof q.search === 'string' ? q.search : '',
+            filters: Array.isArray(q.filters) ? q.filters.filter((f): f is string => typeof f === 'string') : [],
+            status: typeof q.status === 'string' ? q.status : 'all',
+            assignee: typeof q.assignee === 'string' ? q.assignee : 'all',
           },
         },
       ]
@@ -47,29 +59,6 @@ export function loadViews(): SavedView[] {
   } catch {
     return []
   }
-}
-
-function write(views: readonly SavedView[]): void {
-  try {
-    globalThis.localStorage?.setItem(KEY, JSON.stringify(views))
-  } catch {
-    // A blocked localStorage costs the shortcut, not the page.
-  }
-}
-
-/** Save under a name, replacing a view of the same name rather than doubling it. */
-export function saveView(name: string, query: LeadQuery): SavedView[] {
-  const trimmed = name.trim()
-  if (!trimmed) return loadViews()
-  const next = [...loadViews().filter((v) => v.name !== trimmed), { name: trimmed, query }]
-  write(next)
-  return next
-}
-
-export function deleteView(name: string): SavedView[] {
-  const next = loadViews().filter((v) => v.name !== name)
-  write(next)
-  return next
 }
 
 /** Whether a query is worth offering to save — an unfiltered list is not a view. */

@@ -2,7 +2,9 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { AppEnv } from './context'
 import { errorBoundary } from './middleware/errors'
+import { requestId } from './middleware/request-id'
 import { securityHeaders, rateLimit } from './middleware/security'
+import { setLogLevel } from './lib/log'
 import { healthRouter } from './modules/health/router'
 import { authRouter } from './modules/auth/router'
 import { accessRouter } from './modules/access/router'
@@ -28,34 +30,78 @@ import { platformRouter } from './modules/platform/router'
 
 const app = new Hono<AppEnv>()
 
-app.use('*', errorBoundary)
+app.use('*', async (c, next) => {
+  setLogLevel(c.env.LOG_LEVEL)
+  await next()
+})
+app.use('*', requestId)
 app.use('*', securityHeaders)
-// CORS from an env allowlist. Forgiving of trailing slashes and a "*" entry;
-// empty ALLOWED_ORIGINS = allow all (dev).
+app.use('*', errorBoundary)
+// CORS from an env allowlist. Fail-closed in production.
 app.use('*', (c, next) => {
   const stripSlash = (s: string) => s.replace(/\/+$/, '')
   const allow = (c.env.ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((o) => stripSlash(o.trim()))
     .filter(Boolean)
+  const isProd = (c.env.ENVIRONMENT ?? '') === 'production'
+  if (allow.includes('*') && isProd) {
+    console.warn('ALLOWED_ORIGINS contains * in production - denying')
+  }
   return cors({
     origin: (origin) => {
-      if (allow.length === 0 || allow.includes('*')) return origin || '*'
+      if (allow.length === 0) {
+        return isProd ? '' : origin || '*'
+      }
+      if (allow.includes('*')) {
+        return isProd ? '' : origin || '*'
+      }
       return allow.includes(stripSlash(origin ?? '')) ? origin : ''
     },
-    allowHeaders: ['Authorization', 'Content-Type'],
-    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    // Without these the browser cannot read the ids the client shows in its
+    // error states, nor the limit headers it could back off on.
+    exposeHeaders: ['X-Request-Id', 'X-Correlation-Id', 'RateLimit-Limit', 'RateLimit-Remaining', 'Retry-After'],
+    // The refresh cookie (AUTH_COOKIE=1) rides on credentialed requests. The
+    // origin above is always echoed from the allowlist, never '*', which is
+    // what makes credentials safe to allow.
+    credentials: true,
   })(c, next)
 })
 
-// Rate limit the unauthenticated / abuse-prone surfaces.
-app.use('/auth/*', rateLimit({ windowMs: 60_000, limit: 20 }))
+// ── Rate limits ───────────────────────────────────────────────
+// The credential surfaces share ONE tight bucket per address: a password
+// guesser gains nothing by alternating login and reset. Session upkeep
+// (refresh, session hydrate, sign-out) is routine traffic that every open tab
+// generates, so it gets its own, far roomier bucket — sharing the tight one
+// meant an office NAT with a dozen people signed in was rate-limited out of
+// its own app on a reload.
+const CREDENTIAL_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/verify',
+  '/auth/resend-verification',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/accept-invite',
+  '/auth/invite',
+]
+const credentialLimiter = rateLimit({ windowMs: 60_000, limit: 10, scope: 'ip' })
+for (const path of CREDENTIAL_PATHS) app.use(path, credentialLimiter)
+app.use('/auth/session', rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use('/auth/refresh', rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use('/auth/logout', rateLimit({ windowMs: 60_000, limit: 60 }))
+app.use('/auth/logout-all', rateLimit({ windowMs: 60_000, limit: 60 }))
+app.use('/auth/change-password', rateLimit({ windowMs: 60_000, limit: 10 }))
 app.use('/public/*', rateLimit({ windowMs: 60_000, limit: 30 }))
-app.use('/webhooks/*', rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use('/webhooks/*', rateLimit({ windowMs: 60_000, limit: 60 }))
+app.use('/health', rateLimit({ windowMs: 60_000, limit: 60 }))
+app.use('/cron/reminders', rateLimit({ windowMs: 60_000, limit: 10 }))
 
 // ── Routers ───────────────────────────────────────────────────
-// One router per domain (~25 total). Domain modules land per phase and mount
-// their own auth + permission middleware; /health stays public.
+// One router per domain. Domain modules mount their own auth + permission
+// middleware; /health stays public.
 app.route('/health', healthRouter)
 app.route('/auth', authRouter)
 app.route('/access', accessRouter)

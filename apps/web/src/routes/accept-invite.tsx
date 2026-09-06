@@ -6,12 +6,19 @@ import { authToken, invitationPreview } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { setTokens } from '@/shared/auth/token'
+import { markCookieSession } from '@/shared/api/client'
+
+/** Store the pair; an empty refresh token means the API keeps it in its cookie. */
+function rememberSession(pair: { access_token: string; refresh_token: string }) {
+  setTokens(pair)
+  markCookieSession(!pair.refresh_token)
+}
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { humanize } from '@/shared/ui/format'
-import { LoadingState } from '@/shared/ui/states'
+import { Skeleton } from '@/shared/ui/skeleton'
 
 /**
  * Landing page for an invitation link (/accept-invite?token=…).
@@ -53,7 +60,7 @@ export function AcceptInvitePage() {
     }
     setBusy(true)
     try {
-      setTokens(
+      rememberSession(
         await callApi('/auth/accept-invite', {
           method: 'POST',
           body: { token, password },
@@ -98,7 +105,12 @@ export function AcceptInvitePage() {
                 </Link>
               </div>
             ) : preview.isLoading ? (
-              <LoadingState label="Checking your invitation…" />
+              <div className="flex flex-col gap-3" role="status" aria-label="Checking your invitation">
+                <Skeleton className="h-6 w-2/3" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="mt-2 h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
+              </div>
             ) : (
               <>
                 <h2 className="text-lg font-semibold tracking-tight">
@@ -130,7 +142,11 @@ export function AcceptInvitePage() {
                       autoComplete="new-password"
                     />
                   </div>
-                  {error && <p className="text-sm text-destructive">{error}</p>}
+                  {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
                   <Button type="submit" disabled={busy}>
                     {busy ? 'Setting up…' : 'Accept invitation'}
                   </Button>

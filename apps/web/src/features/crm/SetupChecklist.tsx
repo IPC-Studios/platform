@@ -6,8 +6,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
 import { cn } from '@/shared/ui/cn'
 import { useDirectory } from '@/features/team/api'
-import { useDistribution } from './api'
-import { loadViews } from './views'
+import { useDistribution, useSavedViews } from './api'
 
 interface ChecklistItem {
   title: string
@@ -27,6 +26,7 @@ export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead
   const [open, setOpen] = useState(true)
   const { data: team } = useDirectory()
   const { data: rota } = useDistribution()
+  const { data: views } = useSavedViews()
 
   const items: ChecklistItem[] = [
     {
@@ -70,7 +70,7 @@ export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead
     {
       title: 'Save a personal view',
       where: 'Lead Inbox → Save current view',
-      done: loadViews().length > 0,
+      done: (views?.length ?? 0) > 0,
     },
   ]
 

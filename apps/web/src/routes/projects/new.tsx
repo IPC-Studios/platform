@@ -268,7 +268,11 @@ function NewProject() {
           {step === 'review' && <ReviewStep draft={draft} totals={totals} errors={errors} onJump={goTo} />}
 
           {showErrors && stepError && <p className="mt-4 text-sm text-destructive">{stepError}</p>}
-          {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="mt-4 text-sm text-destructive">
+              {error}
+            </p>
+          )}
         </Section>
       </div>
 

@@ -21,6 +21,8 @@ const row = (name: string, over: Partial<AttendanceDayRow> = {}): AttendanceDayR
   status: 'present',
   check_in_at: '2026-09-01T03:34:00Z',
   check_out_at: '2026-09-01T12:04:00Z',
+  corrected_by: null,
+  correction_note: null,
   ...over,
 })
 
