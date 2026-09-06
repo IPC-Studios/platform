@@ -95,6 +95,14 @@ check("B: cannot fetch A's client by id (404)", bGet.status === 404)
 const anon = await api('/clients')
 check('anon: rejected without a token', anon.status === 401)
 
+// Numeric query params must survive driver serialization (regression: custom
+// pg serializers once returned numbers unchanged and every LIMIT query died
+// with ERR_INVALID_ARG_TYPE in production while string-only routes stayed up).
+const auditPage = await api('/settings/audit?limit=1', { token: a.token })
+check('audit: numeric limit param works (200)', auditPage.status === 200)
+const cronHistory = await api('/cron/runs?limit=1', { token: a.token })
+check('cron: numeric limit param works (200)', cronHistory.status === 200)
+
 // ── refresh + sign-out ────────────────────────────────────────
 const rotated = await api('/auth/refresh', { method: 'POST', body: { refresh_token: a.refresh } })
 check(
