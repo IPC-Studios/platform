@@ -1,0 +1,180 @@
+import { useMemo, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
+import { createQuoteRequest, type CreateQuoteRequest, type CrmLead } from '@ipc/contracts'
+import { computeInvoice, type GstSlab } from '@ipc/domain'
+import { Button } from '@/shared/ui/button'
+import { Dialog, DialogContent } from '@/shared/ui/dialog'
+import { Input, Label, Select } from '@/shared/ui/input'
+import { formatINR } from '@/shared/ui/format'
+import { useCreateQuote } from './api'
+
+interface Line {
+  description: string
+  quantity: string
+  rate: string
+  gst_rate: GstSlab
+}
+
+const SLABS: GstSlab[] = [0, 5, 12, 18, 28]
+const blank = (): Line => ({ description: '', quantity: '1', rate: '', gst_rate: 18 })
+
+function iso(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * A priced offer on a deal: lines, discount, GST split, validity. Totals are
+ * computed here with the same arithmetic the invoices use, so what the
+ * client accepts is what they will later be billed.
+ */
+export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boolean; onClose: (createdId?: string) => void }) {
+  const create = useCreateQuote()
+  const [title, setTitle] = useState(lead.title ?? `${lead.name ?? 'Wedding'} package`)
+  const [lines, setLines] = useState<Line[]>([{ description: 'Photography coverage', quantity: '1', rate: lead.deal_value ? String(lead.deal_value) : '', gst_rate: 18 }])
+  const [discount, setDiscount] = useState('0')
+  const [intra, setIntra] = useState(true)
+  const [place, setPlace] = useState('')
+  const [validUntil, setValidUntil] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 14)
+    return iso(d)
+  })
+  const [notes, setNotes] = useState('')
+  const [terms, setTerms] = useState('50% advance to confirm the date; balance before delivery.')
+  const [error, setError] = useState<string | null>(null)
+
+  const parsedLines = useMemo(
+    () =>
+      lines
+        .filter((l) => l.description.trim() && Number(l.rate) >= 0 && Number(l.quantity) > 0)
+        .map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity), rate: Number(l.rate) || 0, gst_rate: l.gst_rate })),
+    [lines],
+  )
+  const totals = useMemo(() => computeInvoice(parsedLines, { intraState: intra, discount: Number(discount) || 0 }), [parsedLines, intra, discount])
+
+  const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)))
+
+  function save() {
+    setError(null)
+    const body: CreateQuoteRequest = {
+      lead_id: lead.id,
+      ...(title.trim() ? { title: title.trim() } : {}),
+      ...(validUntil ? { valid_until: validUntil } : {}),
+      place_of_supply: place.trim(),
+      intra_state: intra,
+      discount: Number(discount) || 0,
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(terms.trim() ? { terms: terms.trim() } : {}),
+      lines: parsedLines,
+    }
+    const parsed = createQuoteRequest.safeParse(body)
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Please check the quote.')
+      return
+    }
+    create.mutate(parsed.data, { onSuccess: (q) => onClose(q.id) })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent title={`Quote for ${lead.name ?? lead.phone ?? 'this deal'}`} description="Lines, discount and GST. The client gets a link to accept or decline." className="max-w-2xl">
+        <div className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto pr-1">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <Label htmlFor="q-title">Title</Label>
+              <Input id="q-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-valid">Valid until</Label>
+              <Input id="q-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Lines</Label>
+            {lines.map((l, i) => (
+              <div key={i} className="grid gap-2 sm:grid-cols-12">
+                <Input className="sm:col-span-6" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="Description" aria-label="Description" />
+                <Input className="sm:col-span-1" type="number" min={0.01} step="0.01" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} aria-label="Quantity" />
+                <Input className="sm:col-span-2" type="number" min={0} value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} placeholder="Rate" aria-label="Rate" />
+                <Select className="sm:col-span-2" value={l.gst_rate} onChange={(e) => setLine(i, { gst_rate: Number(e.target.value) as GstSlab })} aria-label="GST">
+                  {SLABS.map((s) => (
+                    <option key={s} value={s}>
+                      GST {s}%
+                    </option>
+                  ))}
+                </Select>
+                <Button size="icon" variant="ghost" className="sm:col-span-1" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label="Remove line">
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+            <div>
+              <Button size="sm" variant="outline" onClick={() => setLines((ls) => [...ls, blank()])}>
+                <Plus /> Add line
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-discount">Discount (₹)</Label>
+              <Input id="q-discount" type="number" min={0} value={discount} onChange={(e) => setDiscount(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-place">Place of supply</Label>
+              <Input id="q-place" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="e.g. Maharashtra" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-intra">Tax split</Label>
+              <Select id="q-intra" value={intra ? 'intra' : 'inter'} onChange={(e) => setIntra(e.target.value === 'intra')}>
+                <option value="intra">Same state (CGST + SGST)</option>
+                <option value="inter">Other state (IGST)</option>
+              </Select>
+            </div>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg bg-muted/30 p-3 text-sm sm:grid-cols-4">
+            <div>
+              <dt className="text-xs text-muted-foreground">Subtotal</dt>
+              <dd className="tabular-nums">{formatINR(totals.subtotal)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Discount</dt>
+              <dd className="tabular-nums">{formatINR(totals.discount)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">GST</dt>
+              <dd className="tabular-nums">{formatINR(totals.tax)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Total</dt>
+              <dd className="text-lg font-semibold tabular-nums">{formatINR(totals.total)}</dd>
+            </div>
+          </dl>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-notes">Note to the client</Label>
+              <textarea id="q-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="q-terms">Terms</Label>
+              <textarea id="q-terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onClose()}>
+              Cancel
+            </Button>
+            <Button disabled={create.isPending || parsedLines.length === 0} onClick={save}>
+              {create.isPending ? 'Saving…' : 'Create quote'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

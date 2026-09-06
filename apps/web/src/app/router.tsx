@@ -39,6 +39,7 @@ import { SettingsPage } from '@/routes/settings'
 import { RolesAccessPage } from '@/routes/settings/roles'
 import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
+import { QuoteAcceptPage } from '@/routes/quote-accept'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
@@ -111,6 +112,7 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
+  publicRoute('/quote/accept', QuoteAcceptPage),
 
   renewalLayout.addChildren([
     createRoute({

@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { uuid, isoDate, isoDateTime } from './shared/primitives'
+import { uuid, isoDate, isoDateTime, money } from './shared/primitives'
+import { invoiceLineInput } from './billing'
 
 export const leadStatus = z.enum([
   'new',
@@ -383,6 +384,9 @@ export const crmStats = z.object({
   conversion_rate: z.number(),
   byStatus: z.record(z.string(), z.number().int()),
   bySource: z.record(z.string(), z.number().int()),
+  /** Lost in the range, by reason and by who they went to. */
+  byLostReason: z.record(z.string(), z.number().int()).default({}),
+  byCompetitor: z.record(z.string(), z.number().int()).default({}),
 })
 export type CrmStats = z.infer<typeof crmStats>
 
@@ -717,6 +721,8 @@ export const convertLeadRequest = z
       package_cost: z.number().finite().nonnegative().default(0),
       status: z.enum(['active', 'on_hold']).default('active'),
     }),
+    /** An accepted quote whose lines become the project's deliverables. */
+    quote_id: uuid.optional(),
   })
   .refine((v) => !(v.client_id && v.client), {
     message: 'Pick a client or describe a new one, not both.',
@@ -952,6 +958,11 @@ export const crmForecast = z.object({
   weighted: z.coerce.number(),
   won_value: z.coerce.number(),
   open_value: z.coerce.number(),
+  won_count: z.number().int().default(0),
+  lost_count: z.number().int().default(0),
+  /** won / (won + lost) over deals closed in the range; null when none closed. */
+  win_rate: z.coerce.number().nullable().default(null),
+  avg_cycle_days: z.coerce.number().nullable().default(null),
   by_stage: z.array(forecastBucket.extend({ stage_id: uuid.nullable(), name: z.string(), kind: stageKind })),
   by_owner: z.array(forecastBucket.extend({ user_id: uuid.nullable(), name: z.string() })),
   by_month: z.array(forecastBucket.extend({ month: z.string().regex(/^\d{4}-\d{2}$/) })),
@@ -1132,3 +1143,127 @@ export const updateIntegrationRequest = z.object({
   config: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
 })
 export type UpdateIntegrationRequest = z.infer<typeof updateIntegrationRequest>
+
+// ── per-person preferences ────────────────────────────────────
+export const inboxColumn = z.enum(['lead', 'stage', 'score', 'source', 'owner', 'value', 'close', 'company', 'follow_up', 'created'])
+export type InboxColumn = z.infer<typeof inboxColumn>
+
+export const crmUserPrefs = z.object({
+  columns: z.array(inboxColumn).max(12).default(['lead', 'stage', 'score', 'source', 'owner', 'value', 'follow_up']),
+  default_view_id: uuid.nullable().default(null),
+  density: z.enum(['comfortable', 'compact']).default('comfortable'),
+  pipeline_id: uuid.nullable().default(null),
+})
+export type CrmUserPrefs = z.infer<typeof crmUserPrefs>
+
+export const updateCrmUserPrefsRequest = crmUserPrefs.partial()
+export type UpdateCrmUserPrefsRequest = z.infer<typeof updateCrmUserPrefsRequest>
+
+// ── quotes ────────────────────────────────────────────────────
+export const quoteStatus = z.enum(['draft', 'sent', 'accepted', 'declined', 'expired'])
+export type QuoteStatus = z.infer<typeof quoteStatus>
+
+export const quoteItem = z.object({
+  id: uuid.optional(),
+  description: z.string(),
+  quantity: z.coerce.number(),
+  rate: z.coerce.number(),
+  amount: z.coerce.number(),
+  gst_rate: z.coerce.number(),
+  taxable: z.coerce.number(),
+  cgst: z.coerce.number(),
+  sgst: z.coerce.number(),
+  igst: z.coerce.number(),
+})
+export type QuoteItem = z.infer<typeof quoteItem>
+
+export const crmQuote = z.object({
+  id: uuid,
+  lead_id: uuid,
+  lead_name: z.string().nullable().default(null),
+  quote_number: z.string(),
+  title: z.string().nullable(),
+  status: quoteStatus,
+  valid_until: isoDate.nullable(),
+  place_of_supply: z.string().nullable(),
+  intra_state: z.boolean(),
+  subtotal: z.coerce.number(),
+  discount: z.coerce.number(),
+  taxable: z.coerce.number(),
+  tax: z.coerce.number(),
+  total: z.coerce.number(),
+  notes: z.string().nullable(),
+  terms: z.string().nullable(),
+  sent_at: isoDateTime.nullable(),
+  accepted_at: isoDateTime.nullable(),
+  accepted_by_name: z.string().nullable(),
+  declined_at: isoDateTime.nullable(),
+  decline_reason: z.string().nullable(),
+  items: z.array(quoteItem).default([]),
+  created_at: isoDateTime,
+})
+export type CrmQuote = z.infer<typeof crmQuote>
+
+export const createQuoteRequest = z.object({
+  lead_id: uuid,
+  title: z.string().trim().max(160).optional(),
+  valid_until: isoDate.optional(),
+  place_of_supply: z.string().trim().max(60).default(''),
+  /** Same state as the studio: CGST + SGST; otherwise IGST. */
+  intra_state: z.boolean().default(true),
+  discount: money.default(0),
+  notes: z.string().max(4000).optional(),
+  terms: z.string().max(8000).optional(),
+  lines: z.array(invoiceLineInput).min(1).max(50),
+})
+export type CreateQuoteRequest = z.infer<typeof createQuoteRequest>
+
+export const sendQuoteRequest = z.object({
+  /** Also deliver the link on WhatsApp (Cloud API when connected, else a wa.me link) or by email. */
+  channel: z.enum(['none', 'whatsapp', 'email']).default('none'),
+  ttl_hours: z.number().int().min(1).max(8760).default(720),
+})
+export type SendQuoteRequest = z.infer<typeof sendQuoteRequest>
+
+export const sendQuoteResponse = z.object({
+  /** The public page the client opens. */
+  url: z.string(),
+  /** A link to open (wa.me / mailto:) when the channel needs the person's own app; null when delivered or none. */
+  open_url: z.string().nullable(),
+  delivery: z.enum(['none', 'api', 'link']),
+})
+export type SendQuoteResponse = z.infer<typeof sendQuoteResponse>
+
+/** What the client sees on the public page. */
+export const publicQuote = z.object({
+  quote_number: z.string(),
+  title: z.string().nullable(),
+  status: quoteStatus,
+  valid_until: isoDate.nullable(),
+  subtotal: z.coerce.number(),
+  discount: z.coerce.number(),
+  taxable: z.coerce.number(),
+  tax: z.coerce.number(),
+  total: z.coerce.number(),
+  notes: z.string().nullable(),
+  terms: z.string().nullable(),
+  accepted_at: isoDateTime.nullable(),
+  declined_at: isoDateTime.nullable(),
+  studio: z.string(),
+  client_name: z.string().nullable(),
+  items: z.array(quoteItem),
+  expired: z.boolean(),
+})
+export type PublicQuote = z.infer<typeof publicQuote>
+
+export const acceptQuoteRequest = z.object({
+  name: z.string().trim().min(1).max(160),
+  email: z.string().trim().max(200).optional(),
+})
+export type AcceptQuoteRequest = z.infer<typeof acceptQuoteRequest>
+
+export const declineQuoteRequest = z.object({ reason: z.string().trim().max(500).optional() })
+export type DeclineQuoteRequest = z.infer<typeof declineQuoteRequest>
+
+export const okResponse = z.object({ ok: z.boolean() })
+export type OkResponse = z.infer<typeof okResponse>

@@ -9,14 +9,18 @@ import {
   convertLeadResponse,
   createCadenceRequest,
   createLeadRequest,
+  createQuoteRequest,
   crmActivity,
   crmCompany,
   crmContact,
   crmForecast,
   crmIntegration,
+  crmQuote,
+  crmUserPrefs,
   emailSyncResponse,
   placeCallResponse,
   scheduleMeetingResponse,
+  sendQuoteResponse,
   timelineResponse,
   crmLead,
   crmSettings,
@@ -56,6 +60,7 @@ import {
   type CreateLeadRequest,
   type CreateLostReasonRequest,
   type CreatePipelineRequest,
+  type CreateQuoteRequest,
   type CreateSavedViewRequest,
   type CreateScoringRuleRequest,
   type CreateStageRequest,
@@ -68,6 +73,7 @@ import {
   type PlaceCallRequest,
   type ScheduleMeetingRequest,
   type SendTemplateRequest,
+  type UpdateCrmUserPrefsRequest,
   type UpdateActivityRequest,
   type UpdateCadenceRequest,
   type UpdateContactRequest,
@@ -749,5 +755,51 @@ export function useRecomputeScores() {
   return useCrmMutation(
     (_: void) => callApi('/crm/scoring/recompute', { method: 'POST', body: {}, responseSchema: recomputeScoresResponse }),
     (r) => `Rescored ${r.rescored} deal${r.rescored === 1 ? '' : 's'}`,
+  )
+}
+
+// ── quotes ──────────────────────────────────────────────────
+export function useQuotes(leadId?: string) {
+  const qs = leadId ? `?lead_id=${encodeURIComponent(leadId)}` : ''
+  return useCrmQuery(['quotes', leadId ?? 'all'], () =>
+    callApi(`/crm/quotes${qs}`, { responseSchema: crmQuote.array() }),
+  )
+}
+
+export function useCreateQuote() {
+  return useCrmMutation(
+    (input: CreateQuoteRequest) =>
+      callApi('/crm/quotes', {
+        method: 'POST',
+        body: createQuoteRequest.parse(input),
+        responseSchema: crmQuote,
+      }),
+    (q) => `Quote ${q.quote_number} created`,
+  )
+}
+
+export function useSendQuote() {
+  return useCrmMutation(({ id, ...body }: { id: string; channel: 'none' | 'whatsapp' | 'email'; ttl_hours?: number }) =>
+    callApi(`/crm/quotes/${id}/send`, { method: 'POST', body, responseSchema: sendQuoteResponse }),
+  )
+}
+
+export function useDeleteQuote() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/quotes/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Quote deleted',
+  )
+}
+
+// ── per-person preferences ──────────────────────────────────
+export function useCrmPrefs() {
+  return useCrmQuery(['prefs'], () => callApi('/crm/prefs', { responseSchema: crmUserPrefs }), 60_000)
+}
+
+export function useUpdateCrmPrefs() {
+  return useCrmMutation(
+    (input: UpdateCrmUserPrefsRequest) =>
+      callApi('/crm/prefs', { method: 'PUT', body: input, responseSchema: crmUserPrefs }),
+    'Preferences saved',
   )
 }

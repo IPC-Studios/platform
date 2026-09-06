@@ -36,10 +36,12 @@ export const cronRouter = new Hono<AppEnv>()
           : ((await sql<{ n: number }[]>`select purge_expired_refresh_tokens() as n`)[0]?.n ?? 0)
         // Workflows queue template sends; only the API can deliver them.
         const outbox = dryRun ? { claimed: 0, sent: 0, manual: 0, failed: 0 } : await drainOutbox(c.env, sql)
+        const expiredQuotes = dryRun ? 0 : ((await sql<{ n: number }[]>`select crm_expire_quotes() as n`)[0]?.n ?? 0)
         return {
           summary: rows[0]?.summary ?? {},
           crm_follow_ups: followUps[0]?.summary ?? {},
           crm_outbox: outbox,
+          crm_expired_quotes: expiredQuotes,
           purged_refresh_tokens: purged,
         }
       }),

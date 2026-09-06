@@ -62,6 +62,7 @@ import { sendWhatsAppText, whatsappConfigured, whatsappLink } from '../../lib/wh
 import { crmObjectsRouter } from './objects'
 import { crmActivitiesRouter } from './activities'
 import { crmWorkflowsRouter } from './workflows'
+import { crmQuotesRouter } from './quotes'
 
 const list = crmLead.array()
 const edit = requireAction('crm', 'edit')
@@ -545,7 +546,7 @@ export const crmRouter = new Hono<AppEnv>()
         withUser(c.env, c.get('auth').userId, async (sql) => {
           const rows = await sql<{ client_id: string; project_id: string }[]>`
             select * from convert_lead_to_project(
-              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${sql.json(v.project)})`
+              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${sql.json(v.project)}, ${v.quote_id ?? null})`
           return rows[0] ?? null
         }),
       { onCode: (code, err) => (code === '22023' && String((err as { message?: string })?.message ?? '').includes('already') ? ('done' as const) : undefined) },
@@ -966,3 +967,5 @@ export const crmRouter = new Hono<AppEnv>()
   .route('/', crmActivitiesRouter)
   // Workflows, enrollments, scoring.
   .route('/', crmWorkflowsRouter)
+  // Quotes and per-person preferences.
+  .route('/', crmQuotesRouter)

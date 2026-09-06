@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Download, Globe, Search, Users, X } from 'lucide-react'
-import type { CrmLead, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
+import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Search, Users, X } from 'lucide-react'
+import type { CrmLead, InboxColumn, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useBulkPatch, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useWorkflows } from '../api'
+import { useBulkPatch, useCrmPrefs, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useUpdateCrmPrefs, useWorkflows } from '../api'
 import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
-import { LeadTable, exportLeadsCsv } from './shared'
+import { DEFAULT_INBOX_COLUMNS, INBOX_COLUMNS, LeadTable, exportLeadsCsv } from './shared'
 
 const SCOPE_LABEL: Record<SavedViewVisibility, string> = { private: 'Only me', team: 'My team', everyone: 'Everyone' }
 
@@ -61,6 +61,37 @@ export function InboxTab({
       if (!views.some((s) => s.name === v.name)) saveView.mutate({ name: v.name, query: v.query, visibility: 'private' })
     }
   }, [views, saveView])
+
+  // Personal layout: which columns show, remembered per person on the API.
+  const { data: prefs } = useCrmPrefs()
+  const updatePrefs = useUpdateCrmPrefs()
+  const [showColumns, setShowColumns] = useState(false)
+  const columns = prefs?.columns ?? DEFAULT_INBOX_COLUMNS
+  const density = prefs?.density ?? 'comfortable'
+
+  function toggleColumn(key: InboxColumn, on: boolean) {
+    if (key === 'lead') return
+    const next = on ? [...columns, key] : columns.filter((c) => c !== key)
+    // Keep the canonical left-to-right order so a toggled column lands where
+    // the eye expects it rather than appended at the end.
+    const order = INBOX_COLUMNS.map((c) => c.key)
+    next.sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    updatePrefs.mutate({ columns: next })
+  }
+
+  // The default view opens itself on arrival — but only when the person
+  // hasn't already filtered; a shared link's filters always win.
+  const appliedDefault = useRef(false)
+  useEffect(() => {
+    if (appliedDefault.current || !prefs?.default_view_id || !views) return
+    if (isSaveable(query)) {
+      appliedDefault.current = true
+      return
+    }
+    const v = views.find((s) => s.id === prefs.default_view_id)
+    if (v) onQuery(toLeadQuery(v.query))
+    appliedDefault.current = true
+  }, [prefs, views, query, onQuery])
 
   const rows = useMemo(() => applyQuery(leads, query, now), [leads, query, now])
   const assignees = useMemo(() => {
@@ -189,6 +220,37 @@ export function InboxTab({
             })}
           </span>
         )}
+
+        <span className="relative">
+          <Button variant="outline" size="sm" onClick={() => setShowColumns((s) => !s)} aria-expanded={showColumns}>
+            <Columns3 /> Columns
+          </Button>
+          {showColumns && (
+            <span className="absolute left-0 top-full z-20 mt-1 flex w-48 flex-col gap-0.5 rounded-lg border border-border bg-card p-2 shadow-lg">
+              {INBOX_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+                  <input
+                    type="checkbox"
+                    checked={columns.includes(c.key)}
+                    disabled={c.key === 'lead'}
+                    onChange={(e) => toggleColumn(c.key, e.target.checked)}
+                  />
+                  {c.label}
+                  {c.key === 'lead' && <span className="text-xs text-muted-foreground">(always)</span>}
+                </label>
+              ))}
+              <span className="mt-1 flex items-center gap-2 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
+                Density
+                <button type="button" onClick={() => updatePrefs.mutate({ density: 'comfortable' })} className={cn('rounded px-1.5 py-0.5', density === 'comfortable' ? 'bg-primary/10 font-medium text-primary' : 'hover:underline')}>
+                  Roomy
+                </button>
+                <button type="button" onClick={() => updatePrefs.mutate({ density: 'compact' })} className={cn('rounded px-1.5 py-0.5', density === 'compact' ? 'bg-primary/10 font-medium text-primary' : 'hover:underline')}>
+                  Compact
+                </button>
+              </span>
+            </span>
+          )}
+        </span>
 
         <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
           <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} />
@@ -325,7 +387,7 @@ export function InboxTab({
         </div>
       )}
 
-      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} hotScore={settings.data?.hot_score ?? 60} />
+      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} hotScore={settings.data?.hot_score ?? 60} columns={columns} density={density} />
 
       <LostReasonDialog
         open={losing}

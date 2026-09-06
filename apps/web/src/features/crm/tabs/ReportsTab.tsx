@@ -69,6 +69,7 @@ export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
               </CardContent>
             </Card>
             <ForecastCard range={range} />
+            <LostCard data={data} />
             <Card>
               <CardContent className="p-5">
                 <p className="font-medium">Export</p>
@@ -116,6 +117,34 @@ function ForecastCard({ range }: { range: CrmStatsQuery }) {
             {data.by_stage.length > 0 && (
               <Bars rows={data.by_stage.map((s) => [s.name, Math.round(s.weighted)])} money />
             )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Where lost deals went, and to whom — the range's post-mortem. */
+function LostCard({ data }: { data: { lost: number; byLostReason: Record<string, number>; byCompetitor: Record<string, number> } }) {
+  const reasons = Object.entries(data.byLostReason).sort((a, b) => b[1] - a[1])
+  const competitors = Object.entries(data.byCompetitor).sort((a, b) => b[1] - a[1])
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <p className="font-medium">Lost analysis</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{data.lost} lost in this range.</p>
+        {reasons.length === 0 ? (
+          <p className="mt-4 text-sm text-muted-foreground">Nothing lost — or no reasons recorded yet.</p>
+        ) : (
+          <>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">By reason</p>
+            <Bars rows={reasons} />
+          </>
+        )}
+        {competitors.length > 0 && (
+          <>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">By competitor</p>
+            <Bars rows={competitors} />
           </>
         )}
       </CardContent>

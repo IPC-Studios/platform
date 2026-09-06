@@ -25,8 +25,10 @@ import { ImportsTab } from '@/features/crm/tabs/ImportsTab'
 import { DuplicatesTab } from '@/features/crm/tabs/DuplicatesTab'
 import { CrmSettingsTab } from '@/features/crm/tabs/SettingsTab'
 import { ActivitiesTab } from '@/features/crm/tabs/ActivitiesTab'
+import { ForecastTab } from '@/features/crm/tabs/ForecastTab'
+import { QuotesTab } from '@/features/crm/tabs/QuotesTab'
 
-/** Every tab of the CRM. All twelve are built. */
+/** Every tab of the CRM. All fourteen are built. */
 const TABS = [
   { key: 'inbox', label: 'Lead Inbox' },
   { key: 'today', label: "Today's Work" },
@@ -36,6 +38,8 @@ const TABS = [
   { key: 'distribution', label: 'Distribution Rules' },
   { key: 'templates', label: 'Templates' },
   { key: 'reports', label: 'Reports' },
+  { key: 'forecast', label: 'Forecast' },
+  { key: 'quotes', label: 'Quotes' },
   { key: 'team', label: 'Team Dashboard' },
   { key: 'imports', label: 'Imports & Workflows' },
   { key: 'duplicates', label: 'Duplicate Management' },
@@ -149,6 +153,10 @@ function Crm() {
           <TemplatesTab />
         ) : tab === 'reports' ? (
           <ReportsTab leads={leads} />
+        ) : tab === 'forecast' ? (
+          <ForecastTab />
+        ) : tab === 'quotes' ? (
+          <QuotesTab onOpen={setOpenLead} />
         ) : tab === 'team' ? (
           <TeamTab />
         ) : tab === 'imports' ? (

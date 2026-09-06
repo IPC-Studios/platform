@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Archive, ArrowDown, ArrowUp, Gauge, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, Timer, Trash2, XCircle } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, Columns3, Gauge, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, RotateCcw, Timer, Trash2, XCircle } from 'lucide-react'
 import type { ConditionOp, CrmLead, PipelineStage, StageRequiredField } from '@ipc/contracts'
 import { CONDITION_FIELDS, OP_LABEL, REQUIRED_FIELD_LABEL, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
@@ -17,6 +17,7 @@ import {
   useCreatePipeline,
   useCreateScoringRule,
   useCreateStage,
+  useCrmPrefs,
   useCrmSettings,
   useDeleteLostReason,
   useDeletePipeline,
@@ -28,7 +29,9 @@ import {
   usePipelines,
   useRecomputeScores,
   useReorderStages,
+  useSavedViews,
   useScoringRules,
+  useUpdateCrmPrefs,
   useUpdateCrmSettings,
   useUpdateIntegration,
   useUpdateLostReason,
@@ -36,6 +39,7 @@ import {
   useUpdateScoringRule,
   useUpdateStage,
 } from '../api'
+import { DEFAULT_INBOX_COLUMNS } from './shared'
 
 const REQUIRED_OPTIONS: StageRequiredField[] = ['deal_value', 'close_date', 'email', 'name', 'assigned_to', 'title']
 
@@ -64,6 +68,7 @@ export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[];
       <IntegrationsCard />
       <ScoringCard />
       <SlaCard />
+      <MyViewCard />
       <Card>
         <CardContent className="flex flex-col gap-3 p-5">
           <p className="flex items-center gap-2 font-medium">
@@ -96,6 +101,63 @@ export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[];
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/** How this person likes the inbox: density, columns and the view it opens on. */
+function MyViewCard() {
+  const { data: prefs } = useCrmPrefs()
+  const update = useUpdateCrmPrefs()
+  const { data: views } = useSavedViews()
+  const columns = prefs?.columns ?? DEFAULT_INBOX_COLUMNS
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-5">
+        <p className="flex items-center gap-2 font-medium">
+          <Columns3 className="size-4 text-muted-foreground" /> My inbox view
+        </p>
+        <div className="flex flex-col gap-1.5">
+          <Label>Open the inbox on</Label>
+          <Select
+            value={prefs?.default_view_id ?? ''}
+            onChange={(e) => update.mutate({ default_view_id: e.target.value || null })}
+            disabled={update.isPending}
+          >
+            <option value="">The full list</option>
+            {(views ?? []).map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Density</Label>
+          <div className="flex gap-2">
+            {(['comfortable', 'compact'] as const).map((d) => (
+              <Button
+                key={d}
+                size="sm"
+                variant={prefs?.density === d ? 'default' : 'outline'}
+                disabled={update.isPending}
+                onClick={() => update.mutate({ density: d })}
+              >
+                {d === 'comfortable' ? 'Roomy' : 'Compact'}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            {columns.length} of {10} columns showing. Change them from the Columns button in the inbox.
+          </p>
+          <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => update.mutate({ columns: [...DEFAULT_INBOX_COLUMNS] })}>
+            <RotateCcw /> Reset
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

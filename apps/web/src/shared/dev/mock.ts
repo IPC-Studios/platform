@@ -285,6 +285,16 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/companies') return { ...crmCompaniesFx[0], id: uid(0xdb), ...(body as Record<string, unknown>) }
   if (method === 'PATCH' && path.startsWith('/crm/companies/')) return {}
   if (method === 'GET' && path.startsWith('/crm/forecast')) return crmForecastFx
+  if (method === 'GET' && path.startsWith('/crm/quotes')) return crmQuotesFx
+  if (method === 'POST' && path === '/crm/quotes')
+    return { ...crmQuotesFx[0], id: uid(0xd0), ...(body as Record<string, unknown>) }
+  if (method === 'POST' && /^\/crm\/quotes\/[^/]+\/send$/.test(path))
+    return { url: 'https://app.example/quote/accept?token=demo', open_url: null, delivery: 'none' }
+  if (method === 'DELETE' && path.startsWith('/crm/quotes/')) return {}
+  if (method === 'GET' && path === '/crm/prefs') return crmPrefsFx
+  if (method === 'PUT' && path === '/crm/prefs') return { ...crmPrefsFx, ...(body as Record<string, unknown>) }
+  if (method === 'GET' && path.startsWith('/public/quote/')) return publicQuoteFx
+  if (method === 'POST' && path.includes('/public/quote/')) return { ok: true }
   if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
   if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
     return atStage(dealLeads(), 'partial')
@@ -1308,6 +1318,94 @@ const crmForecastFx = {
     { month: '2026-09', count: 2, total_value: 240000, weighted: 82500 },
     { month: '2026-10', count: 1, total_value: 90000, weighted: 90000 },
   ],
+}
+
+const crmQuotesFx = [
+  {
+    id: uid(0xd1),
+    lead_id: uid(0xb1),
+    lead_name: 'Priya & Arjun',
+    quote_number: 'Q-0007',
+    title: 'Wedding package',
+    status: 'sent',
+    valid_until: '2026-09-20',
+    place_of_supply: 'Maharashtra',
+    intra_state: true,
+    subtotal: 120000,
+    discount: 0,
+    taxable: 120000,
+    tax: 21600,
+    total: 141600,
+    notes: 'Half in advance to confirm the date.',
+    terms: 'Balance before delivery.',
+    sent_at: '2026-09-04T09:00:00Z',
+    accepted_at: null,
+    accepted_by_name: null,
+    declined_at: null,
+    decline_reason: null,
+    items: [
+      { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+      { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+    ],
+    created_at: '2026-09-04T09:00:00Z',
+  },
+  {
+    id: uid(0xd2),
+    lead_id: uid(0xb2),
+    lead_name: 'Meera',
+    quote_number: 'Q-0006',
+    title: 'Pre-wedding shoot',
+    status: 'accepted',
+    valid_until: '2026-09-10',
+    place_of_supply: 'Maharashtra',
+    intra_state: true,
+    subtotal: 50000,
+    discount: 5000,
+    taxable: 45000,
+    tax: 8100,
+    total: 53100,
+    notes: null,
+    terms: null,
+    sent_at: '2026-08-28T09:00:00Z',
+    accepted_at: '2026-08-30T09:00:00Z',
+    accepted_by_name: 'Meera',
+    declined_at: null,
+    decline_reason: null,
+    items: [
+      { description: 'Pre-wedding shoot', quantity: 1, rate: 50000, amount: 50000, gst_rate: 18, taxable: 45000, cgst: 4050, sgst: 4050, igst: 0 },
+    ],
+    created_at: '2026-08-28T09:00:00Z',
+  },
+]
+
+const crmPrefsFx = {
+  columns: ['lead', 'stage', 'score', 'source', 'owner', 'value', 'follow_up'],
+  default_view_id: null,
+  density: 'comfortable',
+  pipeline_id: null,
+}
+
+const publicQuoteFx = {
+  quote_number: 'Q-0007',
+  title: 'Wedding package',
+  status: 'sent',
+  valid_until: '2026-09-20',
+  subtotal: 120000,
+  discount: 0,
+  taxable: 120000,
+  tax: 21600,
+  total: 141600,
+  notes: 'Half in advance to confirm the date.',
+  terms: 'Balance before delivery.',
+  accepted_at: null,
+  declined_at: null,
+  studio: 'Demo Studio',
+  client_name: 'Priya & Arjun',
+  items: [
+    { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+  ],
+  expired: false,
 }
 
 const activityFx = (id: string, over: Partial<Record<string, unknown>>) => ({

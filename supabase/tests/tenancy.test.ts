@@ -74,6 +74,7 @@ async function freshDb() {
   await db.exec(mig('0038_crm_objects.sql'))
   await db.exec(mig('0039_crm_activities.sql'))
   await db.exec(mig('0040_crm_workflows.sql'))
+  await db.exec(mig('0041_crm_quotes_prefs.sql'))
   return db
 }
 
@@ -3021,5 +3022,132 @@ describe('CRM workflows — delays, branches, replies, scoring, outbox (0040)', 
     const claimed = await db.query<{ lead_id: string }>(`select lead_id from crm_outbox_claim(10);`)
     expect(claimed.rows.map((r) => r.lead_id)).toContain(lead)
     await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+})
+
+describe('CRM quotes, preferences, lost analysis (0041)', () => {
+  let db: PGlite
+  const owner = '5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const items = JSON.stringify([
+    { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+  ])
+  const quote = async (lead: string) =>
+    (
+      await db.query<{ id: string; quote_number: string }>(
+        `select * from create_quote('${lead}', 'Wedding package', current_date + 14, 'MH', true, 120000, 0, 120000, 21600, 141600, '${items}'::jsonb, 'Thanks!', 'Half in advance.');`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}','owner@crm8.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM8 Studio','Owner');`)
+  })
+
+  it('quotes are numbered per studio and set the deal value', async () => {
+    const lead = await add('Quoted', '9876970001')
+    const q1 = await quote(lead)
+    const q2 = await quote(lead)
+    expect(q1.quote_number).toBe('Q-0001')
+    expect(q2.quote_number).toBe('Q-0002')
+    const l = await db.query<{ deal_value: string }>(`select deal_value from crm_leads where id = '${lead}';`)
+    expect(Number(l.rows[0]!.deal_value)).toBe(141600)
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_quote_items where quote_id = '${q1.id}';`)
+    expect(n.rows[0]!.n).toBe(2)
+    await expect(
+      db.query(`select * from create_quote('${lead}', null, null, 'MH', true, 0, 0, 0, 0, 0, '[]'::jsonb);`),
+    ).rejects.toThrow(/at least one line/)
+  })
+
+  it('a sent quote is accepted once through its public link, then read-only', async () => {
+    const lead = await add('Accepts', '9876970002')
+    const q = await quote(lead)
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}', 48) as t;`)).rows[0]!.t
+    expect((await db.query<{ status: string }>(`select status from crm_quotes where id = '${q.id}';`)).rows[0]!.status).toBe('sent')
+    const shown = await db.query<{ q: { quote_number: string; items: unknown[]; studio: string; total: number } }>(
+      `select get_quote_for_token('${token}') as q;`,
+    )
+    expect(shown.rows[0]!.q.quote_number).toBe(q.quote_number)
+    expect(shown.rows[0]!.q.items).toHaveLength(2)
+    expect(shown.rows[0]!.q.studio).toBe('CRM8 Studio')
+    expect((await db.query<{ ok: boolean }>(`select accept_quote('${token}', 'Priya', 'p@x.in', '1.2.3.4', 'ua') as ok;`)).rows[0]!.ok).toBe(true)
+    expect((await db.query<{ ok: boolean }>(`select accept_quote('${token}', 'Priya') as ok;`)).rows[0]!.ok).toBe(false)
+    const after = await db.query<{ status: string; accepted_by_name: string }>(`select status, accepted_by_name from crm_quotes where id = '${q.id}';`)
+    expect(after.rows[0]).toEqual({ status: 'accepted', accepted_by_name: 'Priya' })
+    // Still viewable after acceptance.
+    const again = await db.query<{ q: { status: string } }>(`select get_quote_for_token('${token}') as q;`)
+    expect(again.rows[0]!.q.status).toBe('accepted')
+    const ev = await db.query<{ n: number }>(`select count(*)::int as n from crm_lead_events where lead_id = '${lead}' and note like 'quote % accepted%';`)
+    expect(ev.rows[0]!.n).toBe(1)
+    await expect(db.query(`select issue_quote_link('${q.id}');`)).rejects.toThrow(/already closed/)
+  })
+
+  it('a quote can be declined with a reason, and an old quote expires', async () => {
+    const lead = await add('Declines', '9876970003')
+    const q = await quote(lead)
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}') as t;`)).rows[0]!.t
+    expect((await db.query<{ ok: boolean }>(`select decline_quote('${token}', 'Too pricey') as ok;`)).rows[0]!.ok).toBe(true)
+    const d = await db.query<{ status: string; decline_reason: string }>(`select status, decline_reason from crm_quotes where id = '${q.id}';`)
+    expect(d.rows[0]).toEqual({ status: 'declined', decline_reason: 'Too pricey' })
+
+    const q2 = await quote(lead)
+    await db.query(`select issue_quote_link('${q2.id}');`)
+    await db.exec(`update crm_quotes set valid_until = current_date - 1 where id = '${q2.id}';`)
+    expect((await db.query<{ n: number }>(`select crm_expire_quotes() as n;`)).rows[0]!.n).toBe(1)
+    expect((await db.query<{ status: string }>(`select status from crm_quotes where id = '${q2.id}';`)).rows[0]!.status).toBe('expired')
+  })
+
+  it('converting with a quote carries its lines into the project', async () => {
+    const lead = await add('Converts', '9876970004')
+    const q = await quote(lead)
+    const r = await db.query<{ client_id: string; project_id: string }>(
+      `select * from convert_lead_to_project('${lead}', null, '{}'::jsonb, '{}'::jsonb, '${q.id}');`,
+    )
+    const { project_id } = r.rows[0]!
+    const p = await db.query<{ name: string; package_cost: string; show_quotation: boolean }>(
+      `select name, package_cost, show_quotation from projects where id = '${project_id}';`,
+    )
+    expect(p.rows[0]!.name).toBe('Wedding package')
+    expect(Number(p.rows[0]!.package_cost)).toBe(141600)
+    expect(p.rows[0]!.show_quotation).toBe(true)
+    const d = await db.query<{ title: string; description: string | null }>(
+      `select title, description from deliverables where project_id = '${project_id}' order by title;`,
+    )
+    expect(d.rows.map((x) => x.title)).toEqual(['Album', 'Wedding coverage'])
+    expect(d.rows[0]!.description).toBe('2.00 × 10000.00')
+  })
+
+  it('lost analysis groups by reason and competitor; the forecast reports win rate', async () => {
+    const a = await add('Lost A', '9876970010')
+    const b = await add('Lost B', '9876970011')
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Budget', lost_competitor = 'Studio X' where id = '${a}';`)
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Budget' where id = '${b}';`)
+    const s = await db.query<{ s: { byLostReason: Record<string, number>; byCompetitor: Record<string, number>; lost: number } }>(
+      `select crm_stats(current_date - 1, current_date) as s;`,
+    )
+    expect(s.rows[0]!.s.byLostReason.Budget).toBe(2)
+    expect(s.rows[0]!.s.byCompetitor['Studio X']).toBe(1)
+    const f = await db.query<{ f: { won_count: number; lost_count: number; win_rate: number | null; avg_cycle_days: number | null } }>(
+      `select crm_forecast(current_date - 1, current_date) as f;`,
+    )
+    expect(f.rows[0]!.f.lost_count).toBe(2)
+    expect(f.rows[0]!.f.won_count).toBeGreaterThanOrEqual(1)
+    expect(f.rows[0]!.f.win_rate).not.toBeNull()
+  })
+
+  it('preferences are one row per person', async () => {
+    await db.exec(`insert into crm_user_prefs (company_id, user_id, prefs) values (get_current_company_id(), '${owner}', '{"columns":["name","stage"]}');`)
+    await db.exec(`insert into crm_user_prefs (company_id, user_id, prefs) values (get_current_company_id(), '${owner}', '{"columns":["name"]}') on conflict (company_id, user_id) do update set prefs = excluded.prefs;`)
+    const p = await db.query<{ prefs: { columns: string[] } }>(`select prefs from crm_user_prefs where user_id = '${owner}';`)
+    expect(p.rows[0]!.prefs.columns).toEqual(['name'])
   })
 })

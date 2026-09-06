@@ -37,6 +37,7 @@ import {
   useLeadEnrollments,
   useMoveStage,
   usePipelines,
+  useQuotes,
   useSendTemplate,
   useStartCadence,
   useStopCadence,
@@ -44,6 +45,8 @@ import {
   useUpdateLead,
   useWorkflows,
 } from './api'
+import { QuoteBuilder } from './QuoteBuilder'
+import { QuoteRow } from './tabs/QuotesTab'
 import { ScoreBadge } from './tabs/shared'
 import { LostReasonDialog } from './LostReasonDialog'
 import { Timeline } from './Timeline'
@@ -387,6 +390,8 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 
           {canEdit && !lead.converted_project_id && lead.status !== 'lost' && <ConvertPanel lead={lead} onDone={onClose} />}
 
+          <QuotesPanel lead={lead} canEdit={canEdit} />
+
           <Timeline lead={lead} />
 
           {canEdit && (
@@ -407,6 +412,40 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Priced offers on this deal: build one, send its link, watch it land. */
+function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
+  const { data: quotes } = useQuotes(lead.id)
+  const [building, setBuilding] = useState(false)
+  const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Quotes ({rows.length})
+        </p>
+        {canEdit && (
+          <Button size="sm" variant="outline" onClick={() => setBuilding(true)}>
+            New quote
+          </Button>
+        )}
+      </div>
+      {rows.length > 0 ? (
+        <ul className="mt-2 divide-y divide-border">
+          {rows.map((q) => (
+            <QuoteRow key={q.id} quote={q} compact />
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          No quotes yet. One becomes the number the project is built from.
+        </p>
+      )}
+      {building && <QuoteBuilder lead={lead} open onClose={() => setBuilding(false)} />}
+    </div>
   )
 }
 

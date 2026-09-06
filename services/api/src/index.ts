@@ -25,6 +25,7 @@ import { cronRouter } from './modules/cron/router'
 import { notificationsRouter } from './modules/notifications/router'
 import { subscriptionRouter } from './modules/subscription/router'
 import { termsRouter, publicTermsRouter } from './modules/terms/router'
+import { publicQuotesRouter } from './modules/crm/quotes'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
 
@@ -123,6 +124,7 @@ app.route('/notifications', notificationsRouter)
 app.route('/subscription', subscriptionRouter)
 app.route('/terms', termsRouter)
 app.route('/public', publicTermsRouter)
+app.route('/public', publicQuotesRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
 
