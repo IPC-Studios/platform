@@ -30,7 +30,11 @@ import {
   useCadences,
   useConvertLead,
   useCrmCompanies,
+  useCrmSettings,
+  useEnrollWorkflow,
+  useExitEnrollment,
   useLeadCadence,
+  useLeadEnrollments,
   useMoveStage,
   usePipelines,
   useSendTemplate,
@@ -38,7 +42,9 @@ import {
   useStopCadence,
   useTemplates,
   useUpdateLead,
+  useWorkflows,
 } from './api'
+import { ScoreBadge } from './tabs/shared'
 import { LostReasonDialog } from './LostReasonDialog'
 import { Timeline } from './Timeline'
 import { STAGE_LABEL, dueBucket } from './leads'
@@ -78,6 +84,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const move = useMoveStage()
   const { data: pipelines } = usePipelines()
   const { data: companies } = useCrmCompanies()
+  const { data: settings } = useCrmSettings()
   const [losingTo, setLosingTo] = useState<string | null>(null)
   const pipeline = (pipelines ?? []).find((p) => p.id === lead.pipeline_id) ?? (pipelines ?? []).find((p) => p.is_default)
   const stages = pipeline ? sortStages(pipeline.stages) : []
@@ -138,6 +145,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
         <div className="flex max-h-[75vh] flex-col gap-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge tone={lead.is_hot ? 'danger' : 'neutral'}>{lead.is_hot ? 'Hot lead' : 'Normal'}</StatusBadge>
+            <ScoreBadge score={lead.score} hotScore={settings?.hot_score ?? 60} />
             {lead.is_archived && <StatusBadge tone="neutral">Archived</StatusBadge>}
             {bucket === 'overdue' && <StatusBadge tone="danger">Follow-up overdue</StatusBadge>}
             {bucket === 'today' && <StatusBadge tone="warning">Due today</StatusBadge>}
@@ -355,6 +363,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           </div>
 
           {canEdit && <CadencePanel lead={lead} />}
+          {canEdit && <WorkflowPanel lead={lead} />}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="lead-notes">Notes</Label>
@@ -452,6 +461,52 @@ function CadencePanel({ lead }: { lead: CrmLead }) {
               </Button>
             </>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The workflows this deal is in, and the one to put it in. */
+function WorkflowPanel({ lead }: { lead: CrmLead }) {
+  const { data: enrollments } = useLeadEnrollments(lead.id)
+  const { data: workflows } = useWorkflows()
+  const enroll = useEnrollWorkflow()
+  const exit = useExitEnrollment()
+  const [pick, setPick] = useState('')
+  const active = (enrollments ?? []).filter((e) => e.status === 'active')
+  const options = (workflows ?? []).filter((w) => w.is_active && !active.some((e) => e.workflow_id === w.id))
+  if (options.length === 0 && active.length === 0) return null
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Workflows</p>
+      {active.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 text-sm">
+          {active.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{e.workflow_name ?? 'Workflow'}</span>
+              <StatusBadge tone="info">step {e.current_step}</StatusBadge>
+              {e.next_at && <span className="text-xs text-muted-foreground">next {when.format(new Date(e.next_at))}</span>}
+              <Button size="sm" variant="ghost" className="ml-auto" disabled={exit.isPending} onClick={() => exit.mutate(e.id)}>
+                <Square /> Stop
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {options.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Select value={pick} onChange={(e) => setPick(e.target.value)} className="w-56" aria-label="Workflow">
+            <option value="">Enroll in a workflow…</option>
+            {options.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </Select>
+          <Button size="sm" disabled={!pick || enroll.isPending} onClick={() => enroll.mutate({ workflowId: pick, lead_ids: [lead.id] }, { onSuccess: () => setPick('') })}>
+            Enroll
+          </Button>
         </div>
       )}
     </div>

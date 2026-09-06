@@ -54,6 +54,17 @@ export function DueBadge({ lead, now }: { lead: CrmLead; now: Date }) {
   return <StatusBadge tone={tone}>{label}</StatusBadge>
 }
 
+/** The score as a small badge; a flame once it reaches the studio's hot score. */
+export function ScoreBadge({ score, hotScore = 60 }: { score: number; hotScore?: number }) {
+  const hot = score >= hotScore
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[0.7rem] tabular-nums ${hot ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-border text-muted-foreground'}`} title={`Score ${score}${hot ? ' · hot' : ''}`}>
+      {hot && <Flame className="size-3" />}
+      {score}
+    </span>
+  )
+}
+
 export function LeadTable({
   leads,
   now,
@@ -62,6 +73,7 @@ export function LeadTable({
   selected,
   onToggleSelect,
   onToggleAll,
+  hotScore = 60,
 }: {
   leads: readonly CrmLead[]
   now: Date
@@ -70,6 +82,7 @@ export function LeadTable({
   selected?: Set<string>
   onToggleSelect?: (id: string, on: boolean) => void
   onToggleAll?: (on: boolean) => void
+  hotScore?: number
 }) {
   const isMobile = useIsMobile()
 
@@ -140,6 +153,7 @@ export function LeadTable({
             )}
             <th className="min-w-48 px-4 py-2 font-medium">Lead</th>
             <th className="px-4 py-2 font-medium">Stage</th>
+            <th className="px-4 py-2 font-medium">Score</th>
             <th className="px-4 py-2 font-medium">Source</th>
             <th className="px-4 py-2 font-medium">Owner</th>
             <th className="px-4 py-2 text-right font-medium">Value</th>
@@ -176,6 +190,9 @@ export function LeadTable({
               </td>
               <td className="px-4 py-2">
                 <StatusBadge tone={STAGE_TONE[l.status]}>{leadStageLabel(l)}</StatusBadge>
+              </td>
+              <td className="px-4 py-2">
+                <ScoreBadge score={l.score} hotScore={hotScore} />
               </td>
               <td className="px-4 py-2">
                 <StatusBadge tone={SOURCE_TONE[l.source] ?? 'neutral'}>{l.source}</StatusBadge>

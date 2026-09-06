@@ -7,6 +7,7 @@ import { withService, withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { timingSafeEqual } from '../../lib/crypto'
 import { log } from '../../lib/log'
+import { drainOutbox } from '../../lib/outbox'
 
 /**
  * Cron ingress. Authenticated ONLY by a shared secret compared in constant
@@ -33,9 +34,12 @@ export const cronRouter = new Hono<AppEnv>()
         const purged = dryRun
           ? 0
           : ((await sql<{ n: number }[]>`select purge_expired_refresh_tokens() as n`)[0]?.n ?? 0)
+        // Workflows queue template sends; only the API can deliver them.
+        const outbox = dryRun ? { claimed: 0, sent: 0, manual: 0, failed: 0 } : await drainOutbox(c.env, sql)
         return {
           summary: rows[0]?.summary ?? {},
           crm_follow_ups: followUps[0]?.summary ?? {},
+          crm_outbox: outbox,
           purged_refresh_tokens: purged,
         }
       }),

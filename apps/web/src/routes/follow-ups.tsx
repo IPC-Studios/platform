@@ -37,7 +37,7 @@ const TABS = [
   { key: 'templates', label: 'Templates' },
   { key: 'reports', label: 'Reports' },
   { key: 'team', label: 'Team Dashboard' },
-  { key: 'imports', label: 'Imports & Automations' },
+  { key: 'imports', label: 'Imports & Workflows' },
   { key: 'duplicates', label: 'Duplicate Management' },
   { key: 'settings', label: 'CRM Settings' },
 ] as const

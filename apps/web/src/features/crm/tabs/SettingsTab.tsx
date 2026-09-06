@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Archive, ArrowDown, ArrowUp, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, Timer, Trash2, XCircle } from 'lucide-react'
-import type { CrmLead, PipelineStage, StageRequiredField } from '@ipc/contracts'
-import { REQUIRED_FIELD_LABEL, sortStages } from '@ipc/domain'
+import { Archive, ArrowDown, ArrowUp, Gauge, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, Timer, Trash2, XCircle } from 'lucide-react'
+import type { ConditionOp, CrmLead, PipelineStage, StageRequiredField } from '@ipc/contracts'
+import { CONDITION_FIELDS, OP_LABEL, REQUIRED_FIELD_LABEL, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label, Select } from '@/shared/ui/input'
@@ -15,20 +15,25 @@ import {
   useBulkPatch,
   useCreateLostReason,
   useCreatePipeline,
+  useCreateScoringRule,
   useCreateStage,
   useCrmSettings,
   useDeleteLostReason,
   useDeletePipeline,
+  useDeleteScoringRule,
   useDeleteStage,
   useEmailSync,
   useIntegrations,
   useLostReasons,
   usePipelines,
+  useRecomputeScores,
   useReorderStages,
+  useScoringRules,
   useUpdateCrmSettings,
   useUpdateIntegration,
   useUpdateLostReason,
   useUpdatePipeline,
+  useUpdateScoringRule,
   useUpdateStage,
 } from '../api'
 
@@ -57,6 +62,7 @@ export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[];
       <PipelinesCard />
       <LostReasonsCard />
       <IntegrationsCard />
+      <ScoringCard />
       <SlaCard />
       <Card>
         <CardContent className="flex flex-col gap-3 p-5">
@@ -410,6 +416,145 @@ function IntegrationsCard() {
             })}
           </ul>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const OPS: ConditionOp[] = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'is_null', 'not_null']
+
+/** Points a lead earns for each fact about it; the sum is its score, recomputed on every change. */
+function ScoringCard() {
+  const { session } = useAuth()
+  const isOwner = !!session?.is_owner
+  const access = useAccess()
+  const canEdit = access.hasAction('crm', 'edit')
+  const { data, isLoading } = useScoringRules()
+  const settings = useCrmSettings()
+  const saveSettings = useUpdateCrmSettings()
+  const create = useCreateScoringRule()
+  const update = useUpdateScoringRule()
+  const remove = useDeleteScoringRule()
+  const recompute = useRecomputeScores()
+  const [label, setLabel] = useState('')
+  const [field, setField] = useState('deal_value')
+  const [op, setOp] = useState<ConditionOp>('gte')
+  const [value, setValue] = useState('')
+  const [points, setPoints] = useState('10')
+  const [hot, setHot] = useState('')
+  useEffect(() => {
+    if (settings.data) setHot(String(settings.data.hot_score))
+  }, [settings.data])
+  const meta = CONDITION_FIELDS.find((f) => f.key === field)
+  const noValue = op === 'is_null' || op === 'not_null'
+
+  function add() {
+    const p = Number(points)
+    if (!Number.isInteger(p) || label.trim().length < 2) return
+    const v: string | number | boolean | undefined = noValue
+      ? undefined
+      : meta?.type === 'number'
+        ? Number(value)
+        : meta?.type === 'boolean'
+          ? value !== 'false'
+          : value
+    create.mutate({ label: label.trim(), field, op, points: p, ...(v === undefined ? {} : { value: v }) }, { onSuccess: () => { setLabel(''); setValue('') } })
+  }
+
+  return (
+    <Card className="md:col-span-2">
+      <CardContent className="flex flex-col gap-3 p-5">
+        <p className="flex items-center gap-2 font-medium">
+          <Gauge className="size-4 text-muted-foreground" /> Lead scoring
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Each rule adds or removes points when its fact is true of a deal. Scores recompute on every change; deals at or above the hot score show a flame.
+        </p>
+        {isLoading ? (
+          <Skeleton className="h-24" />
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border text-sm">
+            {(data ?? []).map((r) => (
+              <li key={r.id} className={`flex flex-wrap items-center gap-2 p-2.5 ${r.is_active ? '' : 'opacity-50'}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{r.label}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {CONDITION_FIELDS.find((f) => f.key === r.field)?.label ?? r.field} {OP_LABEL[r.op]}
+                    {r.op === 'is_null' || r.op === 'not_null' ? '' : ` ${String(r.value ?? '')}`}
+                  </span>
+                </span>
+                <StatusBadge tone={r.points >= 0 ? 'success' : 'danger'}>
+                  {r.points >= 0 ? '+' : ''}
+                  {r.points}
+                </StatusBadge>
+                {canEdit && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => update.mutate({ id: r.id, patch: { is_active: !r.is_active } })}>
+                      {r.is_active ? 'Off' : 'On'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)} aria-label={`Remove ${r.label}`}>
+                      <Trash2 />
+                    </Button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {canEdit && (
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sc-label">Rule</Label>
+              <Input id="sc-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Big wedding" className="w-40" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sc-field">When</Label>
+              <Select id="sc-field" value={field} onChange={(e) => setField(e.target.value)} className="w-52">
+                {CONDITION_FIELDS.map((f) => (
+                  <option key={f.key} value={f.key}>
+                    {f.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Select value={op} onChange={(e) => setOp(e.target.value as ConditionOp)} className="w-36" aria-label="Operator">
+              {OPS.map((o) => (
+                <option key={o} value={o}>
+                  {OP_LABEL[o]}
+                </option>
+              ))}
+            </Select>
+            {!noValue &&
+              (meta?.type === 'boolean' ? (
+                <Select value={value || 'true'} onChange={(e) => setValue(e.target.value)} className="w-24" aria-label="Value">
+                  <option value="true">yes</option>
+                  <option value="false">no</option>
+                </Select>
+              ) : (
+                <Input type={meta?.type === 'number' ? 'number' : meta?.type === 'date' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} className="w-32" aria-label="Value" />
+              ))}
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sc-points">Points</Label>
+              <Input id="sc-points" type="number" min={-100} max={100} value={points} onChange={(e) => setPoints(e.target.value)} className="w-20" />
+            </div>
+            <Button size="sm" variant="outline" disabled={create.isPending || label.trim().length < 2} onClick={add}>
+              <Plus /> Add rule
+            </Button>
+            <Button size="sm" variant="ghost" disabled={recompute.isPending} onClick={() => recompute.mutate()} title="Apply the rules to every open deal now">
+              <RefreshCw /> Rescore all
+            </Button>
+          </div>
+        )}
+        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="hot-score">Hot score</Label>
+            <Input id="hot-score" type="number" min={1} max={1000} value={hot} onChange={(e) => setHot(e.target.value)} disabled={!isOwner} className="w-28" />
+          </div>
+          <Button size="sm" disabled={!isOwner || saveSettings.isPending || hot === String(settings.data?.hot_score ?? '')} onClick={() => saveSettings.mutate({ hot_score: Number(hot) })}>
+            Save
+          </Button>
+          {!isOwner && <p className="text-xs text-muted-foreground">Only the studio owner can change the threshold.</p>}
+        </div>
       </CardContent>
     </Card>
   )

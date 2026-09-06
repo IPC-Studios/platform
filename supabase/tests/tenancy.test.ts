@@ -73,11 +73,37 @@ async function freshDb() {
   await db.exec(mig('0037_truly_amazing.sql'))
   await db.exec(mig('0038_crm_objects.sql'))
   await db.exec(mig('0039_crm_activities.sql'))
+  await db.exec(mig('0040_crm_workflows.sql'))
   return db
 }
 
 async function asUser(db: PGlite, uid: string) {
   await db.exec(`set request.jwt.claim.sub = '${uid}';`)
+}
+
+/** Insert a workflow with its steps (in order) for the current company; returns its id. */
+async function workflow(
+  db: PGlite,
+  name: string,
+  trigger: string,
+  condition: Record<string, unknown>,
+  steps: Array<{ kind: 'action' | 'delay' | 'branch' | 'exit'; config?: Record<string, unknown> }>,
+  opts: { allow_reenroll?: boolean; exit_on_reply?: boolean } = {},
+): Promise<string> {
+  const id = (
+    await db.query<{ id: string }>(
+      `insert into crm_workflows (company_id, name, trigger, condition, allow_reenroll, exit_on_reply)
+       values (get_current_company_id(), '${name}', '${trigger}', '${JSON.stringify(condition)}', ${opts.allow_reenroll ?? false}, ${opts.exit_on_reply ?? true})
+       returning id;`,
+    )
+  ).rows[0]!.id
+  for (const [i, step] of steps.entries()) {
+    await db.exec(
+      `insert into crm_workflow_steps (workflow_id, company_id, step_no, kind, config)
+       values ('${id}', get_current_company_id(), ${i + 1}, '${step.kind}', '${JSON.stringify(step.config ?? {})}');`,
+    )
+  }
+  return id
 }
 
 describe('tenancy migrations + functions', () => {
@@ -2204,27 +2230,26 @@ describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations
     expect(meera.open).toBe(0)
   })
 
-  it('a rule fires on arrival, and its own update does not re-fire it', async () => {
-    await db.exec(
-      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
-       values (get_current_company_id(), 'Hot enquiries', 'lead_created', '{"source":"enquiry"}', 'mark_hot', '{}'),
-              (get_current_company_id(), 'Assign Meera', 'lead_created', '{}', 'assign_to', '{"user_id":"${member}"}'),
-              (get_current_company_id(), 'Quote follow-up', 'stage_changed', '{"to_status":"proposal_sent"}', 'set_follow_up_days', '{"days":2}');`,
-    )
+  it('a one-step workflow fires on arrival, and its own update does not re-fire it', async () => {
+    await workflow(db, 'Hot enquiries', 'lead_created', { source: 'enquiry' }, [{ kind: 'action', config: { action: 'mark_hot' } }])
+    await workflow(db, 'Assign Meera', 'lead_created', {}, [{ kind: 'action', config: { action: 'assign_to', user_id: member } }])
+    await workflow(db, 'Quote follow-up', 'stage_changed', { to_status: 'proposal_sent' }, [
+      { kind: 'action', config: { action: 'set_follow_up_days', days: 2 } },
+    ])
     const id = await add('Auto', '9876700030')
     const l = await lead(id)
     expect(l.is_hot).toBe(true)
     expect(l.assigned_to).toBe(member)
     const trail = await db.query<{ note: string | null }>(
-      `select note from crm_lead_events where lead_id = '${id}' and note like 'automation:%' order by created_at;`,
+      `select note from crm_lead_events where lead_id = '${id}' and note like 'workflow:%' order by created_at;`,
     )
-    expect(trail.rows.map((r) => r.note)).toEqual(['automation: Hot enquiries', 'automation: Assign Meera'])
+    expect(trail.rows.map((r) => r.note)).toEqual(['workflow: Hot enquiries · mark_hot', 'workflow: Assign Meera · assign_to'])
 
     await db.exec(`update crm_leads set status = 'proposal_sent' where id = '${id}';`)
     expect((await lead(id)).follow_up_at).not.toBeNull()
-    // Exactly one application per rule: the nested updates did not loop.
+    // Exactly one application per workflow: the nested updates did not loop.
     const applied = await db.query<{ n: number }>(
-      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'automation:%';`,
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'workflow:%';`,
     )
     expect(applied.rows[0]!.n).toBe(3)
   })
@@ -2431,17 +2456,16 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     ).toBe(false)
   })
 
-  it('an automation can start a cadence on arrival', async () => {
+  it('a workflow can start a cadence on arrival', async () => {
     await asUser(db, owner)
     const cad = (
       await db.query<{ id: string }>(
         `select id from crm_cadences where name = 'Wedding follow-up';`,
       )
     ).rows[0]!.id
-    await db.exec(
-      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
-       values (get_current_company_id(), 'Auto cadence', 'lead_created', '{"source":"enquiry"}', 'start_cadence', '{"cadence_id":"${cad}"}');`,
-    )
+    await workflow(db, 'Auto cadence', 'lead_created', { source: 'enquiry' }, [
+      { kind: 'action', config: { action: 'start_cadence', cadence_id: cad } },
+    ])
     const lead = await add('Auto cadence lead', '9876800020')
     const lc = await db.query<{ cadence_id: string }>(`select cadence_id from crm_lead_cadences where lead_id = '${lead}';`)
     expect(lc.rows[0]!.cadence_id).toBe(cad)
@@ -2831,5 +2855,171 @@ describe('CRM activities — timeline, replies, tasks, integrations (0039)', () 
     await expect(
       db.exec(`insert into crm_integrations (company_id, provider, status) values (get_current_company_id(), 'twilio', 'error');`),
     ).rejects.toThrow()
+  })
+})
+
+describe('CRM workflows — delays, branches, replies, scoring, outbox (0040)', () => {
+  let db: PGlite
+  const owner = '7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c'
+  const member = '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d'
+
+  const add = async (name: string, phone: string, email: string | null = null, source = 'enquiry') =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', ${email ? `'${email}'` : 'null'}, '${source}', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const enrollment = async (wf: string, lead: string) =>
+    (
+      await db.query<{ status: string; current_step: number; next_at: string | null; exit_reason: string | null; steps_run: number }>(
+        `select status, current_step, next_at, exit_reason, steps_run from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}' order by enrolled_at desc limit 1;`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm7.test'),('${member}','member@crm7.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM7 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm7.test');`,
+    )
+  })
+
+  it('existing rules were migrated into one-step workflows and switched off', async () => {
+    // The migration ran before this studio existed; prove the shape by hand.
+    await db.exec(
+      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
+       values (get_current_company_id(), 'Legacy rule', 'lead_created', '{}', 'mark_hot', '{}');`,
+    )
+    await db.exec(readMig('0040_crm_workflows.sql'))
+    const wf = await db.query<{ name: string; is_active: boolean; kind: string; config: { action: string } }>(
+      `select w.name, w.is_active, s.kind, s.config from crm_workflows w join crm_workflow_steps s on s.workflow_id = w.id where w.name = 'Legacy rule';`,
+    )
+    expect(wf.rows[0]).toMatchObject({ name: 'Legacy rule', is_active: true, kind: 'action', config: { action: 'mark_hot' } })
+    const rule = await db.query<{ is_active: boolean }>(`select is_active from crm_automation_rules where name = 'Legacy rule';`)
+    expect(rule.rows[0]!.is_active).toBe(false)
+    await db.exec(`update crm_workflows set is_active = false where name = 'Legacy rule';`)
+  })
+
+  it('a delay pauses the enrollment and a branch picks the path when it resumes', async () => {
+    const wf = await workflow(db, 'Nurture', 'lead_created', {}, [
+      { kind: 'action', config: { action: 'add_note', note: 'welcome' } },
+      { kind: 'delay', config: { amount: 1, unit: 'hours' } },
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: true }], yes_step: 4, no_step: 5 } },
+      { kind: 'action', config: { action: 'add_score', points: 10 } },
+      { kind: 'exit' },
+    ])
+    const cold = await add('Cold', '9876960001')
+    const hot = await add('Hot', '9876960002')
+    let e = await enrollment(wf, cold)
+    expect(e.status).toBe('active')
+    expect(e.current_step).toBe(3)
+    expect(e.next_at).not.toBeNull()
+    expect((await db.query<{ notes: string }>(`select notes from crm_leads where id = '${cold}';`)).rows[0]!.notes).toContain('welcome')
+
+    // Nothing runs before the delay is up.
+    const early = await db.query<{ s: { workflows: { due: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(early.rows[0]!.s.workflows.due).toBe(0)
+
+    await db.exec(`update crm_leads set is_hot = true where id = '${hot}';`)
+    await db.exec(`update crm_workflow_enrollments set next_at = now() - interval '1 minute' where workflow_id = '${wf}';`)
+    const run = await db.query<{ s: { workflows: { due: number; ran: number; completed: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(run.rows[0]!.s.workflows).toMatchObject({ due: 2, ran: 2, completed: 2 })
+    e = await enrollment(wf, cold)
+    expect(e.status).toBe('completed')
+    e = await enrollment(wf, hot)
+    expect(e.status).toBe('completed')
+    const adj = await db.query<{ id: string; score_adjust: number }>(
+      `select id, score_adjust from crm_leads where id in ('${cold}','${hot}') order by name;`,
+    )
+    expect(adj.rows.find((r) => r.id === cold)!.score_adjust).toBe(0)
+    expect(adj.rows.find((r) => r.id === hot)!.score_adjust).toBe(10)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('a reply from the lead exits the enrollment', async () => {
+    const wf = await workflow(db, 'Chase', 'lead_created', {}, [
+      { kind: 'delay', config: { amount: 2, unit: 'days' } },
+      { kind: 'action', config: { action: 'notify_assignee' } },
+    ])
+    const lead = await add('Chased', '9876960003')
+    expect((await enrollment(wf, lead)).status).toBe('active')
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject) values (get_current_company_id(), '${lead}', 'email', 'in', 'Sounds good');`,
+    )
+    const e = await enrollment(wf, lead)
+    expect(e.status).toBe('exited')
+    expect(e.exit_reason).toBe('replied')
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('manual enrollment runs at once and does not double-enroll an active lead', async () => {
+    const wf = await workflow(db, 'By hand', 'manual', {}, [
+      { kind: 'action', config: { action: 'create_task', subject: 'Send brochure', days: 1 } },
+      { kind: 'delay', config: { amount: 1, unit: 'days' } },
+    ])
+    const lead = await add('Manual', '9876960004')
+    expect((await db.query<{ n: number }>(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]) as n;`)).rows[0]!.n).toBe(1)
+    expect((await db.query<{ n: number }>(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]) as n;`)).rows[0]!.n).toBe(0)
+    const task = await db.query<{ subject: string; assigned_to: string | null }>(
+      `select subject, assigned_to from crm_activities where lead_id = '${lead}' and type = 'task';`,
+    )
+    expect(task.rows[0]!.subject).toBe('Send brochure')
+    await asUser(db, member)
+    await expect(db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)).resolves.toBeDefined()
+    await asUser(db, owner)
+  })
+
+  it('an overdue follow-up enrolls once a day', async () => {
+    const wf = await workflow(db, 'Overdue nudge', 'follow_up_overdue', {}, [{ kind: 'action', config: { action: 'notify_assignee' } }], { allow_reenroll: true })
+    const lead = await add('Overdue', '9876960005')
+    await db.exec(`update crm_leads set assigned_to = '${member}', follow_up_at = now() - interval '1 day' where id = '${lead}';`)
+    await db.query(`select run_crm_followup_cron(false);`)
+    await db.query(`select run_crm_followup_cron(false);`)
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`)
+    expect(n.rows[0]!.n).toBe(1)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('scoring follows the studio rules and a score change can start a workflow', async () => {
+    const rules = await db.query<{ n: number }>(`select count(*)::int as n from crm_scoring_rules;`)
+    expect(rules.rows[0]!.n).toBe(7)
+    const wf = await workflow(db, 'Hot score', 'score_changed', { conditions: [{ field: 'score', op: 'gte', value: 40 }] }, [
+      { kind: 'action', config: { action: 'mark_hot' } },
+    ])
+    const lead = await add('Scored', '9876960006', 'scored@x.in', 'referral')
+    // email +10, referral +15
+    let l = await db.query<{ score: number; is_hot: boolean }>(`select score, is_hot from crm_leads where id = '${lead}';`)
+    expect(l.rows[0]!.score).toBe(25)
+    expect(l.rows[0]!.is_hot).toBe(false)
+    await db.exec(`update crm_leads set deal_value = 60000 where id = '${lead}';`)
+    l = await db.query<{ score: number; is_hot: boolean }>(`select score, is_hot from crm_leads where id = '${lead}';`)
+    // +20 for the value, then the workflow marks it hot (+20 more on the next recompute)
+    expect(l.rows[0]!.score).toBeGreaterThanOrEqual(45)
+    expect(l.rows[0]!.is_hot).toBe(true)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+    const hot = await db.query<{ h: number }>(`select coalesce((select hot_score from crm_settings where company_id = get_current_company_id()), 60) as h;`)
+    expect(hot.rows[0]!.h).toBe(60)
+  })
+
+  it('a send_template step queues the outbox for the API to drain', async () => {
+    const tpl = (
+      await db.query<{ id: string }>(
+        `insert into crm_templates (company_id, name, body, kind) values (get_current_company_id(), 'Welcome', 'Hi {{name}}', 'whatsapp') returning id;`,
+      )
+    ).rows[0]!.id
+    const wf = await workflow(db, 'Welcome message', 'lead_created', {}, [
+      { kind: 'action', config: { action: 'send_template', template_id: tpl, channel: 'whatsapp' } },
+    ])
+    const lead = await add('Welcomed', '9876960007')
+    const box = await db.query<{ status: string; channel: string }>(`select status, channel from crm_outbox where lead_id = '${lead}';`)
+    expect(box.rows[0]).toEqual({ status: 'pending', channel: 'whatsapp' })
+    const claimed = await db.query<{ lead_id: string }>(`select lead_id from crm_outbox_claim(10);`)
+    expect(claimed.rows.map((r) => r.lead_id)).toContain(lead)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
   })
 })

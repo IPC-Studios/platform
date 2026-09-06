@@ -6,7 +6,7 @@ import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useBulkPatch, useDeleteView, useSaveView, useSavedViews } from '../api'
+import { useBulkPatch, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useWorkflows } from '../api'
 import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
@@ -43,6 +43,9 @@ export function InboxTab({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [losing, setLosing] = useState(false)
   const bulk = useBulkPatch()
+  const workflows = useWorkflows()
+  const enroll = useEnrollWorkflow()
+  const settings = useCrmSettings()
   const { session } = useAuth()
   const access = useAccess()
   const canShare = access.hasAction('crm', 'edit')
@@ -293,6 +296,23 @@ export function InboxTab({
           <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => runBulk({ is_hot: true })}>
             Mark hot
           </Button>
+          {(workflows.data ?? []).some((w) => w.is_active) && (
+            <Select
+              value=""
+              aria-label="Enroll in workflow"
+              onChange={(e) => {
+                if (e.target.value) enroll.mutate({ workflowId: e.target.value, lead_ids: [...selected] }, { onSuccess: () => setSelected(new Set()) })
+              }}
+              className="w-44"
+            >
+              <option value="">Enroll in…</option>
+              {(workflows.data ?? []).filter((w) => w.is_active).map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => runBulk({ is_archived: !showArchived })}>
             {showArchived ? 'Restore' : 'Archive'}
           </Button>
@@ -305,7 +325,7 @@ export function InboxTab({
         </div>
       )}
 
-      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} hotScore={settings.data?.hot_score ?? 60} />
 
       <LostReasonDialog
         open={losing}

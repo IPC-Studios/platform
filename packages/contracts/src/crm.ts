@@ -404,82 +404,186 @@ export const crmTeamStatsRow = z.object({
 })
 export type CrmTeamStatsRow = z.infer<typeof crmTeamStatsRow>
 
-// ── automations ───────────────────────────────────────────────
-export const automationTrigger = z.enum(['lead_created', 'stage_changed', 'follow_up_overdue'])
-export type AutomationTrigger = z.infer<typeof automationTrigger>
+// ── workflows ─────────────────────────────────────────────────
+export const workflowTrigger = z.enum(['lead_created', 'stage_changed', 'follow_up_overdue', 'activity_logged', 'score_changed', 'manual'])
+export type WorkflowTrigger = z.infer<typeof workflowTrigger>
 
-export const automationAction = z.enum([
+export const conditionOp = z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'is_null', 'not_null'])
+export type ConditionOp = z.infer<typeof conditionOp>
+
+/** One clause over the lead's facts (see @ipc/domain CONDITION_FIELDS). */
+export const fieldCondition = z.object({
+  field: z.string().trim().min(1).max(40),
+  op: conditionOp.default('eq'),
+  value: z.union([z.string().max(200), z.number(), z.boolean(), z.array(z.union([z.string().max(200), z.number()])).max(50)]).optional(),
+})
+export type FieldCondition = z.infer<typeof fieldCondition>
+
+export const workflowCondition = z.object({
+  source: leadSource.optional(),
+  to_status: leadStatus.optional(),
+  from_status: leadStatus.optional(),
+  is_hot: z.boolean().optional(),
+  conditions: z.array(fieldCondition).max(20).optional(),
+})
+export type WorkflowCondition = z.infer<typeof workflowCondition>
+
+export const workflowAction = z.enum([
   'assign_to',
   'set_follow_up_days',
   'mark_hot',
   'add_note',
   'notify_assignee',
+  'notify_user',
   'start_cadence',
+  'set_stage',
+  'create_task',
+  'add_score',
+  'send_template',
 ])
-export type AutomationAction = z.infer<typeof automationAction>
+export type WorkflowAction = z.infer<typeof workflowAction>
 
-export const automationCondition = z.object({
-  source: leadSource.optional(),
-  to_status: leadStatus.optional(),
-  from_status: leadStatus.optional(),
-  is_hot: z.boolean().optional(),
+export const workflowActionConfig = z
+  .object({
+    action: workflowAction,
+    user_id: uuid.optional(),
+    days: z.number().int().min(0).max(365).optional(),
+    note: z.string().trim().max(500).optional(),
+    title: z.string().trim().max(120).optional(),
+    cadence_id: uuid.optional(),
+    stage_id: uuid.optional(),
+    lost_reason: z.string().trim().min(3).max(500).optional(),
+    subject: z.string().trim().max(200).optional(),
+    points: z.number().int().min(-100).max(100).optional(),
+    template_id: uuid.optional(),
+    channel: z.enum(['whatsapp', 'email']).optional(),
+  })
+  .refine(
+    (v) =>
+      (v.action !== 'assign_to' && v.action !== 'notify_user' || !!v.user_id) &&
+      (v.action !== 'set_follow_up_days' || typeof v.days === 'number') &&
+      (v.action !== 'add_note' || !!v.note) &&
+      (v.action !== 'start_cadence' || !!v.cadence_id) &&
+      (v.action !== 'set_stage' || !!v.stage_id) &&
+      (v.action !== 'create_task' || !!v.subject) &&
+      (v.action !== 'add_score' || typeof v.points === 'number') &&
+      (v.action !== 'send_template' || !!v.template_id),
+    { message: 'This action needs a value.' },
+  )
+export type WorkflowActionConfig = z.infer<typeof workflowActionConfig>
+
+export const workflowDelayConfig = z.object({
+  amount: z.number().int().min(1).max(365),
+  unit: z.enum(['minutes', 'hours', 'days']).default('days'),
 })
-export type AutomationCondition = z.infer<typeof automationCondition>
+export type WorkflowDelayConfig = z.infer<typeof workflowDelayConfig>
 
-export const automationActionValue = z.object({
-  user_id: uuid.optional(),
-  days: z.number().int().min(0).max(365).optional(),
-  note: z.string().trim().max(500).optional(),
-  cadence_id: uuid.optional(),
+export const workflowBranchConfig = z.object({
+  conditions: z.array(fieldCondition).min(1).max(20),
+  /** Step numbers (1-based) to continue at; null = the next step. */
+  yes_step: z.number().int().min(1).max(100).nullable().default(null),
+  no_step: z.number().int().min(1).max(100).nullable().default(null),
 })
-export type AutomationActionValue = z.infer<typeof automationActionValue>
+export type WorkflowBranchConfig = z.infer<typeof workflowBranchConfig>
 
-export const automationRule = z.object({
+export const workflowStepInput = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('action'), config: workflowActionConfig }),
+  z.object({ kind: z.literal('delay'), config: workflowDelayConfig }),
+  z.object({ kind: z.literal('branch'), config: workflowBranchConfig }),
+  z.object({ kind: z.literal('exit'), config: z.object({}).default({}) }),
+])
+export type WorkflowStepInput = z.infer<typeof workflowStepInput>
+
+export const workflowStep = z.discriminatedUnion('kind', [
+  z.object({ id: uuid, step_no: z.number().int(), kind: z.literal('action'), config: workflowActionConfig }),
+  z.object({ id: uuid, step_no: z.number().int(), kind: z.literal('delay'), config: workflowDelayConfig }),
+  z.object({ id: uuid, step_no: z.number().int(), kind: z.literal('branch'), config: workflowBranchConfig }),
+  z.object({ id: uuid, step_no: z.number().int(), kind: z.literal('exit'), config: z.object({}).default({}) }),
+])
+export type WorkflowStep = z.infer<typeof workflowStep>
+
+export const workflow = z.object({
   id: uuid,
   name: z.string(),
-  trigger: automationTrigger,
-  condition: automationCondition,
-  action: automationAction,
-  action_value: automationActionValue,
+  trigger: workflowTrigger,
+  condition: workflowCondition,
   is_active: z.boolean(),
+  allow_reenroll: z.boolean(),
+  exit_on_reply: z.boolean(),
+  steps: z.array(workflowStep),
+  active_count: z.number().int().default(0),
+  completed_count: z.number().int().default(0),
+  errored_count: z.number().int().default(0),
+  last_enrolled_at: isoDateTime.nullable().default(null),
   created_at: isoDateTime,
 })
-export type AutomationRule = z.infer<typeof automationRule>
+export type Workflow = z.infer<typeof workflow>
 
-const actionNeedsValue = (v: { action: AutomationAction; action_value: AutomationActionValue }) => {
-  if (v.action === 'assign_to') return !!v.action_value.user_id
-  if (v.action === 'set_follow_up_days') return typeof v.action_value.days === 'number'
-  if (v.action === 'add_note') return !!v.action_value.note
-  if (v.action === 'start_cadence') return !!v.action_value.cadence_id
-  return true
-}
+export const createWorkflowRequest = z.object({
+  name: z.string().trim().min(2).max(80),
+  trigger: workflowTrigger,
+  condition: workflowCondition.default({}),
+  steps: z.array(workflowStepInput).min(1).max(100),
+  is_active: z.boolean().default(true),
+  allow_reenroll: z.boolean().default(false),
+  exit_on_reply: z.boolean().default(true),
+})
+export type CreateWorkflowRequest = z.infer<typeof createWorkflowRequest>
 
-export const createAutomationRequest = z
-  .object({
-    name: z.string().trim().min(2).max(80),
-    trigger: automationTrigger,
-    condition: automationCondition.default({}),
-    action: automationAction,
-    action_value: automationActionValue.default({}),
-    is_active: z.boolean().default(true),
-  })
-  .refine(actionNeedsValue, { message: 'This action needs a value.', path: ['action_value'] })
-export type CreateAutomationRequest = z.infer<typeof createAutomationRequest>
+export const updateWorkflowRequest = createWorkflowRequest.partial()
+export type UpdateWorkflowRequest = z.infer<typeof updateWorkflowRequest>
 
-export const updateAutomationRequest = z
-  .object({
-    name: z.string().trim().min(2).max(80).optional(),
-    trigger: automationTrigger.optional(),
-    condition: automationCondition.optional(),
-    action: automationAction.optional(),
-    action_value: automationActionValue.optional(),
-    is_active: z.boolean().optional(),
-  })
-  .refine((v) => !v.action || actionNeedsValue({ action: v.action, action_value: v.action_value ?? {} }), {
-    message: 'This action needs a value.',
-    path: ['action_value'],
-  })
-export type UpdateAutomationRequest = z.infer<typeof updateAutomationRequest>
+export const workflowEnrollment = z.object({
+  id: uuid,
+  workflow_id: uuid,
+  workflow_name: z.string().nullable().default(null),
+  lead_id: uuid,
+  lead_name: z.string().nullable().default(null),
+  current_step: z.number().int(),
+  next_at: isoDateTime.nullable(),
+  status: z.enum(['active', 'completed', 'exited', 'errored']),
+  exit_reason: z.string().nullable(),
+  steps_run: z.number().int(),
+  enrolled_at: isoDateTime,
+})
+export type WorkflowEnrollment = z.infer<typeof workflowEnrollment>
+
+export const enrollWorkflowRequest = z.object({ lead_ids: z.array(uuid).min(1).max(200) })
+export type EnrollWorkflowRequest = z.infer<typeof enrollWorkflowRequest>
+
+export const enrollWorkflowResponse = z.object({ enrolled: z.number().int() })
+export type EnrollWorkflowResponse = z.infer<typeof enrollWorkflowResponse>
+
+// ── scoring ───────────────────────────────────────────────────
+export const scoringRule = z.object({
+  id: uuid,
+  label: z.string(),
+  field: z.string(),
+  op: conditionOp,
+  value: z.unknown().nullable().default(null),
+  points: z.number().int(),
+  is_active: z.boolean(),
+  position: z.number().int(),
+})
+export type ScoringRule = z.infer<typeof scoringRule>
+
+export const createScoringRuleRequest = z.object({
+  label: z.string().trim().min(2).max(80),
+  field: z.string().trim().min(1).max(40),
+  op: conditionOp.default('eq'),
+  value: z.union([z.string().max(200), z.number(), z.boolean()]).optional(),
+  points: z.number().int().min(-100).max(100),
+})
+export type CreateScoringRuleRequest = z.infer<typeof createScoringRuleRequest>
+
+export const updateScoringRuleRequest = createScoringRuleRequest.partial().extend({
+  is_active: z.boolean().optional(),
+  position: z.number().int().min(0).max(1000).optional(),
+})
+export type UpdateScoringRuleRequest = z.infer<typeof updateScoringRuleRequest>
+
+export const recomputeScoresResponse = z.object({ rescored: z.number().int() })
+export type RecomputeScoresResponse = z.infer<typeof recomputeScoresResponse>
 
 // ── saved views (per person, every device) ────────────────────
 export const savedViewQuery = z.object({
@@ -523,6 +627,8 @@ export type UpdateSavedViewRequest = z.infer<typeof updateSavedViewRequest>
 export const crmSettings = z.object({
   /** Hours a new lead may wait before first contact and still count as on time. */
   sla_hours: z.number().int().min(1).max(720),
+  /** A lead scoring at or above this is shown as hot. */
+  hot_score: z.number().int().min(1).max(1000).default(60),
 })
 export type CrmSettings = z.infer<typeof crmSettings>
 

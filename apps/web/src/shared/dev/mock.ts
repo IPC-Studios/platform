@@ -300,10 +300,17 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/templates')
     return { ...crmTemplatesFx[0], id: uid(0xc8), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/templates/')) return {}
-  if (method === 'GET' && path === '/crm/automations') return crmAutomationsFx
-  if (method === 'POST' && path === '/crm/automations')
-    return { ...crmAutomationsFx[0], id: uid(0xc9), ...(body as Record<string, unknown>) }
-  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/automations/')) return {}
+  if (method === 'GET' && path === '/crm/workflows') return crmWorkflowsFx
+  if (method === 'POST' && path === '/crm/workflows') return { ...crmWorkflowsFx[0], id: uid(0xf5), ...(body as Record<string, unknown>), steps: crmWorkflowsFx[0]!.steps }
+  if (method === 'POST' && /^\/crm\/workflows\/[^/]+\/enroll$/.test(path)) return { enrolled: 1 }
+  if (method === 'GET' && /^\/crm\/workflows\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx.filter((e) => e.status === 'active')
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/workflows/')) return {}
+  if (method === 'POST' && path.startsWith('/crm/enrollments/')) return {}
+  if (method === 'GET' && path === '/crm/scoring-rules') return crmScoringFx
+  if (method === 'POST' && path === '/crm/scoring-rules') return { ...crmScoringFx[0], id: uid(0xf6), ...(body as Record<string, unknown>) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/scoring-rules/')) return {}
+  if (method === 'POST' && path === '/crm/scoring/recompute') return { rescored: 4 }
   if (method === 'GET' && path.startsWith('/crm/stats')) return crmStatsFx
   if (method === 'GET' && path.startsWith('/crm/team-stats')) return crmTeamStatsFx
   if (method === 'POST' && path === '/crm/imports/preview') return crmPreviewFx
@@ -315,8 +322,8 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/views')
     return { ...crmViewsFx[0], id: uid(0xcb), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/views/')) return {}
-  if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24 }
-  if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, ...(body as Record<string, unknown>) }
+  if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60 }
+  if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60, ...(body as Record<string, unknown>) }
   if (method === 'GET' && path === '/crm/cadences') return crmCadencesFx
   if (method === 'POST' && path === '/crm/cadences') return { id: uid(0xcc) }
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/cadences/')) return {}
@@ -593,6 +600,7 @@ const withDeal = <T extends { status: string; name: string | null }>(l: T, i: nu
   deal_value: i % 3 === 2 ? null : 60000 + i * 15000,
   close_date: i % 2 === 0 ? '2026-10-15' : null,
   title: i === 0 ? 'December wedding' : null,
+  score: [72, 35, 10, 55, 20, 65][i % 6] ?? 0,
   crm_company_id: i === 1 ? COMPANY.verma : null,
   crm_company_name: i === 1 ? 'Verma Weddings' : null,
 })
@@ -1368,17 +1376,40 @@ const crmTemplatesFx = [
   },
 ]
 
-const crmAutomationsFx = [
+const WF = uid(0xf0)
+const crmWorkflowsFx = [
   {
-    id: uid(0xc6),
-    name: 'Hot Facebook leads',
+    id: WF,
+    name: 'Facebook nurture',
     trigger: 'lead_created',
     condition: { source: 'facebook' },
-    action: 'mark_hot',
-    action_value: {},
     is_active: true,
+    allow_reenroll: false,
+    exit_on_reply: true,
+    steps: [
+      { id: uid(0xf1), step_no: 1, kind: 'action', config: { action: 'mark_hot' } },
+      { id: uid(0xf2), step_no: 2, kind: 'delay', config: { amount: 1, unit: 'days' } },
+      { id: uid(0xf3), step_no: 3, kind: 'branch', config: { conditions: [{ field: 'inbound_replies', op: 'gte', value: 1 }], yes_step: 5, no_step: 4 } },
+      { id: uid(0xf4), step_no: 4, kind: 'action', config: { action: 'notify_assignee', note: 'No reply yet — call them.' } },
+      { id: uid(0xf7), step_no: 5, kind: 'exit', config: {} },
+    ],
+    active_count: 1,
+    completed_count: 3,
+    errored_count: 0,
+    last_enrolled_at: '2026-09-04T09:00:00Z',
     created_at: '2026-08-01T09:00:00Z',
   },
+]
+const crmEnrollmentsFx = [
+  { id: uid(0xf8), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb1), lead_name: 'Priya & Arjun', current_step: 3, next_at: '2026-09-06T09:00:00Z', status: 'active', exit_reason: null, steps_run: 2, enrolled_at: '2026-09-04T09:00:00Z' },
+  { id: uid(0xf9), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb2), lead_name: 'Meera', current_step: 5, next_at: null, status: 'completed', exit_reason: null, steps_run: 4, enrolled_at: '2026-08-20T09:00:00Z' },
+]
+const crmScoringFx = [
+  { id: uid(0xfa), label: 'Has an email address', field: 'has_email', op: 'eq', value: true, points: 10, is_active: true, position: 0 },
+  { id: uid(0xfb), label: 'Came by referral', field: 'source', op: 'eq', value: 'referral', points: 15, is_active: true, position: 1 },
+  { id: uid(0xfc), label: 'Deal worth 50,000 or more', field: 'deal_value', op: 'gte', value: 50000, points: 20, is_active: true, position: 2 },
+  { id: uid(0xfd), label: 'Has replied', field: 'inbound_replies', op: 'gte', value: 1, points: 25, is_active: true, position: 3 },
+  { id: uid(0xfe), label: 'Gone quiet for 14 days', field: 'days_since_contact', op: 'gte', value: 14, points: -15, is_active: true, position: 6 },
 ]
 
 const crmStatsFx = {

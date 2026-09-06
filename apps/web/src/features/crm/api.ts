@@ -1,14 +1,12 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  automationRule,
   bulkPatchResponse,
   bulkUndoResponse,
   cadence,
   cadenceStartResponse,
   convertLeadRequest,
   convertLeadResponse,
-  createAutomationRequest,
   createCadenceRequest,
   createLeadRequest,
   crmActivity,
@@ -22,6 +20,12 @@ import {
   timelineResponse,
   crmLead,
   crmSettings,
+  createWorkflowRequest,
+  enrollWorkflowResponse,
+  recomputeScoresResponse,
+  scoringRule,
+  workflow,
+  workflowEnrollment,
   crmStats,
   crmTeamStatsRow,
   crmTemplate,
@@ -45,7 +49,6 @@ import {
   type BulkUndoRequest,
   type ConvertLeadRequest,
   type CreateActivityRequest,
-  type CreateAutomationRequest,
   type CreateCadenceRequest,
   type CreateContactRequest,
   type CreateCrmCompanyRequest,
@@ -54,7 +57,9 @@ import {
   type CreateLostReasonRequest,
   type CreatePipelineRequest,
   type CreateSavedViewRequest,
+  type CreateScoringRuleRequest,
   type CreateStageRequest,
+  type CreateWorkflowRequest,
   type CreateTemplateRequest,
   type CrmStatsQuery,
   type CsvImportCommitRequest,
@@ -64,7 +69,6 @@ import {
   type ScheduleMeetingRequest,
   type SendTemplateRequest,
   type UpdateActivityRequest,
-  type UpdateAutomationRequest,
   type UpdateCadenceRequest,
   type UpdateContactRequest,
   type UpdateCrmCompanyRequest,
@@ -75,7 +79,9 @@ import {
   type UpdateLostReasonRequest,
   type UpdatePipelineRequest,
   type UpdateSavedViewRequest,
+  type UpdateScoringRuleRequest,
   type UpdateStageRequest,
+  type UpdateWorkflowRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -113,10 +119,6 @@ export function useDuplicateGroups() {
 
 export function useTemplates() {
   return useCrmQuery(['templates'], () => callApi('/crm/templates', { responseSchema: crmTemplate.array() }), 60_000)
-}
-
-export function useAutomations() {
-  return useCrmQuery(['automations'], () => callApi('/crm/automations', { responseSchema: automationRule.array() }), 60_000)
 }
 
 export function useCrmStats(range: CrmStatsQuery) {
@@ -297,32 +299,6 @@ export function useRemoveFromRota() {
   return useCrmMutation(
     (id: string) => callApi(`/crm/distribution/${id}`, { method: 'DELETE', responseSchema: noContent }),
     'Removed from the rota',
-  )
-}
-
-export function useCreateAutomation() {
-  return useCrmMutation(
-    (input: CreateAutomationRequest) =>
-      callApi('/crm/automations', {
-        method: 'POST',
-        body: createAutomationRequest.parse(input),
-        responseSchema: automationRule,
-      }),
-    'Rule saved',
-  )
-}
-
-export function useUpdateAutomation() {
-  return useCrmMutation(
-    ({ id, patch }: { id: string; patch: UpdateAutomationRequest }) =>
-      callApi(`/crm/automations/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
-  )
-}
-
-export function useDeleteAutomation() {
-  return useCrmMutation(
-    (id: string) => callApi(`/crm/automations/${id}`, { method: 'DELETE', responseSchema: noContent }),
-    'Rule deleted',
   )
 }
 
@@ -686,5 +662,92 @@ export function useUpdateIntegration() {
     ({ provider, patch }: { provider: string; patch: UpdateIntegrationRequest }) =>
       callApi(`/crm/integrations/${provider}`, { method: 'PUT', body: patch, responseSchema: noContent }),
     'Integration updated',
+  )
+}
+
+// ── workflows ─────────────────────────────────────────────────
+export function useWorkflows() {
+  return useCrmQuery(['workflows'], () => callApi('/crm/workflows', { responseSchema: workflow.array() }), 60_000)
+}
+
+export function useCreateWorkflow() {
+  return useCrmMutation(
+    (input: CreateWorkflowRequest) =>
+      callApi('/crm/workflows', { method: 'POST', body: createWorkflowRequest.parse(input), responseSchema: workflow }),
+    'Workflow saved',
+  )
+}
+
+export function useUpdateWorkflow() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateWorkflowRequest }) =>
+      callApi(`/crm/workflows/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'Workflow updated',
+  )
+}
+
+export function useDeleteWorkflow() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/workflows/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Workflow deleted',
+  )
+}
+
+export function useWorkflowEnrollments(workflowId: string) {
+  return useCrmQuery(['workflow-enrollments', workflowId], () =>
+    callApi(`/crm/workflows/${workflowId}/enrollments`, { responseSchema: workflowEnrollment.array() }),
+  )
+}
+
+export function useLeadEnrollments(leadId: string) {
+  return useCrmQuery(['lead-enrollments', leadId], () =>
+    callApi(`/crm/leads/${leadId}/enrollments`, { responseSchema: workflowEnrollment.array() }),
+  )
+}
+
+export function useEnrollWorkflow() {
+  return useCrmMutation(
+    ({ workflowId, lead_ids }: { workflowId: string; lead_ids: string[] }) =>
+      callApi(`/crm/workflows/${workflowId}/enroll`, { method: 'POST', body: { lead_ids }, responseSchema: enrollWorkflowResponse }),
+    (r) => (r.enrolled === 0 ? 'Already enrolled' : `Enrolled ${r.enrolled} deal${r.enrolled === 1 ? '' : 's'}`),
+  )
+}
+
+export function useExitEnrollment() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/enrollments/${id}/exit`, { method: 'POST', body: {}, responseSchema: noContent }),
+    'Stopped',
+  )
+}
+
+// ── scoring ───────────────────────────────────────────────────
+export function useScoringRules() {
+  return useCrmQuery(['scoring-rules'], () => callApi('/crm/scoring-rules', { responseSchema: scoringRule.array() }), 60_000)
+}
+
+export function useCreateScoringRule() {
+  return useCrmMutation(
+    (input: CreateScoringRuleRequest) => callApi('/crm/scoring-rules', { method: 'POST', body: input, responseSchema: scoringRule }),
+    'Rule added',
+  )
+}
+
+export function useUpdateScoringRule() {
+  return useCrmMutation(({ id, patch }: { id: string; patch: UpdateScoringRuleRequest }) =>
+    callApi(`/crm/scoring-rules/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+  )
+}
+
+export function useDeleteScoringRule() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/scoring-rules/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Rule removed',
+  )
+}
+
+export function useRecomputeScores() {
+  return useCrmMutation(
+    (_: void) => callApi('/crm/scoring/recompute', { method: 'POST', body: {}, responseSchema: recomputeScoresResponse }),
+    (r) => `Rescored ${r.rescored} deal${r.rescored === 1 ? '' : 's'}`,
   )
 }

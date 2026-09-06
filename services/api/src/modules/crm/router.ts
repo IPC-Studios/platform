@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import type { TransactionSql } from 'postgres'
 import {
-  automationRule,
   bulkLeadPatch,
   bulkPatchResponse,
   bulkUndoRequest,
@@ -10,7 +9,6 @@ import {
   cadenceStartResponse,
   convertLeadRequest,
   convertLeadResponse,
-  createAutomationRequest,
   createCadenceRequest,
   createSavedViewRequest,
   createDistributionRequest,
@@ -43,7 +41,6 @@ import {
   unmergeLeadsRequest,
   startCadenceRequest,
   unmergeLeadsResponse,
-  updateAutomationRequest,
   updateCadenceRequest,
   updateCrmSettingsRequest,
   updateDistributionRequest,
@@ -64,6 +61,7 @@ import { audit } from '../../lib/audit'
 import { sendWhatsAppText, whatsappConfigured, whatsappLink } from '../../lib/whatsapp'
 import { crmObjectsRouter } from './objects'
 import { crmActivitiesRouter } from './activities'
+import { crmWorkflowsRouter } from './workflows'
 
 const list = crmLead.array()
 const edit = requireAction('crm', 'edit')
@@ -764,24 +762,34 @@ export const crmRouter = new Hono<AppEnv>()
   // ── Settings ────────────────────────────────────────────────
   .get('/settings', async (c) => {
     const rows = await attempt(c, 'crm.settings', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => sql<{ sla_hours: number }[]>`select crm_sla_hours() as sla_hours`),
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ sla_hours: number; hot_score: number }[]>`
+        select crm_sla_hours() as sla_hours,
+               coalesce((select s.hot_score from crm_settings s where s.company_id = get_current_company_id()), 60) as hot_score`),
     )
     if (!rows) fail(400, 'We could not load CRM settings.')
-    return c.json(crmSettings.parse(rows[0] ?? { sla_hours: 24 }))
+    return c.json(crmSettings.parse(rows[0] ?? { sla_hours: 24, hot_score: 60 }))
   })
 
   .patch('/settings', edit, async (c) => {
     const parsed = updateCrmSettingsRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, 'The SLA must be between 1 and 720 hours.')
-    if (parsed.data.sla_hours === undefined) return c.body(null, 204)
+    if (!parsed.success) fail(422, 'The SLA must be between 1 and 720 hours, the hot score between 1 and 1000.')
+    if (parsed.data.sla_hours === undefined && parsed.data.hot_score === undefined) return c.body(null, 204)
     const auth = c.get('auth')
     if (!auth.isOwner) fail(403, 'Only the studio owner can change CRM settings.')
-    const sla = parsed.data.sla_hours
+    const { sla_hours: sla, hot_score: hot } = parsed.data
     // crm_set_sla_hours() also moves sla_due_at on every lead still waiting,
     // so a tighter target shows up on the board the same minute.
     const row = await attempt(c, 'crm.settings_update', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const rows = await sql<{ sla_hours: number }[]>`select crm_set_sla_hours(${sla}) as sla_hours`
+        if (sla !== undefined) await sql`select crm_set_sla_hours(${sla})`
+        if (hot !== undefined) {
+          await sql`
+            insert into crm_settings (company_id, hot_score) values (get_current_company_id(), ${hot})
+            on conflict (company_id) do update set hot_score = excluded.hot_score`
+        }
+        const rows = await sql<{ sla_hours: number; hot_score: number }[]>`
+          select crm_sla_hours() as sla_hours,
+                 coalesce((select s.hot_score from crm_settings s where s.company_id = get_current_company_id()), 60) as hot_score`
         return rows[0] ?? null
       }),
     )
@@ -872,74 +880,6 @@ export const crmRouter = new Hono<AppEnv>()
     return c.body(null, 204)
   })
 
-  // ── Automations ─────────────────────────────────────────────
-  .get('/automations', async (c) => {
-    const rows = await attempt(c, 'crm.automations', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`
-          select id, name, trigger, condition, action, action_value, is_active, created_at
-          from crm_automation_rules order by created_at`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not load automations.')
-    return c.json(automationRule.array().parse(rows))
-  })
-
-  .post('/automations', edit, async (c) => {
-    const parsed = createAutomationRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, parsed.error.issues[0]?.message ?? 'Please check the rule.')
-    const v = parsed.data
-    const row = await attempt(c, 'crm.automation_create', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        const [r] = await sql`
-          insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value, is_active)
-          values (get_current_company_id(), ${v.name}, ${v.trigger}, ${sql.json(v.condition)}, ${v.action}, ${sql.json(v.action_value)}, ${v.is_active})
-          returning id, name, trigger, condition, action, action_value, is_active, created_at`
-        return r ?? null
-      }),
-    )
-    if (!row) fail(400, 'We could not save this rule.')
-    const created = automationRule.parse(row)
-    await audit(c, { action: 'automation.create', entityType: 'crm_automation_rule', entityId: created.id, after: v })
-    return c.json(created, 201)
-  })
-
-  .patch('/automations/:id', edit, async (c) => {
-    const parsed = updateAutomationRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, 'Invalid update.')
-    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.automation_update', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql<{ id: string }[]>`
-          update crm_automation_rules set ${sql(parsed.data)} where id = ${id} returning id`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not update this rule.')
-    if (!rows.length) fail(404, 'That rule was not found.')
-    await audit(c, { action: 'automation.update', entityType: 'crm_automation_rule', entityId: id, after: parsed.data })
-    return c.body(null, 204)
-  })
-
-  .delete('/automations/:id', remove, async (c) => {
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.automation_delete', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql<{ id: string }[]>`delete from crm_automation_rules where id = ${id} returning id`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not delete this rule.')
-    if (!rows.length) fail(404, 'That rule was not found.')
-    await audit(c, { action: 'automation.delete', entityType: 'crm_automation_rule', entityId: id })
-    return c.body(null, 204)
-  })
-
   // ── Lead sources ────────────────────────────────────────────
   // Each row is an inbox: a key a web form or Meta posts to. The counts come
   // from the leads that actually arrived through it, which is the only way to
@@ -1024,3 +964,5 @@ export const crmRouter = new Hono<AppEnv>()
   .route('/', crmObjectsRouter)
   // Activities, timeline, calls, meetings, mailbox sync, integrations.
   .route('/', crmActivitiesRouter)
+  // Workflows, enrollments, scoring.
+  .route('/', crmWorkflowsRouter)
