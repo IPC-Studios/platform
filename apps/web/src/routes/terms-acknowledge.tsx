@@ -6,7 +6,7 @@ import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
-import { LoadingState } from '@/shared/ui/states'
+import { Skeleton } from '@/shared/ui/skeleton'
 
 const termsBody = z.object({ body: z.string() })
 
@@ -76,7 +76,11 @@ export function TermsAcknowledgePage() {
           </CardContent>
         </Card>
       ) : body === null ? (
-        <LoadingState label="Loading your terms…" />
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-6" role="status" aria-label="Loading your terms">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} className={i % 3 === 2 ? 'h-3 w-3/4' : 'h-3 w-full'} />
+          ))}
+        </div>
       ) : (
         <>
           <Card>

@@ -1,0 +1,14 @@
+# Cloudflare Pages response headers for the SPA. The API sets its own.
+#
+# The session token lives in localStorage, so script injection is the one
+# thing that must not happen: no inline scripts, no third-party script hosts
+# beyond Razorpay Checkout. connect-src is https: rather than the exact API
+# origin because the origin differs per deployment and Pages cannot template
+# this file — tighten it to your api.<domain> once it is known (docs/RUNBOOK.md).
+/*
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(self), camera=(), microphone=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src https://api.razorpay.com https://checkout.razorpay.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'

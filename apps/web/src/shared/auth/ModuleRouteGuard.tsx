@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
+import { Link } from '@tanstack/react-router'
 import type { ModuleKey } from '@ipc/permissions'
 import { useAccess } from './useAccess'
+import { Button } from '../ui/button'
+import { EmptyState } from '../ui/states'
 
 /**
  * Gate a route/section on module visibility, using the same effective set the
@@ -21,10 +24,15 @@ export function ModuleRouteGuard({
   if (!access.hasModule(module)) {
     return (
       fallback ?? (
-        <div style={{ fontFamily: 'system-ui', padding: 24 }}>
-          <h2>Not available</h2>
-          <p>You don’t have access to this area.</p>
-        </div>
+        <EmptyState
+          title="Not available"
+          description="You don’t have access to this area. Ask the studio owner if you think you should."
+          action={
+            <Button variant="outline" asChild>
+              <Link to="/dashboard">Back to dashboard</Link>
+            </Button>
+          }
+        />
       )
     )
   }

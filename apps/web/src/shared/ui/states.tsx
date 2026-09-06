@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from './button'
+import { ApiError } from '../api/client'
 
 /** The loading / error / empty triad every list page renders. */
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
@@ -12,11 +13,29 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   )
 }
 
-export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
+/**
+ * The failure of a page or panel. Pass the caught error and the reference id
+ * the API stamped on it is shown too — the one line support can find in the
+ * logs without asking what time it happened.
+ */
+export function ErrorState({
+  message,
+  error,
+  onRetry,
+}: {
+  message?: string
+  error?: unknown
+  onRetry?: () => void
+}) {
+  const text = message ?? (error instanceof Error ? error.message : undefined)
+  const reference = error instanceof ApiError ? error.correlationId : null
   return (
-    <div className="flex flex-col items-center gap-3 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 py-16 text-center" role="alert">
       <p className="font-medium">This didn’t load</p>
-      {message && <p className="max-w-sm text-sm text-muted-foreground">{message}</p>}
+      {text && <p className="max-w-sm text-sm text-muted-foreground">{text}</p>}
+      {reference && (
+        <p className="font-mono text-xs text-muted-foreground">Reference: {reference}</p>
+      )}
       {onRetry && (
         <Button variant="outline" size="sm" onClick={onRetry}>
           Try again

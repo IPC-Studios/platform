@@ -12,6 +12,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public correlationId?: string | null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -48,16 +49,22 @@ export function setAuthLostHandler(fn: (() => void) | null): void {
   onAuthLost = fn
 }
 
-async function rotateTokens(): Promise<boolean> {
+/**
+ * Rotate the session. In body mode the stored refresh token is sent; in cookie
+ * mode there is nothing stored and the browser sends the HttpOnly cookie. With
+ * neither (never signed in here) there is nothing to try.
+ */
+export async function rotateTokens(): Promise<boolean> {
   const before = getRefreshToken()
-  if (!before) return false
+  if (!before && !hasCookieSession()) return false
 
   rotating ??= (async () => {
     try {
       const res = await fetch(`${config.apiBaseUrl}/auth/refresh`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: before }),
+        body: JSON.stringify(before ? { refresh_token: before } : {}),
       })
       if (!res.ok) {
         // Only an auth refusal means the session is over. A 429 from the shared
@@ -66,6 +73,7 @@ async function rotateTokens(): Promise<boolean> {
         // also wipe the winning tab's freshly stored pair.
         if (res.status === 401 || res.status === 403) {
           if (getRefreshToken() === before) clearToken()
+          markCookieSession(false)
           onAuthLost?.()
         }
         return false
@@ -76,6 +84,7 @@ async function rotateTokens(): Promise<boolean> {
       // writing then would resurrect the session we were told to end.
       if (getRefreshToken() !== before) return false
       setTokens(parsed.data)
+      markCookieSession(!parsed.data.refresh_token)
       return true
     } catch {
       return false // network blip: keep the tokens, let the caller fail
@@ -92,8 +101,30 @@ async function rotateTokens(): Promise<boolean> {
   return !!after && after !== before
 }
 
+/**
+ * Whether this browser is believed to hold a refresh cookie. The cookie is
+ * HttpOnly, so it cannot be read; it is remembered from the last sign-in that
+ * answered with an empty body token, and forgotten on refusal or sign-out.
+ */
+const COOKIE_FLAG = 'ipc_cookie_session'
+function hasCookieSession(): boolean {
+  try {
+    return localStorage.getItem(COOKIE_FLAG) === '1'
+  } catch {
+    return false
+  }
+}
+export function markCookieSession(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(COOKIE_FLAG, '1')
+    else localStorage.removeItem(COOKIE_FLAG)
+  } catch {
+    /* no-op */
+  }
+}
+
 interface CallOptions<TOut extends z.ZodTypeAny> {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   /** Contract the response is parsed against. */
   responseSchema: TOut
@@ -116,6 +147,9 @@ export async function callApi<TOut extends z.ZodTypeAny>(
     const token = getToken()
     const init: RequestInit = {
       method,
+      // The refresh cookie lives on /auth; sending credentials there is what
+      // makes cookie mode work, and it is harmless elsewhere.
+      credentials: path.startsWith('/auth/') ? 'include' : 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -141,13 +175,21 @@ export async function callApi<TOut extends z.ZodTypeAny>(
   }
 
   const json: unknown = await res.json().catch(() => ({}))
+  // Every response carries X-Request-Id; failures also set X-Correlation-Id
+  // (the same value). Either one is what support greps the logs for.
+  const correlationId =
+    res.headers.get('X-Correlation-Id') ??
+    res.headers.get('X-Request-Id') ??
+    (typeof json === 'object' && json && 'correlation_id' in json
+      ? String((json as { correlation_id: unknown }).correlation_id)
+      : null)
 
   if (!res.ok) {
     const msg =
       typeof json === 'object' && json && 'error' in json
         ? String((json as { error: unknown }).error)
         : 'Request failed.'
-    throw new ApiError(res.status, msg)
+    throw new ApiError(res.status, msg, correlationId)
   }
 
   return opts.responseSchema.parse(json)

@@ -1,6 +1,9 @@
 import { useEffect, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useAuth } from './AuthProvider'
+import { Button } from '../ui/button'
+import { Skeleton } from '../ui/skeleton'
+import { ErrorState } from '../ui/states'
 
 /**
  * Blocks children until a studio session exists; bounces to /login otherwise.
@@ -14,17 +17,53 @@ export function RequireAuth({
   children: ReactNode
   allowExpired?: boolean
 }) {
-  const { session, loading } = useAuth()
+  const { session, loading, bootError, retry } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!loading && !session) void navigate({ to: '/login' })
-  }, [loading, session, navigate])
+    if (!loading && !session && !bootError) void navigate({ to: '/login' })
+  }, [loading, session, bootError, navigate])
 
-  if (loading) return <Centered>Loading…</Centered>
+  if (loading) return <BootSkeleton />
+  if (bootError && !session) {
+    return (
+      <Centered>
+        <ErrorState message={bootError} onRetry={() => void retry()} />
+      </Centered>
+    )
+  }
   if (!session) return null
   if (session.plan_gate === 'expired' && !allowExpired) return <PlanExpired />
   return <>{children}</>
+}
+
+/** The shell's silhouette while the session resolves, so nothing jumps on arrival. */
+function BootSkeleton() {
+  return (
+    <div className="flex h-screen bg-background" role="status" aria-label="Loading">
+      <div className="hidden w-64 shrink-0 flex-col gap-2 border-r border-border bg-sidebar p-4 md:flex">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="mt-6 h-3 w-12" />
+        {Array.from({ length: 7 }, (_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-14 items-center gap-3 border-b border-border bg-card px-4">
+          <Skeleton className="ml-auto h-8 w-64" />
+        </div>
+        <div className="flex flex-col gap-4 p-6">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-3 w-80" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-20 w-full" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function PlanExpired() {
@@ -36,30 +75,14 @@ function PlanExpired() {
         <p className="mt-1 text-sm text-muted-foreground">
           Your studio’s plan has lapsed. Renew to regain access.
         </p>
-        <button
-          type="button"
-          onClick={() => void navigate({ to: '/settings/subscription' })}
-          className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-        >
+        <Button className="mt-4" onClick={() => void navigate({ to: '/settings/subscription' })}>
           Renew plan
-        </button>
+        </Button>
       </div>
     </Centered>
   )
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        minHeight: '60vh',
-        display: 'grid',
-        placeItems: 'center',
-        fontFamily: 'system-ui',
-        textAlign: 'center',
-      }}
-    >
-      {children}
-    </div>
-  )
+  return <div className="grid min-h-[60vh] place-items-center bg-background text-center">{children}</div>
 }

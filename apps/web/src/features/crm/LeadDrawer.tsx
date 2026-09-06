@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, Flame, Mail, Phone } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import {
+  Archive,
+  ArchiveRestore,
+  Check,
+  Copy,
+  Flame,
+  FolderPlus,
+  Mail,
+  MessageCircle,
+  Phone,
+  Repeat,
+  Square,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import type { CrmLead, LeadStatus } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -7,8 +20,21 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
-import { useLeads, useUpdateLead } from './api'
-import { STAGES, dueBucket } from './leads'
+import { useAccess } from '@/shared/auth/useAccess'
+import { useMembers } from '@/features/allocation/api'
+import { useClients } from '@/features/clients/api'
+import {
+  useCadences,
+  useConvertLead,
+  useLeadCadence,
+  useLeadEvents,
+  useSendTemplate,
+  useStartCadence,
+  useStopCadence,
+  useTemplates,
+  useUpdateLead,
+} from './api'
+import { STAGES, STAGE_LABEL, dueBucket } from './leads'
 
 /** A datetime-local value from an ISO string, in the viewer's own timezone. */
 function toLocalInput(iso: string | null): string {
@@ -25,6 +51,8 @@ const QUICK_DATES: ReadonlyArray<{ label: string; days: number }> = [
   { label: 'Next week', days: 7 },
 ]
 
+const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
 /**
  * The whole lead on one surface: who they are, where the conversation is, and
  * when it continues. Everything saves on the spot — this is opened between
@@ -32,7 +60,12 @@ const QUICK_DATES: ReadonlyArray<{ label: string; days: number }> = [
  */
 export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => void }) {
   const update = useUpdateLead('Lead updated')
-  const { data: leads } = useLeads()
+  const send = useSendTemplate()
+  const { data: members } = useMembers()
+  const { data: templates } = useTemplates()
+  const { data: events } = useLeadEvents(lead.id)
+  const access = useAccess()
+  const canEdit = access.hasAction('crm', 'edit')
   const [notes, setNotes] = useState(lead.notes ?? '')
   const [followUp, setFollowUp] = useState(toLocalInput(lead.follow_up_at))
   const [copied, setCopied] = useState(false)
@@ -44,11 +77,29 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
     setFollowUp(toLocalInput(lead.follow_up_at))
   }, [lead.id, lead.notes, lead.follow_up_at])
 
-  const owners = [...new Map((leads ?? []).flatMap((l) => (l.assigned_to ? [[l.assigned_to, l.assignee_name ?? 'Unknown']] as const : []))).entries()]
-  const patch = (p: Parameters<typeof update.mutate>[0]['patch']) =>
-    update.mutate({ id: lead.id, patch: p })
-
+  const patch = (p: Parameters<typeof update.mutate>[0]['patch']) => update.mutate({ id: lead.id, patch: p })
   const bucket = dueBucket(lead, new Date())
+  const sendable = (templates ?? []).filter((t) => t.kind !== 'note')
+
+  function sendTemplate(templateId: string, channel: 'whatsapp' | 'email') {
+    send.mutate(
+      { leadId: lead.id, template_id: templateId, channel },
+      {
+        onSuccess: (r) => {
+          if (r.delivery === 'api') {
+            toast.success('Sent on WhatsApp')
+            return
+          }
+          if (!r.url) return
+          const w = window.open(r.url, '_blank', 'noopener')
+          if (!w) {
+            void navigator.clipboard.writeText(r.rendered)
+            toast.message('Pop-up blocked — the message is on your clipboard.')
+          }
+        },
+      },
+    )
+  }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -57,14 +108,20 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
         description={`${lead.source} · added ${new Date(lead.created_at).toLocaleDateString('en-IN')}`}
         className="max-w-xl"
       >
-        <div className="flex flex-col gap-5">
+        <div className="flex max-h-[75vh] flex-col gap-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge tone={lead.is_hot ? 'danger' : 'neutral'}>
-              {lead.is_hot ? 'Hot lead' : 'Normal'}
-            </StatusBadge>
+            <StatusBadge tone={lead.is_hot ? 'danger' : 'neutral'}>{lead.is_hot ? 'Hot lead' : 'Normal'}</StatusBadge>
+            {lead.is_archived && <StatusBadge tone="neutral">Archived</StatusBadge>}
             {bucket === 'overdue' && <StatusBadge tone="danger">Follow-up overdue</StatusBadge>}
             {bucket === 'today' && <StatusBadge tone="warning">Due today</StatusBadge>}
             {lead.last_contacted_at === null && <StatusBadge tone="warning">Never contacted</StatusBadge>}
+            {lead.converted_project_id && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/projects/$id" params={{ id: lead.converted_project_id }}>
+                  Open project
+                </Link>
+              </Button>
+            )}
           </div>
 
           {/* Reaching the person is the point of the screen, so it comes first. */}
@@ -96,120 +153,330 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                 </a>
               </Button>
             )}
-            <Button
-              variant={lead.is_hot ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => patch({ is_hot: !lead.is_hot })}
-            >
-              <Flame /> {lead.is_hot ? 'Hot' : 'Mark hot'}
-            </Button>
+            {canEdit && (
+              <Button variant={lead.is_hot ? 'default' : 'outline'} size="sm" onClick={() => patch({ is_hot: !lead.is_hot })}>
+                <Flame /> {lead.is_hot ? 'Hot' : 'Mark hot'}
+              </Button>
+            )}
           </div>
+
+          {canEdit && sendable.length > 0 && (
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Send a template</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Sends from the studio's WhatsApp when connected, otherwise opens your own app with the message filled in. Either way the lead is marked contacted.
+              </p>
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {sendable.map((t) => (
+                  <li key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                    {lead.phone && (
+                      <Button size="sm" variant="outline" disabled={send.isPending} onClick={() => sendTemplate(t.id, 'whatsapp')}>
+                        <MessageCircle /> WhatsApp
+                      </Button>
+                    )}
+                    {lead.email && (
+                      <Button size="sm" variant="outline" disabled={send.isPending} onClick={() => sendTemplate(t.id, 'email')}>
+                        <Mail /> Email
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label>Stage</Label>
-              <Select
-                value={lead.status}
-                onChange={(e) => patch({ status: e.target.value as LeadStatus })}
-                disabled={update.isPending}
-              >
+              <Label htmlFor="lead-stage">Stage</Label>
+              <Select id="lead-stage" value={lead.status} onChange={(e) => {
+                const v = e.target.value as LeadStatus
+                if (v === 'lost') {
+                  const reason = window.prompt('Why lost? (3+ chars, will be saved)')
+                  if (!reason || reason.trim().length < 3) { e.target.value = lead.status; return }
+                  patch({ status: v, lost_reason: reason.trim() })
+                } else patch({ status: v })
+              }} disabled={update.isPending || !canEdit}>
                 {STAGES.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>
                 ))}
               </Select>
+              {lead.lost_reason && <p className="text-xs text-muted-foreground">Lost: {lead.lost_reason}</p>}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Owner</Label>
-              <Select
-                value={lead.assigned_to ?? ''}
-                onChange={(e) => patch({ assigned_to: e.target.value || null })}
-                disabled={update.isPending}
-              >
+              <Label htmlFor="lead-owner">Owner</Label>
+              <Select id="lead-owner" value={lead.assigned_to ?? ''} onChange={(e) => patch({ assigned_to: e.target.value || null })} disabled={update.isPending || !canEdit}>
                 <option value="">Unassigned</option>
-                {owners.map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
+                {(members ?? []).map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
                   </option>
                 ))}
               </Select>
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-value">Deal value (₹)</Label>
+              <Input id="lead-value" type="number" min={0} defaultValue={lead.deal_value ?? ''} placeholder="0" disabled={!canEdit}
+                onBlur={(e)=>{ const v = e.target.value ? Number(e.target.value) : null; if (v !== lead.deal_value) patch({ deal_value: v })}} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-prob">Probability %</Label>
+              <Input id="lead-prob" type="number" min={0} max={100} defaultValue={lead.probability ?? ''} placeholder="auto" disabled={!canEdit}
+                onBlur={(e)=>{ const v = e.target.value === '' ? null : Number(e.target.value); if (v !== lead.probability) patch({ probability: v })}} />
+            </div>
+          </div>
+          {lead.sla_due_at && !['converted','lost'].includes(lead.status) && (
+            <p className={`text-xs font-medium ${new Date(lead.sla_due_at).getTime() < Date.now() ? 'text-destructive' : 'text-muted-foreground'}`}>
+              SLA {new Date(lead.sla_due_at).getTime() < Date.now() ? 'breached' : 'due'} {when.format(new Date(lead.sla_due_at))} · {lead.probability ?? 10}% · ₹{lead.deal_value ?? 0}
+            </p>
+          )}
 
           <div className="flex flex-col gap-1.5">
-            <Label>Next follow-up</Label>
+            <Label htmlFor="lead-followup">Next follow-up</Label>
             <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="datetime-local"
-                value={followUp}
-                onChange={(e) => setFollowUp(e.target.value)}
-                className="w-56"
-              />
+              <Input id="lead-followup" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="w-56" disabled={!canEdit} />
               <Button
                 size="sm"
-                disabled={update.isPending || followUp === toLocalInput(lead.follow_up_at)}
-                onClick={() =>
-                  patch({ follow_up_at: followUp ? new Date(followUp).toISOString() : null })
-                }
+                disabled={update.isPending || !canEdit || followUp === toLocalInput(lead.follow_up_at)}
+                onClick={() => patch({ follow_up_at: followUp ? new Date(followUp).toISOString() : null })}
               >
                 Set
               </Button>
-              {lead.follow_up_at && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => patch({ follow_up_at: null })}
-                  disabled={update.isPending}
-                >
+              {lead.follow_up_at && canEdit && (
+                <Button size="sm" variant="ghost" onClick={() => patch({ follow_up_at: null })} disabled={update.isPending}>
                   Clear
                 </Button>
               )}
             </div>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {QUICK_DATES.map((q) => (
-                <button
-                  key={q.label}
-                  type="button"
-                  onClick={() => {
-                    const at = new Date()
-                    at.setDate(at.getDate() + q.days)
-                    at.setHours(10, 0, 0, 0)
-                    patch({ follow_up_at: at.toISOString() })
-                  }}
-                  className={cn(
-                    'rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground',
-                    'transition-colors hover:border-primary/40 hover:text-foreground',
-                  )}
-                >
-                  {q.label}
-                </button>
-              ))}
-            </div>
+            {canEdit && (
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {QUICK_DATES.map((q) => (
+                  <button
+                    key={q.label}
+                    type="button"
+                    onClick={() => {
+                      const at = new Date()
+                      at.setDate(at.getDate() + q.days)
+                      at.setHours(10, 0, 0, 0)
+                      patch({ follow_up_at: at.toISOString() })
+                    }}
+                    className={cn(
+                      'rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground',
+                      'transition-colors hover:border-primary/40 hover:text-foreground',
+                    )}
+                  >
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
+          {canEdit && <CadencePanel lead={lead} />}
+
           <div className="flex flex-col gap-1.5">
-            <Label>Notes</Label>
+            <Label htmlFor="lead-notes">Notes</Label>
             <textarea
+              id="lead-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={4}
+              disabled={!canEdit}
               placeholder="What was said, what they asked for, what you promised."
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={update.isPending || notes === (lead.notes ?? '')}
-                onClick={() => patch({ notes })}
-              >
-                Save notes
+            {canEdit && (
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" disabled={update.isPending || notes === (lead.notes ?? '')} onClick={() => patch({ notes })}>
+                  Save notes
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {canEdit && !lead.converted_project_id && lead.status !== 'lost' && <ConvertPanel lead={lead} onDone={onClose} />}
+
+          {events && events.length > 0 && (
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">History</p>
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {events.slice(0, 12).map((e) => (
+                  <li key={e.id} className="text-xs text-muted-foreground">
+                    <span className="tabular-nums">{when.format(new Date(e.created_at))}</span>
+                    {' — '}
+                    {e.to_status ? `${e.from_status ? STAGE_LABEL[e.from_status] : 'Arrived'} → ${STAGE_LABEL[e.to_status]}` : (e.note ?? 'note')}
+                    {e.to_status && e.note ? ` · ${e.note}` : ''}
+                    {e.actor_name ? ` · ${e.actor_name}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="flex justify-end border-t border-border pt-3">
+              <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => patch({ is_archived: !lead.is_archived })}>
+                {lead.is_archived ? (
+                  <>
+                    <ArchiveRestore /> Restore to inbox
+                  </>
+                ) : (
+                  <>
+                    <Archive /> Archive
+                  </>
+                )}
               </Button>
             </div>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The follow-up sequence this lead is on, or the one to put it on. */
+function CadencePanel({ lead }: { lead: CrmLead }) {
+  const { data: current } = useLeadCadence(lead.id)
+  const { data: cadences } = useCadences()
+  const start = useStartCadence()
+  const stop = useStopCadence()
+  const [pick, setPick] = useState('')
+  const options = (cadences ?? []).filter((c) => c.is_active && c.steps.length > 0)
+  const closed = lead.status === 'converted' || lead.status === 'lost'
+  const running = current && !current.completed_at && !current.stopped_at
+
+  if (options.length === 0 && !current) return null
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <Repeat className="size-3.5" /> Cadence
+      </p>
+      {running ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{current.cadence_name}</span>
+          <StatusBadge tone="info">
+            step {current.step_no} of {current.total_steps}
+          </StatusBadge>
+          {current.next_at && <span className="text-muted-foreground">next {when.format(new Date(current.next_at))}</span>}
+          <Button size="sm" variant="ghost" className="ml-auto" disabled={stop.isPending} onClick={() => stop.mutate(lead.id)}>
+            <Square /> Stop
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {current && (
+            <span className="text-xs text-muted-foreground">
+              {current.cadence_name} {current.completed_at ? 'completed' : 'stopped'}.
+            </span>
+          )}
+          {!closed && options.length > 0 && (
+            <>
+              <Select value={pick} onChange={(e) => setPick(e.target.value)} className="w-56" aria-label="Cadence">
+                <option value="">Put on a cadence…</option>
+                {options.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {c.steps.length} step{c.steps.length === 1 ? '' : 's'}
+                  </option>
+                ))}
+              </Select>
+              <Button size="sm" disabled={!pick || start.isPending} onClick={() => start.mutate({ leadId: lead.id, cadence_id: pick }, { onSuccess: () => setPick('') })}>
+                Start
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Won it? Make it a project, with the client it belongs to. */
+function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
+  const convert = useConvertLead()
+  const { data: clients } = useClients()
+  const [open, setOpen] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [name, setName] = useState(`${lead.name ?? 'New'} project`)
+  const [cost, setCost] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  // A client with this number is very likely the same person.
+  const digits = (lead.phone ?? '').replace(/\D/g, '').slice(-10)
+  const match = digits ? (clients ?? []).find((c) => (c.phone ?? '').replace(/\D/g, '').endsWith(digits)) : undefined
+
+  useEffect(() => {
+    if (match && !clientId) setClientId(match.id)
+  }, [match, clientId])
+
+  if (!open) {
+    return (
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          <FolderPlus /> Convert to project
+        </Button>
+      </div>
+    )
+  }
+
+  function submit() {
+    setError(null)
+    const amount = Number(cost || 0)
+    if (!name.trim()) return setError('Name the project.')
+    if (Number.isNaN(amount) || amount < 0) return setError('Package cost must be a number.')
+    convert.mutate(
+      {
+        leadId: lead.id,
+        ...(clientId ? { client_id: clientId } : {}),
+        project: { name: name.trim(), package_cost: amount, status: 'active' },
+      },
+      { onSuccess: () => onDone() },
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <FolderPlus className="size-3.5" /> Convert to project
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        Marks the lead won and creates the project. {match ? 'A client with this number already exists.' : 'A client is created from the lead unless you pick one.'}
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <Label htmlFor="conv-client">Client</Label>
+          <Select id="conv-client" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">Create “{lead.name ?? lead.phone ?? 'New client'}”</option>
+            {(clients ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.phone ? ` · ${c.phone}` : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="conv-name">Project name</Label>
+          <Input id="conv-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!error && !name.trim()} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="conv-cost">Package (₹)</Label>
+          <Input id="conv-cost" type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" />
+        </div>
+      </div>
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+        <Button size="sm" disabled={convert.isPending} onClick={submit}>
+          {convert.isPending ? 'Creating…' : 'Create project'}
+        </Button>
+      </div>
+    </div>
   )
 }

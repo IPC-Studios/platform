@@ -3,7 +3,6 @@ import { Bell, Check } from 'lucide-react'
 import { notification, z } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
-import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
@@ -31,12 +30,9 @@ function useMarkRead() {
   })
 }
 
+/** Every member has alerts of their own; there is no module to gate this on. */
 export function NotificationsPage() {
-  return (
-    <AuthedPage module="crm">
-      <Notifications />
-    </AuthedPage>
-  )
+  return <Notifications />
 }
 
 function Notifications() {
