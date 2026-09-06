@@ -343,6 +343,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/views')
     return { ...crmViewsFx[0], id: uid(0xcb), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/views/')) return {}
+  if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
   if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24 }
   if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, ...(body as Record<string, unknown>) }
   if (method === 'GET' && path === '/crm/cadences') return crmCadencesFx
@@ -1588,8 +1589,10 @@ const auditFx = {
 const crmViewsFx = [
   {
     id: uid(0xca),
+    user_id: uid(1),
     name: 'My overdue',
     query: { search: '', filters: ['overdue'], status: 'all', assignee: 'all' },
+    visibility: 'private',
     created_at: '2026-08-01T09:00:00Z',
   },
 ]

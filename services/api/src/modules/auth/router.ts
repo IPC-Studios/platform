@@ -28,6 +28,7 @@ import { audit } from '../../lib/audit'
 import { isDevLike } from '../../lib/env'
 import { issueToken, hashPassword, verifyPassword, TTL_SECONDS } from '../../lib/auth-token'
 import { clearRefreshCookie, cookieMode, readRefreshCookie, setRefreshCookie } from '../../lib/session-cookie'
+import { originAllowed } from '../../lib/allowed-origins'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
 
 /**
@@ -339,6 +340,13 @@ export const authRouter = new Hono<AppEnv>()
   .post('/refresh', async (c) => {
     const parsed = refreshRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Missing refresh token.')
+    // A cookie-presented token arrives without the page's involvement, so a
+    // forged cross-site POST must not spend it: browsers always send Origin
+    // on POST, and only allowlisted origins may rotate by cookie.
+    const fromCookie = parsed.data.refresh_token == null && readRefreshCookie(c) != null
+    if (fromCookie && !originAllowed(c.env, c.req.header('origin'))) {
+      fail(403, 'Your session has expired. Please sign in again.')
+    }
     // Body first (the client that holds one), else the HttpOnly cookie.
     const presented = parsed.data.refresh_token ?? readRefreshCookie(c)
     if (!presented) fail(422, 'Missing refresh token.')

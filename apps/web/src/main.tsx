@@ -5,6 +5,8 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import { RouterProvider } from '@tanstack/react-router'
 import { Toaster, toast } from 'sonner'
 import { AuthProvider } from '@/shared/auth/AuthProvider'
+import { MOCK_ENABLED } from '@/shared/dev/mock'
+import { installClientErrorReporting } from '@/shared/error/report'
 import { ThemeProvider } from '@/shared/theme/ThemeProvider'
 import { ConfirmProvider } from '@/shared/ui/confirm'
 import { router } from '@/app/router'
@@ -19,6 +21,9 @@ const queryClient = new QueryClient({
     queries: { retry: import.meta.env.DEV ? false : 2, refetchOnWindowFocus: false },
   },
 })
+
+// The mock preview has no backend to receive reports.
+if (!MOCK_ENABLED) installClientErrorReporting()
 
 const el = document.getElementById('root')
 if (!el) throw new Error('#root not found')

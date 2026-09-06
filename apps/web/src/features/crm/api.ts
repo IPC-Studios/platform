@@ -45,6 +45,7 @@ import {
   type UpdateCrmSettingsRequest,
   type UpdateDistributionRequest,
   type UpdateLeadRequest,
+  type UpdateSavedViewRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -305,6 +306,14 @@ export function useSaveView() {
     (input: CreateSavedViewRequest) =>
       callApi('/crm/views', { method: 'POST', body: input, responseSchema: savedView }),
     'View saved',
+  )
+}
+
+export function useUpdateView() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateSavedViewRequest }) =>
+      callApi(`/crm/views/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'View updated',
   )
 }
 

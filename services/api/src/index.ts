@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { allowedOrigins, isProduction } from './lib/allowed-origins'
 import type { AppEnv } from './context'
 import { errorBoundary } from './middleware/errors'
 import { requestId } from './middleware/request-id'
@@ -42,12 +43,8 @@ app.use('*', securityHeaders)
 app.use('*', errorBoundary)
 // CORS from an env allowlist. Fail-closed in production.
 app.use('*', (c, next) => {
-  const stripSlash = (s: string) => s.replace(/\/+$/, '')
-  const allow = (c.env.ALLOWED_ORIGINS ?? '')
-    .split(',')
-    .map((o) => stripSlash(o.trim()))
-    .filter(Boolean)
-  const isProd = (c.env.ENVIRONMENT ?? '') === 'production'
+  const allow = allowedOrigins(c.env)
+  const isProd = isProduction(c.env)
   if (allow.includes('*') && isProd) {
     console.warn('ALLOWED_ORIGINS contains * in production - denying')
   }
@@ -59,7 +56,7 @@ app.use('*', (c, next) => {
       if (allow.includes('*')) {
         return isProd ? '' : origin || '*'
       }
-      return allow.includes(stripSlash(origin ?? '')) ? origin : ''
+      return allow.includes((origin ?? '').replace(/\/+$/, '')) ? origin : ''
     },
     allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
@@ -100,6 +97,8 @@ app.use('/auth/change-password', rateLimit({ windowMs: 60_000, limit: 10 }))
 app.use('/public/*', rateLimit({ windowMs: 60_000, limit: 30 }))
 app.use('/webhooks/*', rateLimit({ windowMs: 60_000, limit: 60 }))
 app.use('/health', rateLimit({ windowMs: 60_000, limit: 60 }))
+// Crash reports are public by necessity; keep the abuse ceiling low and explicit.
+app.use('/health/client-errors', rateLimit({ windowMs: 60_000, limit: 20 }))
 app.use('/cron/reminders', rateLimit({ windowMs: 60_000, limit: 10 }))
 
 // ── Routers ───────────────────────────────────────────────────
