@@ -7,6 +7,7 @@ import { Button } from '@/shared/ui/button'
 import { cn } from '@/shared/ui/cn'
 import { useDirectory } from '@/features/team/api'
 import { useDistribution, useSavedViews } from './api'
+import { isOpen } from './leads'
 
 interface ChecklistItem {
   title: string
@@ -48,9 +49,7 @@ export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead
     {
       title: 'Give every open lead an owner',
       where: 'Lead drawer → Owner',
-      done:
-        leads.length > 0 &&
-        !leads.some((l) => l.assigned_to === null && l.status !== 'converted' && l.status !== 'lost'),
+      done: leads.length > 0 && !leads.some((l) => l.assigned_to === null && isOpen(l)),
     },
     {
       title: 'Contact a lead',

@@ -6,12 +6,11 @@ import { SkeletonTiles } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { StatCard } from '@/shared/ui/stat-card'
 import { ErrorState } from '@/shared/ui/states'
-import { useCrmStats } from '../api'
-import { STAGE_LABEL } from '../leads'
+import { formatINR } from '@/shared/ui/format'
+import { useCrmStats, useForecast } from '../api'
+import { STAGES } from '../leads'
 import { DateRange, daysBack } from './DateRange'
 import { exportLeadsCsv } from './shared'
-
-const STAGE_ORDER = ['new', 'contacted', 'qualified', 'proposal_sent', 'converted', 'lost'] as const
 
 export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
   const [range, setRange] = useState<CrmStatsQuery>(() => daysBack(29))
@@ -45,7 +44,7 @@ export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
               <CardContent className="p-5">
                 <p className="font-medium">Pipeline by stage</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Every open and closed lead right now.</p>
-                <Bars rows={STAGE_ORDER.map((k) => [STAGE_LABEL[k], data.byStatus[k] ?? 0])} />
+                <Bars rows={STAGES.map((s) => [s.label, data.byStatus[s.key] ?? 0])} />
               </CardContent>
             </Card>
             <Card>
@@ -69,6 +68,7 @@ export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
                 </dl>
               </CardContent>
             </Card>
+            <ForecastCard range={range} />
             <Card>
               <CardContent className="p-5">
                 <p className="font-medium">Export</p>
@@ -85,6 +85,44 @@ export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
   )
 }
 
+/** Σ value × probability over the deals expected to close in the range. */
+function ForecastCard({ range }: { range: CrmStatsQuery }) {
+  const { data, isLoading, isError, error, refetch } = useForecast(range)
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <p className="font-medium">Forecast</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Deals expected to close in the range, weighted by their probability.</p>
+        {isLoading ? (
+          <SkeletonTiles count={2} />
+        ) : isError || !data ? (
+          <ErrorState error={error} onRetry={() => void refetch()} />
+        ) : (
+          <>
+            <dl className="mt-3 grid grid-cols-3 gap-3 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">Weighted</dt>
+                <dd className="text-xl font-semibold tabular-nums">{formatINR(data.weighted)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Won</dt>
+                <dd className="text-xl font-semibold tabular-nums text-success">{formatINR(data.won_value)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Open</dt>
+                <dd className="text-xl font-semibold tabular-nums">{formatINR(data.open_value)}</dd>
+              </div>
+            </dl>
+            {data.by_stage.length > 0 && (
+              <Bars rows={data.by_stage.map((s) => [s.name, Math.round(s.weighted)])} money />
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
     <div>
@@ -94,7 +132,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: str
   )
 }
 
-function Bars({ rows }: { rows: ReadonlyArray<readonly [string, number]> }) {
+function Bars({ rows, money = false }: { rows: ReadonlyArray<readonly [string, number]>; money?: boolean }) {
   const max = Math.max(1, ...rows.map(([, v]) => v))
   return (
     <div className="mt-3 flex flex-col gap-2">
@@ -104,7 +142,7 @@ function Bars({ rows }: { rows: ReadonlyArray<readonly [string, number]> }) {
           <div className="h-2 flex-1 rounded-full bg-muted" role="img" aria-label={`${label}: ${value}`}>
             <div className="h-2 rounded-full bg-primary transition-[width]" style={{ width: `${Math.round((value / max) * 100)}%` }} />
           </div>
-          <span className="w-8 text-right text-xs tabular-nums">{value}</span>
+          <span className={`${money ? 'w-20' : 'w-8'} text-right text-xs tabular-nums`}>{money ? formatINR(value) : value}</span>
         </div>
       ))}
     </div>

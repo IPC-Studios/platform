@@ -256,8 +256,28 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
+  if (method === 'GET' && path === '/crm/pipelines') return crmPipelinesFx
+  if (method === 'POST' && path === '/crm/pipelines') return { ...crmPipelinesFx[0], id: uid(0xd8), name: String((body as { name?: string }).name ?? 'Pipeline'), is_default: false }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/pipelines/') && !path.endsWith('/stages')) return {}
+  if (method === 'POST' && /^\/crm\/pipelines\/[^/]+\/stages$/.test(path)) return crmPipelinesFx[0]
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/stages/')) return {}
+  if (method === 'POST' && /^\/crm\/leads\/[^/]+\/stage$/.test(path))
+    return { status: 'contacted', stage_id: String((body as { stage_id?: string }).stage_id ?? STAGE.contacted) }
+  if (method === 'GET' && path === '/crm/lost-reasons') return crmLostReasonsFx
+  if (method === 'POST' && path === '/crm/lost-reasons') return { id: uid(0xd9), label: String((body as { label?: string }).label ?? 'Other'), position: 9, is_active: true }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/lost-reasons/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/contacts/')) return crmContactsFx[0]
+  if (method === 'GET' && path.startsWith('/crm/contacts')) return crmContactsFx
+  if (method === 'POST' && path === '/crm/contacts') return { ...crmContactsFx[0], id: uid(0xda), ...(body as Record<string, unknown>) }
+  if (method === 'PATCH' && path.startsWith('/crm/contacts/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/companies/')) return crmCompaniesFx[0]
+  if (method === 'GET' && path.startsWith('/crm/companies')) return crmCompaniesFx
+  if (method === 'POST' && path === '/crm/companies') return { ...crmCompaniesFx[0], id: uid(0xdb), ...(body as Record<string, unknown>) }
+  if (method === 'PATCH' && path.startsWith('/crm/companies/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/forecast')) return crmForecastFx
+  if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
   if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
-    return atStage(leads, 'partial')
+    return atStage(dealLeads(), 'partial')
   if (method === 'GET' && /^\/crm\/leads\/[^/]+\/events$/.test(path)) return crmEventsFx
   if (method === 'POST' && /^\/crm\/leads\/[^/]+\/send-template$/.test(path))
     return { url: 'https://wa.me/919876543210?text=Hi', rendered: 'Hi', delivery: 'link' }
@@ -315,7 +335,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/sources/')) return {}
   if (method === 'POST' && path === '/crm/leads')
     return {
-      ...leads[3],
+      ...dealLeads()[3],
       id: uid(0xbf),
       ...(body as Record<string, unknown>),
       status: 'new',
@@ -544,7 +564,31 @@ const daysFromNow = (n: number, hour = 10) => {
   return at.toISOString()
 }
 
-const leads = [
+const COMPANY = { verma: uid(0xde) }
+const PIPELINE = uid(0xd0)
+const STAGE = { new: uid(0xd1), contacted: uid(0xd2), qualified: uid(0xd3), proposal: uid(0xd4), won: uid(0xd5), lost: uid(0xd6) }
+/** Deal fields for the fixtures above: a stage per status, a value on most. */
+const STAGE_FOR: Record<string, string> = {
+  new: STAGE.new,
+  contacted: STAGE.contacted,
+  qualified: STAGE.qualified,
+  proposal_sent: STAGE.proposal,
+  converted: STAGE.won,
+  lost: STAGE.lost,
+}
+const withDeal = <T extends { status: string; name: string | null }>(l: T, i: number) => ({
+  ...l,
+  pipeline_id: PIPELINE,
+  stage_id: STAGE_FOR[l.status] ?? STAGE.new,
+  deal_value: i % 3 === 2 ? null : 60000 + i * 15000,
+  close_date: i % 2 === 0 ? '2026-10-15' : null,
+  title: i === 0 ? 'December wedding' : null,
+  crm_company_id: i === 1 ? COMPANY.verma : null,
+  crm_company_name: i === 1 ? 'Verma Weddings' : null,
+})
+const dealLeads = () => rawLeads.map(withDeal)
+
+const rawLeads = [
   {
     id: uid(0xb1),
     name: 'Priya & Arjun',
@@ -1138,6 +1182,115 @@ function delv(
   }
 }
 
+
+const stageFx = (id: string, name: string, key: string, position: number, kind: 'open' | 'won' | 'lost', probability_default: number, deal_count: number) => ({
+  id,
+  pipeline_id: PIPELINE,
+  name,
+  key,
+  position,
+  kind,
+  probability_default,
+  wip_limit: key === 'proposal_sent' ? 5 : null,
+  required_fields: key === 'proposal_sent' ? ['deal_value'] : [],
+  deal_count,
+})
+const crmPipelinesFx = [
+  {
+    id: PIPELINE,
+    name: 'Sales',
+    is_default: true,
+    position: 0,
+    created_at: '2026-08-01T09:00:00Z',
+    stages: [
+      stageFx(STAGE.new, 'New', 'new', 0, 'open', 10, 1),
+      stageFx(STAGE.contacted, 'Contacted', 'contacted', 1, 'open', 25, 1),
+      stageFx(STAGE.qualified, 'Qualified', 'qualified', 2, 'open', 50, 1),
+      stageFx(STAGE.proposal, 'Proposal sent', 'proposal_sent', 3, 'open', 75, 0),
+      stageFx(STAGE.won, 'Won', 'converted', 4, 'won', 100, 1),
+      stageFx(STAGE.lost, 'Lost', 'lost', 5, 'lost', 0, 0),
+    ],
+  },
+]
+const crmLostReasonsFx = [
+  { id: uid(0xd7), label: 'Budget', position: 0, is_active: true },
+  { id: uid(0xdc), label: 'Timing', position: 1, is_active: true },
+  { id: uid(0xdd), label: 'Went elsewhere', position: 2, is_active: true },
+]
+const crmCompaniesFx = [
+  {
+    id: COMPANY.verma,
+    name: 'Verma Weddings',
+    domain: 'vermaweddings.in',
+    phone: '9812345678',
+    city: 'Pune',
+    notes: null,
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    is_archived: false,
+    contact_count: 1,
+    deal_count: 1,
+    open_value: 90000,
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]
+const crmContactsFx = [
+  {
+    id: uid(0xdf),
+    name: 'Aanya Sharma',
+    phone: '9876543210',
+    email: 'aanya@example.in',
+    lifecycle: 'lead',
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    source: 'facebook',
+    crm_company_id: null,
+    crm_company_name: null,
+    notes: null,
+    is_archived: false,
+    deal_count: 1,
+    open_deal_count: 1,
+    last_contacted_at: null,
+    created_at: '2026-08-01T09:00:00Z',
+  },
+  {
+    id: uid(0xe1),
+    name: 'Rahul Verma',
+    phone: '9812345678',
+    email: null,
+    lifecycle: 'customer',
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    source: 'referral',
+    crm_company_id: COMPANY.verma,
+    crm_company_name: 'Verma Weddings',
+    notes: 'Repeat client',
+    is_archived: false,
+    deal_count: 2,
+    open_deal_count: 1,
+    last_contacted_at: '2026-08-20T09:00:00Z',
+    created_at: '2026-07-01T09:00:00Z',
+  },
+]
+const crmForecastFx = {
+  from: '2026-08-07',
+  to: '2026-12-05',
+  count: 3,
+  total_value: 330000,
+  weighted: 197500,
+  won_value: 90000,
+  open_value: 240000,
+  by_stage: [
+    { stage_id: STAGE.contacted, name: 'Contacted', kind: 'open', count: 1, total_value: 150000, weighted: 37500 },
+    { stage_id: STAGE.qualified, name: 'Qualified', kind: 'open', count: 1, total_value: 90000, weighted: 45000 },
+    { stage_id: STAGE.won, name: 'Won', kind: 'won', count: 1, total_value: 90000, weighted: 90000 },
+  ],
+  by_owner: [{ user_id: uid(1), name: 'Demo Owner', count: 3, total_value: 330000, weighted: 197500 }],
+  by_month: [
+    { month: '2026-09', count: 2, total_value: 240000, weighted: 82500 },
+    { month: '2026-10', count: 1, total_value: 90000, weighted: 90000 },
+  ],
+}
 
 const crmEventsFx = [
   {

@@ -157,7 +157,7 @@ export const MODULES: Readonly<Record<ModuleKey, ModuleDef>> = {
     key: 'crm',
     label: 'CRM',
     path: '/follow-ups',
-    routePatterns: ['/follow-ups', '/reminders'],
+    routePatterns: ['/follow-ups', '/reminders', '/crm'],
     sensitive: false,
     defaultVisibility: allow(true, true, false),
   },

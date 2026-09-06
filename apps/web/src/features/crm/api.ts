@@ -5,11 +5,15 @@ import {
   bulkPatchResponse,
   bulkUndoResponse,
   cadence,
+  cadenceStartResponse,
   convertLeadRequest,
   convertLeadResponse,
   createAutomationRequest,
   createCadenceRequest,
   createLeadRequest,
+  crmCompany,
+  crmContact,
+  crmForecast,
   crmLead,
   crmSettings,
   crmStats,
@@ -19,9 +23,13 @@ import {
   csvImportPreviewResponse,
   distributionRule,
   duplicateGroup,
+  idResponse,
   leadCadence,
   leadEvent,
+  lostReason,
   mergeLeadsResponse,
+  moveStageResponse,
+  pipeline,
   savedView,
   sendTemplateResponse,
   unmergeLeadsResponse,
@@ -32,19 +40,31 @@ import {
   type ConvertLeadRequest,
   type CreateAutomationRequest,
   type CreateCadenceRequest,
+  type CreateContactRequest,
+  type CreateCrmCompanyRequest,
   type CreateDistributionRequest,
   type CreateLeadRequest,
+  type CreateLostReasonRequest,
+  type CreatePipelineRequest,
   type CreateSavedViewRequest,
+  type CreateStageRequest,
   type CreateTemplateRequest,
   type CrmStatsQuery,
   type CsvImportCommitRequest,
   type MergeLeadsRequest,
+  type MoveStageRequest,
   type SendTemplateRequest,
   type UpdateAutomationRequest,
   type UpdateCadenceRequest,
+  type UpdateContactRequest,
+  type UpdateCrmCompanyRequest,
   type UpdateCrmSettingsRequest,
   type UpdateDistributionRequest,
   type UpdateLeadRequest,
+  type UpdateLostReasonRequest,
+  type UpdatePipelineRequest,
+  type UpdateSavedViewRequest,
+  type UpdateStageRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -249,7 +269,7 @@ export function useImportCommit() {
 export function useAddToRota() {
   return useCrmMutation(
     (input: CreateDistributionRequest) =>
-      callApi('/crm/distribution', { method: 'POST', body: input, responseSchema: z.object({ id: z.string() }) }),
+      callApi('/crm/distribution', { method: 'POST', body: input, responseSchema: idResponse }),
     'Added to the rota',
   )
 }
@@ -308,6 +328,14 @@ export function useSaveView() {
   )
 }
 
+export function useUpdateView() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateSavedViewRequest }) =>
+      callApi(`/crm/views/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'View updated',
+  )
+}
+
 export function useDeleteView() {
   return useCrmMutation((id: string) => callApi(`/crm/views/${id}`, { method: 'DELETE', responseSchema: noContent }))
 }
@@ -336,7 +364,7 @@ export function useCreateCadence() {
       callApi('/crm/cadences', {
         method: 'POST',
         body: createCadenceRequest.parse(input),
-        responseSchema: z.object({ id: z.string() }),
+        responseSchema: idResponse,
       }),
     'Cadence saved',
   )
@@ -370,7 +398,7 @@ export function useStartCadence() {
       callApi(`/crm/leads/${leadId}/cadence`, {
         method: 'POST',
         body: { cadence_id },
-        responseSchema: z.object({ next_at: z.string().nullable() }),
+        responseSchema: cadenceStartResponse,
       }),
     'Cadence started',
   )
@@ -401,4 +429,169 @@ export function useConvertLead() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+}
+
+// ── pipelines & stages ────────────────────────────────────────
+export function usePipelines() {
+  return useCrmQuery(['pipelines'], () => callApi('/crm/pipelines', { responseSchema: pipeline.array() }), 60_000)
+}
+
+export function useCreatePipeline() {
+  return useCrmMutation(
+    (input: CreatePipelineRequest) => callApi('/crm/pipelines', { method: 'POST', body: input, responseSchema: pipeline }),
+    'Pipeline created',
+  )
+}
+
+export function useUpdatePipeline() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdatePipelineRequest }) =>
+      callApi(`/crm/pipelines/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'Pipeline updated',
+  )
+}
+
+export function useDeletePipeline() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/pipelines/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Pipeline deleted',
+  )
+}
+
+export function useCreateStage() {
+  return useCrmMutation(
+    ({ pipelineId, ...body }: CreateStageRequest & { pipelineId: string }) =>
+      callApi(`/crm/pipelines/${pipelineId}/stages`, { method: 'POST', body, responseSchema: pipeline }),
+    'Stage added',
+  )
+}
+
+export function useUpdateStage() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateStageRequest }) =>
+      callApi(`/crm/stages/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'Stage updated',
+  )
+}
+
+export function useReorderStages() {
+  return useCrmMutation(({ pipelineId, stage_ids }: { pipelineId: string; stage_ids: string[] }) =>
+    callApi(`/crm/pipelines/${pipelineId}/stages/reorder`, { method: 'POST', body: { stage_ids }, responseSchema: noContent }),
+  )
+}
+
+export function useDeleteStage() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/stages/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Stage removed',
+  )
+}
+
+/**
+ * The one way a deal moves between stages. The server enforces the stage's
+ * WIP limit and required fields, and a lost stage needs a reason; its 422
+ * message is written for the person and is shown as-is.
+ */
+export function useMoveStage() {
+  return useCrmMutation(({ leadId, ...body }: MoveStageRequest & { leadId: string }) =>
+    callApi(`/crm/leads/${leadId}/stage`, { method: 'POST', body, responseSchema: moveStageResponse }),
+  )
+}
+
+// ── lost reasons ──────────────────────────────────────────────
+export function useLostReasons() {
+  return useCrmQuery(['lost-reasons'], () => callApi('/crm/lost-reasons', { responseSchema: lostReason.array() }), 300_000)
+}
+
+export function useCreateLostReason() {
+  return useCrmMutation(
+    (input: CreateLostReasonRequest) => callApi('/crm/lost-reasons', { method: 'POST', body: input, responseSchema: lostReason }),
+    'Reason added',
+  )
+}
+
+export function useUpdateLostReason() {
+  return useCrmMutation(({ id, patch }: { id: string; patch: UpdateLostReasonRequest }) =>
+    callApi(`/crm/lost-reasons/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+  )
+}
+
+export function useDeleteLostReason() {
+  return useCrmMutation(
+    (id: string) => callApi(`/crm/lost-reasons/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    'Reason removed',
+  )
+}
+
+// ── contacts & companies ──────────────────────────────────────
+export function useContacts(opts: { q?: string; includeArchived?: boolean; companyId?: string } = {}) {
+  const params = new URLSearchParams()
+  if (opts.q) params.set('q', opts.q)
+  if (opts.includeArchived) params.set('include_archived', '1')
+  if (opts.companyId) params.set('crm_company_id', opts.companyId)
+  const qs = params.toString()
+  return useCrmQuery(['contacts', qs], () => callApi(`/crm/contacts${qs ? `?${qs}` : ''}`, { responseSchema: crmContact.array() }), 30_000)
+}
+
+export function useContact(id: string | null) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['crm', 'contact', id],
+    queryFn: () => callApi(`/crm/contacts/${id}`, { responseSchema: crmContact }),
+    enabled: !!session && !!id,
+  })
+}
+
+export function useCreateContact() {
+  return useCrmMutation(
+    (input: CreateContactRequest) => callApi('/crm/contacts', { method: 'POST', body: input, responseSchema: crmContact }),
+    'Contact added',
+  )
+}
+
+export function useUpdateContact() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateContactRequest }) =>
+      callApi(`/crm/contacts/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'Contact updated',
+  )
+}
+
+export function useCrmCompanies(includeArchived = false) {
+  return useCrmQuery(
+    ['companies', includeArchived ? 'all' : 'active'],
+    () => callApi(`/crm/companies${includeArchived ? '?include_archived=1' : ''}`, { responseSchema: crmCompany.array() }),
+    30_000,
+  )
+}
+
+export function useCreateCrmCompany() {
+  return useCrmMutation(
+    (input: CreateCrmCompanyRequest) => callApi('/crm/companies', { method: 'POST', body: input, responseSchema: crmCompany }),
+    'Company added',
+  )
+}
+
+export function useUpdateCrmCompany() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateCrmCompanyRequest }) =>
+      callApi(`/crm/companies/${id}`, { method: 'PATCH', body: patch, responseSchema: noContent }),
+    'Company updated',
+  )
+}
+
+/** Deals on one contact or company, archived included so history is complete. */
+export function useDealsFor(filter: { contactId?: string; companyId?: string }) {
+  const params = new URLSearchParams({ include_archived: '1' })
+  if (filter.contactId) params.set('contact_id', filter.contactId)
+  if (filter.companyId) params.set('crm_company_id', filter.companyId)
+  const qs = params.toString()
+  return useCrmQuery(['leads', 'for', qs], () => callApi(`/crm/leads?${qs}`, { responseSchema: leadsList }), 15_000)
+}
+
+// ── forecast ──────────────────────────────────────────────────
+export function useForecast(range: CrmStatsQuery) {
+  return useCrmQuery(['forecast', range.from, range.to], () =>
+    callApi(`/crm/forecast?from=${range.from}&to=${range.to}`, { responseSchema: crmForecast }),
+  )
 }

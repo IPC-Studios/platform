@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
 import { Archive, Flame } from 'lucide-react'
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import type { CrmLead, LeadStatus, StageKind } from '@ipc/contracts'
+import { stageLabel } from '@ipc/domain'
 import { Card, CardContent } from '@/shared/ui/card'
+import { formatINR } from '@/shared/ui/format'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState } from '@/shared/ui/states'
 import { Avatar } from '@/shared/ui/avatar'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { STAGE_LABEL, dueBucket } from '../leads'
+import { dueBucket } from '../leads'
 
 export const SOURCE_TONE: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
   facebook: 'info',
@@ -24,6 +26,12 @@ export const STAGE_TONE: Record<LeadStatus, 'info' | 'success' | 'warning' | 'ne
   converted: 'success',
   lost: 'danger',
 }
+
+/** The badge tone for a stage by what it means, so a custom stage reads like the legacy one. */
+export const stageTone = (kind: StageKind): 'info' | 'success' | 'danger' => (kind === 'won' ? 'success' : kind === 'lost' ? 'danger' : 'info')
+
+/** The stage a deal shows: its own stage name when the pipeline has one, else the status. */
+export const leadStageLabel = (l: CrmLead): string => stageLabel(l.status, l.stage_name)
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 export const prettyDate = (iso: string) => dayFormat.format(new Date(iso))
@@ -94,9 +102,12 @@ export function LeadTable({
           >
             <div className="flex items-start justify-between gap-2">
               <p className="truncate font-medium">{l.name ?? l.phone ?? 'Unnamed lead'}</p>
-              <StatusBadge tone={STAGE_TONE[l.status]}>{STAGE_LABEL[l.status]}</StatusBadge>
+              <StatusBadge tone={STAGE_TONE[l.status]}>{leadStageLabel(l)}</StatusBadge>
             </div>
-            <p className="mt-1 truncate text-sm text-muted-foreground">{l.phone ?? '—'}</p>
+            <p className="mt-1 truncate text-sm text-muted-foreground">
+              {l.phone ?? '—'}
+              {l.deal_value !== null ? ` · ${formatINR(l.deal_value)}` : ''}
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {l.is_hot && (
                 <StatusBadge tone="danger">
@@ -131,6 +142,7 @@ export function LeadTable({
             <th className="px-4 py-2 font-medium">Stage</th>
             <th className="px-4 py-2 font-medium">Source</th>
             <th className="px-4 py-2 font-medium">Owner</th>
+            <th className="px-4 py-2 text-right font-medium">Value</th>
             <th className="px-4 py-2 font-medium">Follow-up</th>
           </tr>
         </thead>
@@ -157,10 +169,13 @@ export function LeadTable({
                   {l.is_archived && <Archive className="size-3.5 shrink-0 text-muted-foreground" aria-label="Archived" />}
                   {l.name ?? 'Unnamed lead'}
                 </span>
-                <span className="text-xs text-muted-foreground">{l.phone ?? '—'}</span>
+                <span className="text-xs text-muted-foreground">
+                  {l.phone ?? '—'}
+                  {l.crm_company_name ? ` · ${l.crm_company_name}` : ''}
+                </span>
               </td>
               <td className="px-4 py-2">
-                <StatusBadge tone={STAGE_TONE[l.status]}>{STAGE_LABEL[l.status]}</StatusBadge>
+                <StatusBadge tone={STAGE_TONE[l.status]}>{leadStageLabel(l)}</StatusBadge>
               </td>
               <td className="px-4 py-2">
                 <StatusBadge tone={SOURCE_TONE[l.source] ?? 'neutral'}>{l.source}</StatusBadge>
@@ -174,6 +189,9 @@ export function LeadTable({
                 ) : (
                   <span className="text-warning">Unassigned</span>
                 )}
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                {l.deal_value !== null ? formatINR(l.deal_value) : '—'}
               </td>
               <td className="px-4 py-2">
                 <DueBadge lead={l} now={now} />
@@ -232,10 +250,14 @@ export function BoardColumn({
 
 /** Downloads the given leads as a spreadsheet-friendly CSV. */
 export function exportLeadsCsv(leads: readonly CrmLead[], filename = 'leads.csv') {
-  const header = 'name,phone,email,status,source,owner,follow_up_at,created_at\n'
+  const header = 'name,phone,email,stage,status,source,owner,company,title,deal_value,probability,close_date,lost_reason,follow_up_at,created_at\n'
   const rows = leads
     .map((l) =>
-      [l.name ?? '', l.phone ?? '', l.email ?? '', l.status, l.source, l.assignee_name ?? '', l.follow_up_at ?? '', l.created_at]
+      [
+        l.name ?? '', l.phone ?? '', l.email ?? '', leadStageLabel(l), l.status, l.source, l.assignee_name ?? '',
+        l.crm_company_name ?? '', l.title ?? '', l.deal_value ?? '', l.probability ?? '', l.close_date ?? '',
+        l.lost_reason ?? '', l.follow_up_at ?? '', l.created_at,
+      ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(','),
     )

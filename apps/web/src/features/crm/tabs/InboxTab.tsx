@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Download, Search, X } from 'lucide-react'
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import { Bookmark, BookmarkPlus, Download, Globe, Search, Users, X } from 'lucide-react'
+import type { CrmLead, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useAccess } from '@/shared/auth/useAccess'
 import { useBulkPatch, useDeleteView, useSaveView, useSavedViews } from '../api'
+import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
 import { LeadTable, exportLeadsCsv } from './shared'
+
+const SCOPE_LABEL: Record<SavedViewVisibility, string> = { private: 'Only me', team: 'My team', everyone: 'Everyone' }
 
 export function InboxTab({
   leads,
@@ -33,9 +38,15 @@ export function InboxTab({
   const deleteView = useDeleteView()
   const [naming, setNaming] = useState(false)
   const [viewName, setViewName] = useState('')
+  const [viewScope, setViewScope] = useState<SavedViewVisibility>('private')
   const [dismissed, setDismissed] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [losing, setLosing] = useState(false)
   const bulk = useBulkPatch()
+  const { session } = useAuth()
+  const access = useAccess()
+  const canShare = access.hasAction('crm', 'edit')
+  const myId = session?.user_id ?? null
 
   // Views saved before they lived on the API were in this browser only. Push
   // them up once, so nothing someone set up is lost in the move.
@@ -109,17 +120,23 @@ export function InboxTab({
         </Select>
 
         {naming ? (
-          <span className="flex items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2">
             <Input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" className="w-48" autoFocus aria-label="View name" />
+            <Select value={viewScope} onChange={(e) => setViewScope(e.target.value as SavedViewVisibility)} className="w-36" aria-label="Who can see this view">
+              <option value="private">Only me</option>
+              {canShare && <option value="team">My team</option>}
+              {canShare && <option value="everyone">Everyone</option>}
+            </Select>
             <Button
               size="sm"
               disabled={!viewName.trim() || saveView.isPending}
               onClick={() =>
                 saveView.mutate(
-                  { name: viewName.trim(), query: toSavedQuery(query), visibility: 'private' },
+                  { name: viewName.trim(), query: toSavedQuery(query), visibility: viewScope },
                   {
                     onSuccess: () => {
                       setViewName('')
+                      setViewScope('private')
                       setNaming(false)
                     },
                   },
@@ -146,18 +163,27 @@ export function InboxTab({
 
         {(views ?? []).length > 0 && (
           <span className="flex flex-wrap items-center gap-1">
-            {(views ?? []).map((v) => (
-              <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs">
-                <Bookmark className="size-3" />
-                <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
-                  {v.name}
-                </button>
-                <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
-                  <X className="size-3" />
-                  <span className="sr-only">Delete {v.name}</span>
-                </button>
-              </span>
-            ))}
+            {(views ?? []).map((v) => {
+              const mine = v.user_id === myId
+              const removable = mine || !!session?.is_owner
+              const scope = `${SCOPE_LABEL[v.visibility]}${!mine && v.owner_name ? ` · by ${v.owner_name}` : ''}`
+              return (
+                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs" title={scope}>
+                  {v.visibility === 'everyone' ? <Globe className="size-3" /> : v.visibility === 'team' ? <Users className="size-3" /> : <Bookmark className="size-3" />}
+                  <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
+                    {v.name}
+                  </button>
+                  {removable ? (
+                    <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
+                      <X className="size-3" />
+                      <span className="sr-only">Delete {v.name}</span>
+                    </button>
+                  ) : (
+                    <span className="w-1" />
+                  )}
+                </span>
+              )
+            })}
           </span>
         )}
 
@@ -234,7 +260,8 @@ export function InboxTab({
             aria-label="Move to stage"
             onChange={(e) => {
               const v = e.target.value as LeadStatus | ''
-              if (v) runBulk({ status: v })
+              if (v === 'lost') setLosing(true)
+              else if (v) runBulk({ status: v })
             }}
             className="w-36"
           >
@@ -279,6 +306,17 @@ export function InboxTab({
       )}
 
       <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+
+      <LostReasonDialog
+        open={losing}
+        count={selected.size}
+        pending={bulk.isPending}
+        onCancel={() => setLosing(false)}
+        onConfirm={(d) => {
+          setLosing(false)
+          runBulk({ status: 'lost', ...d })
+        }}
+      />
     </div>
   )
 }

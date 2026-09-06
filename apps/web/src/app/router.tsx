@@ -29,6 +29,8 @@ import { InvoiceDetailPage } from '@/routes/invoice-detail'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
 import { FollowUpsPage } from '@/routes/follow-ups'
+import { CrmContactsPage } from '@/routes/crm/contacts'
+import { CrmCompaniesPage } from '@/routes/crm/companies'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
 import { EmployeesPage } from '@/routes/employees'
@@ -137,6 +139,8 @@ const routeTree = rootRoute.addChildren([
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),
   route('/follow-ups', FollowUpsPage),
+  route('/crm/contacts', CrmContactsPage),
+  route('/crm/companies', CrmCompaniesPage),
   route('/lead-sources', LeadSourcesPage),
   // The permissions matrix has declared /facebook as this module's path since
   // Phase 2; keep it working rather than breaking anyone's bookmark.

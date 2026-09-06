@@ -26,6 +26,8 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
   const [email, setEmail] = useState('')
   const [source, setSource] = useState<CreateLeadRequest['source']>('enquiry')
   const [notes, setNotes] = useState('')
+  const [value, setValue] = useState('')
+  const [closeDate, setCloseDate] = useState('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -34,6 +36,8 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
     setEmail('')
     setSource('enquiry')
     setNotes('')
+    setValue('')
+    setCloseDate('')
     setErrors({})
   }
 
@@ -45,6 +49,8 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
       ...(name.trim() ? { name: name.trim() } : {}),
       ...(email.trim() ? { email: email.trim() } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(value.trim() && Number(value) >= 0 ? { deal_value: Number(value) } : {}),
+      ...(closeDate ? { close_date: closeDate } : {}),
     }
     const found = fieldErrors<Field>(createLeadRequest, body, { labels: LABELS })
     setErrors(found)
@@ -126,6 +132,17 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
                 <option value="webform">Web form</option>
                 <option value="facebook">Facebook</option>
               </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Deal value (₹)</Label>
+              <Input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Expected close</Label>
+              <Input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)} />
             </div>
           </div>
 

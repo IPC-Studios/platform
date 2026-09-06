@@ -1,4 +1,5 @@
 import type { SavedViewQuery } from '@ipc/contracts'
+import { isLegacyStatus } from '@ipc/domain'
 import type { LeadQuery, QuickFilter } from './leads'
 import { EMPTY_QUERY, QUICK_FILTERS } from './leads'
 
@@ -22,7 +23,7 @@ export function toLeadQuery(q: SavedViewQuery): LeadQuery {
     ...EMPTY_QUERY,
     search: q.search,
     filters: q.filters.filter(isQuickFilter),
-    status: status === 'all' || ['new', 'contacted', 'qualified', 'proposal_sent', 'converted', 'lost'].includes(status) ? status : 'all',
+    status: status === 'all' || isLegacyStatus(status) ? status : 'all',
     assignee: q.assignee || 'all',
   }
 }

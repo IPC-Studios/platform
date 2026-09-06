@@ -70,6 +70,8 @@ async function freshDb() {
   await db.exec(mig('0034_plan_gate_and_audit.sql'))
   await db.exec(mig('0035_crm_v3.sql'))
   await db.exec(mig('0036_crm_v4.sql'))
+  await db.exec(mig('0037_truly_amazing.sql'))
+  await db.exec(mig('0038_crm_objects.sql'))
   return db
 }
 
@@ -2021,7 +2023,7 @@ describe('CRM v2 — events, archive, merge, stats (0032 + 0034)', () => {
 
   it('crm_stats counts only unarchived leads', async () => {
     const stats = await db.query<{ s: { total: number; byStatus: Record<string, number> } }>(
-      `select crm_stats(30) as s;`,
+      `select crm_stats(current_date - 30, current_date) as s;`,
     )
     expect(stats.rows[0]!.s.total).toBe(2)
     expect(stats.rows[0]!.s.byStatus.contacted).toBe(1)
@@ -2418,7 +2420,7 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     // A lead that closes mid-cadence is taken off it.
     const lead2 = await add('Closes early', '9876800011')
     await db.query(`select start_lead_cadence('${lead2}', '${cad}');`)
-    await db.exec(`update crm_leads set status = 'lost' where id = '${lead2}';`)
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Went elsewhere' where id = '${lead2}';`)
     const stopped = await db.query<{ stopped_at: string | null }>(
       `select stopped_at from crm_lead_cadences where lead_id = '${lead2}';`,
     )
@@ -2460,5 +2462,263 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     const meera = team.rows.find((r) => r.user_name === 'Meera')!
     expect(meera.sla_hours).toBe(4)
     expect(meera.within_sla).toBe(1)
+  })
+})
+
+describe('CRM objects — pipelines, stages, contacts, forecast, SLA sweep (0038)', () => {
+  let db: PGlite
+  const owner = '56565656-5656-5656-5656-565656565656'
+  const member = '78787878-7878-7878-7878-787878787878'
+  const stages: Record<string, string> = {}
+  let pipeline = ''
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const lead = async (id: string) =>
+    (
+      await db.query<{
+        status: string
+        stage_id: string
+        pipeline_id: string
+        contact_id: string
+        probability: number
+        lost_reason: string | null
+        phone_norm: string | null
+      }>(`select status, stage_id, pipeline_id, contact_id, probability, lost_reason, phone_norm from crm_leads where id = '${id}';`)
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm5.test'),('${member}','member@crm5.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM5 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm5.test');`,
+    )
+    const rows = await db.query<{ id: string; key: string; pipeline_id: string }>(
+      `select id, key, pipeline_id from crm_pipeline_stages where company_id = get_current_company_id() order by position;`,
+    )
+    for (const r of rows.rows) stages[r.key] = r.id
+    pipeline = rows.rows[0]!.pipeline_id
+  })
+
+  it('a new studio gets the Sales pipeline, six stages and a lost-reason list', async () => {
+    expect(Object.keys(stages)).toEqual(['new', 'contacted', 'qualified', 'proposal_sent', 'converted', 'lost'])
+    const p = await db.query<{ name: string; is_default: boolean }>(`select name, is_default from crm_pipelines;`)
+    expect(p.rows).toEqual([{ name: 'Sales', is_default: true }])
+    const reasons = await db.query<{ n: number }>(`select count(*)::int as n from crm_lost_reasons;`)
+    expect(reasons.rows[0]!.n).toBe(5)
+  })
+
+  it('a lead lands in the default pipeline, in the stage for its status, with a contact', async () => {
+    const id = await add('Aanya', '9876900001')
+    const l = await lead(id)
+    expect(l.pipeline_id).toBe(pipeline)
+    expect(l.stage_id).toBe(stages.new)
+    expect(l.probability).toBe(10)
+    expect(l.contact_id).not.toBeNull()
+    const c = await db.query<{ name: string; phone_norm: string; lifecycle: string }>(
+      `select name, phone_norm, lifecycle from crm_contacts where id = '${l.contact_id}';`,
+    )
+    expect(c.rows[0]).toEqual({ name: 'Aanya', phone_norm: '919876900001', lifecycle: 'lead' })
+
+    // A second row with the same number (an import beside a known lead) shares the contact.
+    await db.exec(
+      `insert into crm_leads (company_id, name, phone, phone_norm, source) values (get_current_company_id(), 'Aanya again', '9876900001', null, 'manual');`,
+    )
+    const shared = await db.query<{ n: number }>(
+      `select count(distinct contact_id)::int as n from crm_leads where phone_norm = '919876900001';`,
+    )
+    expect(shared.rows[0]!.n).toBe(1)
+  })
+
+  it('moving the stage derives the status, and moving the status derives the stage', async () => {
+    const id = await add('Stage lead', '9876900002')
+    await db.exec(`update crm_leads set stage_id = '${stages.qualified}' where id = '${id}';`)
+    let l = await lead(id)
+    expect(l.status).toBe('qualified')
+    expect(l.probability).toBe(50)
+    const events = await db.query<{ to_status: string }>(
+      `select to_status from crm_lead_events where lead_id = '${id}' and from_status = 'new';`,
+    )
+    expect(events.rows[0]!.to_status).toBe('qualified')
+
+    await db.exec(`update crm_leads set status = 'converted' where id = '${id}';`)
+    l = await lead(id)
+    expect(l.stage_id).toBe(stages.converted)
+    expect(l.probability).toBe(100)
+    const c = await db.query<{ lifecycle: string }>(`select lifecycle from crm_contacts where id = '${l.contact_id}';`)
+    expect(c.rows[0]!.lifecycle).toBe('customer')
+  })
+
+  it('crm_move_stage refuses lost without a reason, another pipeline, a full stage and missing fields', async () => {
+    const id = await add('Move lead', '9876900003')
+    await expect(db.query(`select crm_move_stage('${id}', '${stages.lost}');`)).rejects.toThrow(/lost_reason/)
+    expect(
+      (await db.query<{ s: string }>(`select crm_move_stage('${id}', '${stages.lost}', 'Budget', 'Other Studio') as s;`)).rows[0]!.s,
+    ).toBe('lost')
+    const l = await db.query<{ lost_reason: string; lost_competitor: string }>(
+      `select lost_reason, lost_competitor from crm_leads where id = '${id}';`,
+    )
+    expect(l.rows[0]).toEqual({ lost_reason: 'Budget', lost_competitor: 'Other Studio' })
+    // Back to open clears the reason.
+    await db.query(`select crm_move_stage('${id}', '${stages.contacted}');`)
+    expect((await lead(id)).lost_reason).toBeNull()
+
+    // A stage from another pipeline is refused.
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipelines (company_id, name) values (get_current_company_id(), 'Corporate') returning id;`,
+      )
+    ).rows[0]!.id
+    const foreign = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position) values ('${other}', get_current_company_id(), 'Brief', 'brief', 0) returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(db.query(`select crm_move_stage('${id}', '${foreign}');`)).rejects.toThrow(/another pipeline/)
+
+    // WIP limit counts the deals already there.
+    await db.exec(`update crm_pipeline_stages set wip_limit = 1 where id = '${stages.qualified}';`)
+    const second = await add('Second', '9876900004')
+    await db.query(`select crm_move_stage('${id}', '${stages.qualified}');`)
+    await expect(db.query(`select crm_move_stage('${second}', '${stages.qualified}');`)).rejects.toThrow(/full/)
+    await db.exec(`update crm_pipeline_stages set wip_limit = null where id = '${stages.qualified}';`)
+
+    // Required fields gate the move until they are filled.
+    await db.exec(`update crm_pipeline_stages set required_fields = '{deal_value,close_date}' where id = '${stages.proposal_sent}';`)
+    await expect(db.query(`select crm_move_stage('${second}', '${stages.proposal_sent}');`)).rejects.toThrow(/deal_value, close_date/)
+    await db.exec(`update crm_leads set deal_value = 50000, close_date = current_date + 30 where id = '${second}';`)
+    expect(
+      (await db.query<{ s: string }>(`select crm_move_stage('${second}', '${stages.proposal_sent}') as s;`)).rows[0]!.s,
+    ).toBe('proposal_sent')
+  })
+
+  it('a custom open stage still maps to a legacy status by rank', async () => {
+    const custom = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position, kind, probability_default)
+         values ('${pipeline}', get_current_company_id(), 'Negotiation', 'negotiation', 3, 'open', 80) returning id;`,
+      )
+    ).rows[0]!.id
+    expect((await db.query<{ s: string }>(`select crm_stage_status('${custom}') as s;`)).rows[0]!.s).toBe('proposal_sent')
+    const id = await add('Custom stage', '9876900005')
+    await db.exec(`update crm_leads set stage_id = '${custom}' where id = '${id}';`)
+    const l = await lead(id)
+    expect(l.status).toBe('proposal_sent')
+    expect(l.probability).toBe(80)
+    await db.exec(`delete from crm_pipeline_stages where id = '${custom}';`)
+  })
+
+  it('editing the phone re-normalises it and relinks the contact', async () => {
+    const id = await add('Renumber', '9876900006')
+    const before = await lead(id)
+    await db.exec(`update crm_leads set phone = '+91 98769 00007' where id = '${id}';`)
+    const after = await lead(id)
+    expect(after.phone_norm).toBe('919876900007')
+    expect(after.contact_id).not.toBe(before.contact_id)
+  })
+
+  it('a bulk edit can lose leads with a reason, and undo puts the deal fields back', async () => {
+    const a = await add('Bulk lost A', '9876900010')
+    const b = await add('Bulk lost B', '9876900011')
+    await db.exec(`update crm_leads set deal_value = 12000 where id = '${a}';`)
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost"}'::jsonb);`),
+    ).rejects.toThrow(/lost_reason/)
+    const snap = await db.query<{ id: string; deal_value: string | null; stage_id: string; lost_reason: string | null }>(
+      `select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost","lost_reason":"No response"}'::jsonb);`,
+    )
+    expect(snap.rows).toHaveLength(2)
+    expect(Number(snap.rows.find((r) => r.id === a)!.deal_value)).toBe(12000)
+    expect((await lead(a)).status).toBe('lost')
+    expect((await lead(a)).lost_reason).toBe('No response')
+    await db.query(`select crm_restore_leads('${JSON.stringify(snap.rows)}'::jsonb);`)
+    const restored = await lead(a)
+    expect(restored.status).toBe('new')
+    expect(restored.stage_id).toBe(stages.new)
+    expect(restored.lost_reason).toBeNull()
+
+    // Moving by stage works the same way.
+    const snap2 = await db.query(
+      `select * from crm_bulk_patch(array['${b}']::uuid[], '{"stage_id":"${stages.contacted}"}'::jsonb);`,
+    )
+    expect(snap2.rows).toHaveLength(1)
+    expect((await lead(b)).status).toBe('contacted')
+  })
+
+  it('two people can share a team view under the same name; one person cannot repeat a private name', async () => {
+    await asUser(db, owner)
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Hot this week', '{}', 'private');`,
+    )
+    await expect(
+      db.exec(
+        `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Hot this week', '{}', 'private');`,
+      ),
+    ).rejects.toThrow()
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Team overdue', '{}', 'team');`,
+    )
+    // The old unique (user_id, name) would have refused this second row.
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${member}', 'Hot this week', '{}', 'private');`,
+    )
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_saved_views where name = 'Hot this week';`)
+    expect(n.rows[0]!.n).toBe(2)
+  })
+
+  it('the forecast weights open deals by probability and groups by stage', async () => {
+    const x = await add('Forecast X', '9876900020')
+    const y = await add('Forecast Y', '9876900021')
+    await db.exec(`update crm_leads set deal_value = 100000, stage_id = '${stages.qualified}' where id = '${x}';`)
+    await db.exec(`update crm_leads set deal_value = 40000, stage_id = '${stages.converted}' where id = '${y}';`)
+    const f = await db.query<{
+      f: { count: number; total_value: number; weighted: number; won_value: number; by_stage: Array<{ name: string; count: number }> }
+    }>(`select crm_forecast(current_date - 1, current_date + 1) as f;`)
+    const r = f.rows[0]!.f
+    expect(Number(r.won_value)).toBe(40000)
+    expect(Number(r.total_value)).toBeGreaterThanOrEqual(140000)
+    // 100000 at 50% + 40000 at 100%, plus whatever earlier leads carry.
+    expect(Number(r.weighted)).toBeGreaterThanOrEqual(90000)
+    expect(r.by_stage.find((s) => s.name === 'Won')!.count).toBeGreaterThanOrEqual(1)
+  })
+
+  it('the SLA sweep notifies once a day and writes the breach once', async () => {
+    const id = await add('SLA lead', '9876900030')
+    await db.exec(`update crm_leads set sla_due_at = now() - interval '2 hours', assigned_to = null where id = '${id}';`)
+    const first = await db.query<{ s: { sla: { breached: number; notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(first.rows[0]!.s.sla.breached).toBeGreaterThanOrEqual(1)
+    expect(first.rows[0]!.s.sla.notified).toBeGreaterThanOrEqual(1)
+    const again = await db.query<{ s: { sla: { notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(again.rows[0]!.s.sla.notified).toBe(0)
+    // Unassigned: the studio owner hears about it.
+    const notif = await db.query<{ n: number }>(
+      `select count(*)::int as n from notifications where recipient_uid = '${owner}' and entity_id = '${id}' and type = 'crm_sla';`,
+    )
+    expect(notif.rows[0]!.n).toBe(1)
+    const ev = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note = 'SLA breached';`,
+    )
+    expect(ev.rows[0]!.n).toBe(1)
+  })
+
+  it('changing the SLA target moves the deadline on every lead still waiting', async () => {
+    const id = await add('SLA target', '9876900031')
+    await db.query(`select crm_set_sla_hours(4);`)
+    const l = await db.query<{ ok: boolean }>(
+      `select sla_due_at = created_at + interval '4 hours' as ok from crm_leads where id = '${id}';`,
+    )
+    expect(l.rows[0]!.ok).toBe(true)
+    await asUser(db, member)
+    await expect(db.query(`select crm_set_sla_hours(8);`)).rejects.toThrow(/not allowed/)
+    await asUser(db, owner)
   })
 })

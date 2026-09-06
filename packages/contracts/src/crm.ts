@@ -39,7 +39,20 @@ export const crmLead = z.object({
   deal_value: z.number().nullable().default(null),
   probability: z.number().int().min(0).max(100).nullable().default(null),
   lost_reason: z.string().nullable().default(null),
+  lost_competitor: z.string().nullable().default(null),
   sla_due_at: isoDateTime.nullable().default(null),
+  /** The pipeline and stage the deal sits in; status is derived from the stage's kind. */
+  pipeline_id: uuid.nullable().default(null),
+  stage_id: uuid.nullable().default(null),
+  stage_name: z.string().nullable().default(null),
+  /** The person and (optionally) the organisation this deal belongs to. */
+  contact_id: uuid.nullable().default(null),
+  crm_company_id: uuid.nullable().default(null),
+  crm_company_name: z.string().nullable().default(null),
+  title: z.string().nullable().default(null),
+  close_date: isoDate.nullable().default(null),
+  currency: z.string().default('INR'),
+  score: z.number().int().default(0),
   created_at: isoDateTime,
 })
 export type CrmLead = z.infer<typeof crmLead>
@@ -51,6 +64,12 @@ export const leadsQuery = z.object({
     .optional()
     .transform((v) => v === '1' || v === 'true'),
   limit: z.coerce.number().int().min(1).max(5000).default(2000),
+  pipeline_id: uuid.optional(),
+  stage_id: uuid.optional(),
+  contact_id: uuid.optional(),
+  crm_company_id: uuid.optional(),
+  /** Free text over name, phone, email and title. */
+  q: z.string().trim().max(200).optional(),
 })
 export type LeadsQuery = z.infer<typeof leadsQuery>
 
@@ -67,6 +86,12 @@ export const updateLeadRequest = z.object({
   deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
   probability: z.number().int().min(0).max(100).nullable().optional(),
   lost_reason: z.string().trim().min(3).max(500).nullable().optional(),
+  lost_competitor: z.string().trim().max(120).nullable().optional(),
+  title: z.string().trim().max(160).nullable().optional(),
+  close_date: isoDate.nullable().optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  contact_id: uuid.nullable().optional(),
+  crm_company_id: uuid.nullable().optional(),
 })
 export type UpdateLeadRequest = z.infer<typeof updateLeadRequest>
 
@@ -90,6 +115,11 @@ export const createLeadRequest = z.object({
   follow_up_at: isoDateTime.nullable().optional(),
   deal_value: z.number().min(0).max(1_00_00_000).optional(),
   probability: z.number().int().min(0).max(100).optional(),
+  title: z.string().trim().max(160).optional(),
+  close_date: isoDate.optional(),
+  pipeline_id: uuid.optional(),
+  stage_id: uuid.optional(),
+  crm_company_id: uuid.optional(),
 })
 export type CreateLeadRequest = z.infer<typeof createLeadRequest>
 
@@ -166,10 +196,16 @@ export const bulkLeadPatch = z.object({
   patch: z
     .object({
       status: leadStatus.optional(),
+      stage_id: uuid.optional(),
+      lost_reason: z.string().trim().min(3).max(500).optional(),
+      lost_competitor: z.string().trim().max(120).optional(),
       assigned_to: uuid.nullable().optional(),
       is_hot: z.boolean().optional(),
       follow_up_at: isoDateTime.nullable().optional(),
       is_archived: z.boolean().optional(),
+      deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
+      probability: z.number().int().min(0).max(100).nullable().optional(),
+      close_date: isoDate.nullable().optional(),
     })
     .refine((p) => Object.keys(p).length > 0, 'Nothing to change.'),
 })
@@ -183,6 +219,12 @@ export const leadSnapshot = z.object({
   is_hot: z.boolean(),
   follow_up_at: isoDateTime.nullable(),
   is_archived: z.boolean(),
+  deal_value: z.coerce.number().nullable().default(null),
+  probability: z.number().int().nullable().default(null),
+  lost_reason: z.string().nullable().default(null),
+  lost_competitor: z.string().nullable().default(null),
+  stage_id: uuid.nullable().default(null),
+  close_date: isoDate.nullable().default(null),
 })
 export type LeadSnapshot = z.infer<typeof leadSnapshot>
 
@@ -424,10 +466,19 @@ export const createAutomationRequest = z
   .refine(actionNeedsValue, { message: 'This action needs a value.', path: ['action_value'] })
 export type CreateAutomationRequest = z.infer<typeof createAutomationRequest>
 
-export const updateAutomationRequest = z.object({
-  name: z.string().trim().min(2).max(80).optional(),
-  is_active: z.boolean().optional(),
-})
+export const updateAutomationRequest = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    trigger: automationTrigger.optional(),
+    condition: automationCondition.optional(),
+    action: automationAction.optional(),
+    action_value: automationActionValue.optional(),
+    is_active: z.boolean().optional(),
+  })
+  .refine((v) => !v.action || actionNeedsValue({ action: v.action, action_value: v.action_value ?? {} }), {
+    message: 'This action needs a value.',
+    path: ['action_value'],
+  })
 export type UpdateAutomationRequest = z.infer<typeof updateAutomationRequest>
 
 // ── saved views (per person, every device) ────────────────────
@@ -439,11 +490,17 @@ export const savedViewQuery = z.object({
 })
 export type SavedViewQuery = z.infer<typeof savedViewQuery>
 
+export const savedViewVisibility = z.enum(['private', 'team', 'everyone'])
+export type SavedViewVisibility = z.infer<typeof savedViewVisibility>
+
 export const savedView = z.object({
   id: uuid,
   name: z.string(),
   query: savedViewQuery,
-  visibility: z.enum(['private','team','everyone']).default('private'),
+  /** private = mine only; team / everyone = shared with the studio. */
+  visibility: savedViewVisibility.default('private'),
+  user_id: uuid,
+  owner_name: z.string().nullable().default(null),
   created_at: isoDateTime,
 })
 export type SavedView = z.infer<typeof savedView>
@@ -451,9 +508,16 @@ export type SavedView = z.infer<typeof savedView>
 export const createSavedViewRequest = z.object({
   name: z.string().trim().min(1).max(80),
   query: savedViewQuery,
-  visibility: z.enum(['private','team','everyone']).default('private'),
+  visibility: savedViewVisibility.default('private'),
 })
 export type CreateSavedViewRequest = z.infer<typeof createSavedViewRequest>
+
+export const updateSavedViewRequest = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  query: savedViewQuery.optional(),
+  visibility: savedViewVisibility.optional(),
+})
+export type UpdateSavedViewRequest = z.infer<typeof updateSavedViewRequest>
 
 // ── settings ──────────────────────────────────────────────────
 export const crmSettings = z.object({
@@ -555,3 +619,235 @@ export type ConvertLeadRequest = z.infer<typeof convertLeadRequest>
 
 export const convertLeadResponse = z.object({ client_id: uuid, project_id: uuid })
 export type ConvertLeadResponse = z.infer<typeof convertLeadResponse>
+
+// ── ad-hoc responses, named ───────────────────────────────────
+export const idResponse = z.object({ id: uuid })
+export type IdResponse = z.infer<typeof idResponse>
+
+export const cadenceStartResponse = z.object({ next_at: isoDateTime.nullable() })
+export type CadenceStartResponse = z.infer<typeof cadenceStartResponse>
+
+// ── pipelines and stages ──────────────────────────────────────
+export const stageKind = z.enum(['open', 'won', 'lost'])
+export type StageKind = z.infer<typeof stageKind>
+
+/** The fields a stage can insist on before a deal enters it. */
+export const stageRequiredField = z.enum(['deal_value', 'close_date', 'email', 'name', 'assigned_to', 'title', 'lost_reason'])
+export type StageRequiredField = z.infer<typeof stageRequiredField>
+
+export const pipelineStage = z.object({
+  id: uuid,
+  pipeline_id: uuid,
+  name: z.string(),
+  key: z.string(),
+  position: z.number().int(),
+  kind: stageKind,
+  probability_default: z.number().int().min(0).max(100),
+  wip_limit: z.number().int().nullable(),
+  required_fields: z.array(stageRequiredField),
+  /** Open, unarchived deals in the stage right now. */
+  deal_count: z.number().int().default(0),
+})
+export type PipelineStage = z.infer<typeof pipelineStage>
+
+export const pipeline = z.object({
+  id: uuid,
+  name: z.string(),
+  is_default: z.boolean(),
+  position: z.number().int(),
+  stages: z.array(pipelineStage),
+  created_at: isoDateTime,
+})
+export type Pipeline = z.infer<typeof pipeline>
+
+const stageKey = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z][a-z0-9_]{0,39}$/, 'Keys are lowercase letters, digits and underscores.')
+
+export const createPipelineRequest = z.object({
+  name: z.string().trim().min(2).max(80),
+  is_default: z.boolean().default(false),
+})
+export type CreatePipelineRequest = z.infer<typeof createPipelineRequest>
+
+export const updatePipelineRequest = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  is_default: z.literal(true).optional(),
+  position: z.number().int().min(0).max(1000).optional(),
+})
+export type UpdatePipelineRequest = z.infer<typeof updatePipelineRequest>
+
+export const createStageRequest = z.object({
+  name: z.string().trim().min(1).max(60),
+  key: stageKey.optional(),
+  kind: stageKind.default('open'),
+  position: z.number().int().min(0).max(1000).optional(),
+  probability_default: z.number().int().min(0).max(100).optional(),
+  wip_limit: z.number().int().min(1).max(1000).nullable().optional(),
+  required_fields: z.array(stageRequiredField).max(7).default([]),
+})
+export type CreateStageRequest = z.infer<typeof createStageRequest>
+
+export const updateStageRequest = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  kind: stageKind.optional(),
+  position: z.number().int().min(0).max(1000).optional(),
+  probability_default: z.number().int().min(0).max(100).optional(),
+  wip_limit: z.number().int().min(1).max(1000).nullable().optional(),
+  required_fields: z.array(stageRequiredField).max(7).optional(),
+})
+export type UpdateStageRequest = z.infer<typeof updateStageRequest>
+
+export const reorderStagesRequest = z.object({ stage_ids: z.array(uuid).min(1).max(50) })
+export type ReorderStagesRequest = z.infer<typeof reorderStagesRequest>
+
+/** POST /crm/leads/:id/stage — the one way a deal moves between stages. */
+export const moveStageRequest = z.object({
+  stage_id: uuid,
+  lost_reason: z.string().trim().min(3).max(500).optional(),
+  lost_competitor: z.string().trim().max(120).optional(),
+})
+export type MoveStageRequest = z.infer<typeof moveStageRequest>
+
+export const moveStageResponse = z.object({ status: leadStatus, stage_id: uuid })
+export type MoveStageResponse = z.infer<typeof moveStageResponse>
+
+// ── lost reasons ──────────────────────────────────────────────
+export const lostReason = z.object({
+  id: uuid,
+  label: z.string(),
+  position: z.number().int(),
+  is_active: z.boolean(),
+})
+export type LostReason = z.infer<typeof lostReason>
+
+export const createLostReasonRequest = z.object({ label: z.string().trim().min(3).max(80) })
+export type CreateLostReasonRequest = z.infer<typeof createLostReasonRequest>
+
+export const updateLostReasonRequest = z.object({
+  label: z.string().trim().min(3).max(80).optional(),
+  position: z.number().int().min(0).max(1000).optional(),
+  is_active: z.boolean().optional(),
+})
+export type UpdateLostReasonRequest = z.infer<typeof updateLostReasonRequest>
+
+// ── contacts and companies ────────────────────────────────────
+export const contactLifecycle = z.enum(['lead', 'mql', 'sql', 'customer', 'other'])
+export type ContactLifecycle = z.infer<typeof contactLifecycle>
+
+export const crmContact = z.object({
+  id: uuid,
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  lifecycle: contactLifecycle,
+  owner_id: uuid.nullable(),
+  owner_name: z.string().nullable().default(null),
+  source: z.string().nullable(),
+  crm_company_id: uuid.nullable(),
+  crm_company_name: z.string().nullable().default(null),
+  notes: z.string().nullable(),
+  is_archived: z.boolean(),
+  /** Deals on this contact: all, and the ones still open. */
+  deal_count: z.number().int().default(0),
+  open_deal_count: z.number().int().default(0),
+  last_contacted_at: isoDateTime.nullable().default(null),
+  created_at: isoDateTime,
+})
+export type CrmContact = z.infer<typeof crmContact>
+
+export const contactsQuery = z.object({
+  q: z.string().trim().max(200).optional(),
+  include_archived: z
+    .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
+  crm_company_id: uuid.optional(),
+  limit: z.coerce.number().int().min(1).max(5000).default(1000),
+})
+export type ContactsQuery = z.infer<typeof contactsQuery>
+
+export const createContactRequest = z.object({
+  name: z.string().trim().min(1).max(160),
+  phone: z.string().trim().min(6).max(30).optional(),
+  email: z.string().trim().max(200).optional(),
+  lifecycle: contactLifecycle.default('lead'),
+  owner_id: uuid.nullable().optional(),
+  crm_company_id: uuid.nullable().optional(),
+  notes: z.string().max(4000).optional(),
+})
+export type CreateContactRequest = z.infer<typeof createContactRequest>
+
+export const updateContactRequest = z.object({
+  name: z.string().trim().max(160).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  email: z.string().trim().max(200).nullable().optional(),
+  lifecycle: contactLifecycle.optional(),
+  owner_id: uuid.nullable().optional(),
+  crm_company_id: uuid.nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  is_archived: z.boolean().optional(),
+})
+export type UpdateContactRequest = z.infer<typeof updateContactRequest>
+
+export const crmCompany = z.object({
+  id: uuid,
+  name: z.string(),
+  domain: z.string().nullable(),
+  phone: z.string().nullable(),
+  city: z.string().nullable(),
+  notes: z.string().nullable(),
+  owner_id: uuid.nullable(),
+  owner_name: z.string().nullable().default(null),
+  is_archived: z.boolean(),
+  contact_count: z.number().int().default(0),
+  deal_count: z.number().int().default(0),
+  open_value: z.coerce.number().default(0),
+  created_at: isoDateTime,
+})
+export type CrmCompany = z.infer<typeof crmCompany>
+
+export const createCrmCompanyRequest = z.object({
+  name: z.string().trim().min(1).max(160),
+  domain: z.string().trim().max(200).optional(),
+  phone: z.string().trim().max(30).optional(),
+  city: z.string().trim().max(120).optional(),
+  notes: z.string().max(4000).optional(),
+  owner_id: uuid.nullable().optional(),
+})
+export type CreateCrmCompanyRequest = z.infer<typeof createCrmCompanyRequest>
+
+export const updateCrmCompanyRequest = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  domain: z.string().trim().max(200).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  owner_id: uuid.nullable().optional(),
+  is_archived: z.boolean().optional(),
+})
+export type UpdateCrmCompanyRequest = z.infer<typeof updateCrmCompanyRequest>
+
+// ── forecast ──────────────────────────────────────────────────
+const forecastBucket = z.object({
+  count: z.number().int(),
+  total_value: z.coerce.number(),
+  weighted: z.coerce.number(),
+})
+
+export const crmForecast = z.object({
+  from: isoDate,
+  to: isoDate,
+  count: z.number().int(),
+  total_value: z.coerce.number(),
+  /** Σ deal_value × probability over open deals, plus won deals at 100%. */
+  weighted: z.coerce.number(),
+  won_value: z.coerce.number(),
+  open_value: z.coerce.number(),
+  by_stage: z.array(forecastBucket.extend({ stage_id: uuid.nullable(), name: z.string(), kind: stageKind })),
+  by_owner: z.array(forecastBucket.extend({ user_id: uuid.nullable(), name: z.string() })),
+  by_month: z.array(forecastBucket.extend({ month: z.string().regex(/^\d{4}-\d{2}$/) })),
+})
+export type CrmForecast = z.infer<typeof crmForecast>
