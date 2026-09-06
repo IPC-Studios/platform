@@ -87,7 +87,7 @@ const CREDENTIAL_PATHS = [
   '/auth/accept-invite',
   '/auth/invite',
 ]
-const credentialLimiter = rateLimit({ windowMs: 60_000, limit: 10, scope: 'ip' })
+const credentialLimiter = rateLimit({ windowMs: 60_000, limit: 30, scope: 'ip' })
 for (const path of CREDENTIAL_PATHS) app.use(path, credentialLimiter)
 app.use('/auth/session', rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use('/auth/refresh', rateLimit({ windowMs: 60_000, limit: 120 }))
