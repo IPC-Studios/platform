@@ -12,6 +12,18 @@ let _sql: Sql | null = null
 const ident = (v: unknown): unknown => v
 
 /**
+ * postgres.js feeds every `serialize` return straight into
+ * `Buffer.byteLength` when building the Bind message, so a serializer MUST
+ * return a string. Returning the input unchanged (e.g. a number for LIMIT)
+ * crashes with `ERR_INVALID_ARG_TYPE ... Received type number` — and because
+ * only numeric/date params take this path, every string-only endpoint keeps
+ * working, which is exactly how this hid from all gates until production.
+ */
+export function pgText(v: unknown): string {
+  return v instanceof Date ? v.toISOString() : String(v)
+}
+
+/**
  * PostgREST returned JSON, so the zod contracts expect ISO timestamp strings,
  * "YYYY-MM-DD" dates, and JSON numbers. postgres.js instead yields Date objects
  * and numeric-as-string. These read-side parsers realign the wire shape to what
@@ -25,16 +37,18 @@ function pgTimestampToIso(v: string): string {
   return s
 }
 
-const TYPES = {
+export const pgTypes = {
   // numeric/decimal -> Number (money contracts are z.number()).
-  numeric: { to: 1700, from: [1700], serialize: ident, parse: (v: string) => Number(v) },
+  numeric: { to: 1700, from: [1700], serialize: pgText, parse: (v: string) => Number(v) },
   // int8/bigint -> Number (counts).
-  int8: { to: 20, from: [20], serialize: ident, parse: (v: string) => Number(v) },
+  int8: { to: 20, from: [20], serialize: pgText, parse: (v: string) => Number(v) },
   // date -> "YYYY-MM-DD" string (isoDate), not a Date object.
-  date: { to: 1082, from: [1082], serialize: ident, parse: ident },
+  date: { to: 1082, from: [1082], serialize: pgText, parse: ident },
   // timestamp(tz) -> ISO-8601 string with offset (isoDateTime).
-  timestamptz: { to: 1184, from: [1114, 1184], serialize: ident, parse: pgTimestampToIso },
+  timestamptz: { to: 1184, from: [1114, 1184], serialize: pgText, parse: pgTimestampToIso },
 }
+
+const TYPES = pgTypes
 
 export function db(env: Env): Sql {
   if (!_sql) {
