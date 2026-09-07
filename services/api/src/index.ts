@@ -26,6 +26,7 @@ import { notificationsRouter } from './modules/notifications/router'
 import { subscriptionRouter } from './modules/subscription/router'
 import { termsRouter, publicTermsRouter } from './modules/terms/router'
 import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/router'
+import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
 
@@ -125,7 +126,9 @@ app.route('/subscription', subscriptionRouter)
 app.route('/terms', termsRouter)
 app.route('/team-terms', teamTermsRouter)
 app.route('/public', publicTermsRouter)
+app.route('/documents', documentsRouter)
 app.route('/public', publicTeamTermsRouter)
+app.route('/public', publicDocumentsRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
 
