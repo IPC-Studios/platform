@@ -75,6 +75,7 @@ async function freshDb() {
   await db.exec(mig('0040_role_library.sql'))
   await db.exec(mig('0041_team_terms.sql'))
   await db.exec(mig('0042_client_documents.sql'))
+  await db.exec(mig('0043_enquiries.sql'))
   return db
 }
 
@@ -2962,5 +2963,134 @@ describe('client documents (0042)', () => {
       submission_link: 'https://drive.example/album',
       project_name: 'Sharma Wedding',
     })
+  })
+})
+
+describe('enquiries (0043)', () => {
+  let db: PGlite
+  let company: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+  })
+
+  const addEnquiry = async (name: string, phone: string | null, message = 'Need a quote') =>
+    (
+      await db.query<{ id: string }>(
+        `insert into enquiries (company_id, name, phone, message, source)
+         values ('${company}', '${name}', ${phone ? `'${phone}'` : 'null'}, '${message}', 'website')
+         returning id;`,
+      )
+    ).rows[0]!.id
+
+  it('starts every enquiry as new', async () => {
+    const id = await addEnquiry('Rahul', '9876500001')
+    const row = await db.query<{ enquiry_status: string; converted_lead_id: string | null }>(
+      `select enquiry_status, converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ enquiry_status: 'new', converted_lead_id: null })
+  })
+
+  it('refuses a status nobody renders', async () => {
+    await expect(
+      db.query(
+        `insert into enquiries (company_id, name, enquiry_status)
+         values ('${company}', 'Bad', 'maybe');`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('converts to a lead and remembers which one', async () => {
+    const id = await addEnquiry('Anita', '9876500002', 'Wedding in December')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    const enq = await db.query<{ enquiry_status: string; converted_lead_id: string }>(
+      `select enquiry_status, converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(enq.rows[0]!.enquiry_status).toBe('converted')
+    expect(enq.rows[0]!.converted_lead_id).toBe(lead)
+
+    const row = await db.query<{ name: string; source: string; notes: string }>(
+      `select name, source, notes from crm_leads where id = '${lead}';`,
+    )
+    // The CRM's own enum says where a lead came from; 'website' stays on the
+    // enquiry, which is the record of that.
+    expect(row.rows[0]).toMatchObject({
+      name: 'Anita',
+      source: 'enquiry',
+      notes: 'Wedding in December',
+    })
+  })
+
+  it('converts twice to the same lead, not two', async () => {
+    const id = await addEnquiry('Sana', '9876500003')
+    const first = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    const second = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    expect(second).toBe(first)
+  })
+
+  // One number, one lead — the rule the CRM's own intake already follows.
+  it('attaches to the lead that already has that number', async () => {
+    const existing = (
+      await db.query<{ create_lead: string }>(
+        `select add_lead('Imran', '9876500004', null, 'manual', 'Called in') as create_lead;`,
+      )
+    ).rows[0]!.create_lead
+    const id = await addEnquiry('Imran Q', '9876500004')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    expect(lead).toBe(existing)
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_leads where phone_norm = crm_normalize_phone('9876500004');`,
+    )
+    expect(count.rows[0]!.n).toBe(1)
+  })
+
+  it('refuses an enquiry from another studio', async () => {
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into companies (name, owner_user_id)
+         values ('Other Studio', (select user_id from users limit 1)) returning id;`,
+      )
+    ).rows[0]!.id
+    const stray = (
+      await db.query<{ id: string }>(
+        `insert into enquiries (company_id, name) values ('${other}', 'Theirs') returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(db.query(`select convert_enquiry_to_lead('${stray}'::uuid);`)).rejects.toThrow()
+  })
+
+  it('keeps the enquiry when the lead it made is deleted', async () => {
+    const id = await addEnquiry('Priya', '9876500005')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    await db.query(`delete from crm_leads where id = '${lead}';`)
+    const row = await db.query<{ converted_lead_id: string | null }>(
+      `select converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(row.rows).toHaveLength(1)
+    expect(row.rows[0]!.converted_lead_id).toBeNull()
   })
 })
