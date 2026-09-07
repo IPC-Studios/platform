@@ -29,6 +29,8 @@ import { InvoiceDetailPage } from '@/routes/invoice-detail'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
 import { FollowUpsPage } from '@/routes/follow-ups'
+import { CrmContactsPage } from '@/routes/crm/contacts'
+import { CrmCompaniesPage } from '@/routes/crm/companies'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
 import { EmployeesPage } from '@/routes/employees'
@@ -38,6 +40,7 @@ import { RolesAccessPage } from '@/routes/settings/roles'
 import { TeamTermsPage } from '@/routes/settings/team-terms'
 import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
+import { QuoteAcceptPage } from '@/routes/quote-accept'
 import { TeamTermsAcknowledgePage } from '@/routes/team-terms-acknowledge'
 import { QuotationPage } from '@/routes/quotation'
 import { EnquiriesPage } from '@/routes/enquiries'
@@ -115,6 +118,7 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
+  publicRoute('/quote/accept', QuoteAcceptPage),
   publicRoute('/team-terms', TeamTermsAcknowledgePage),
   publicRoute('/quotation', QuotationPage),
   publicRoute('/receipt', ReceiptPage),
@@ -147,6 +151,8 @@ const routeTree = rootRoute.addChildren([
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),
   route('/follow-ups', FollowUpsPage),
+  route('/crm/contacts', CrmContactsPage),
+  route('/crm/companies', CrmCompaniesPage),
   route('/lead-sources', LeadSourcesPage),
   // The permissions matrix has declared /facebook as this module's path since
   // Phase 2; keep it working rather than breaking anyone's bookmark.

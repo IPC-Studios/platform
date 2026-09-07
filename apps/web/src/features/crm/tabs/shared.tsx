@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
 import { Archive, Flame } from 'lucide-react'
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import type { CrmLead, InboxColumn, LeadStatus, StageKind } from '@ipc/contracts'
+import { stageLabel } from '@ipc/domain'
 import { Card, CardContent } from '@/shared/ui/card'
+import { formatINR } from '@/shared/ui/format'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState } from '@/shared/ui/states'
 import { Avatar } from '@/shared/ui/avatar'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { STAGE_LABEL, dueBucket } from '../leads'
+import { dueBucket } from '../leads'
 
 export const SOURCE_TONE: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
   facebook: 'info',
@@ -24,6 +26,12 @@ export const STAGE_TONE: Record<LeadStatus, 'info' | 'success' | 'warning' | 'ne
   converted: 'success',
   lost: 'danger',
 }
+
+/** The badge tone for a stage by what it means, so a custom stage reads like the legacy one. */
+export const stageTone = (kind: StageKind): 'info' | 'success' | 'danger' => (kind === 'won' ? 'success' : kind === 'lost' ? 'danger' : 'info')
+
+/** The stage a deal shows: its own stage name when the pipeline has one, else the status. */
+export const leadStageLabel = (l: CrmLead): string => stageLabel(l.status, l.stage_name)
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 export const prettyDate = (iso: string) => dayFormat.format(new Date(iso))
@@ -46,6 +54,33 @@ export function DueBadge({ lead, now }: { lead: CrmLead; now: Date }) {
   return <StatusBadge tone={tone}>{label}</StatusBadge>
 }
 
+/** The score as a small badge; a flame once it reaches the studio's hot score. */
+export function ScoreBadge({ score, hotScore = 60 }: { score: number; hotScore?: number }) {
+  const hot = score >= hotScore
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[0.7rem] tabular-nums ${hot ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-border text-muted-foreground'}`} title={`Score ${score}${hot ? ' · hot' : ''}`}>
+      {hot && <Flame className="size-3" />}
+      {score}
+    </span>
+  )
+}
+
+/** Every column the inbox can show. `lead` is always on — it carries the checkbox anchor. */
+export const INBOX_COLUMNS: ReadonlyArray<{ key: InboxColumn; label: string }> = [
+  { key: 'lead', label: 'Lead' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'score', label: 'Score' },
+  { key: 'source', label: 'Source' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'value', label: 'Value' },
+  { key: 'close', label: 'Close' },
+  { key: 'company', label: 'Company' },
+  { key: 'follow_up', label: 'Follow-up' },
+  { key: 'created', label: 'Created' },
+]
+
+export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ['lead', 'stage', 'score', 'source', 'owner', 'value', 'follow_up']
+
 export function LeadTable({
   leads,
   now,
@@ -54,6 +89,9 @@ export function LeadTable({
   selected,
   onToggleSelect,
   onToggleAll,
+  hotScore = 60,
+  columns = DEFAULT_INBOX_COLUMNS,
+  density = 'comfortable',
 }: {
   leads: readonly CrmLead[]
   now: Date
@@ -62,6 +100,9 @@ export function LeadTable({
   selected?: Set<string>
   onToggleSelect?: (id: string, on: boolean) => void
   onToggleAll?: (on: boolean) => void
+  hotScore?: number
+  columns?: readonly InboxColumn[]
+  density?: 'comfortable' | 'compact'
 }) {
   const isMobile = useIsMobile()
 
@@ -94,9 +135,12 @@ export function LeadTable({
           >
             <div className="flex items-start justify-between gap-2">
               <p className="truncate font-medium">{l.name ?? l.phone ?? 'Unnamed lead'}</p>
-              <StatusBadge tone={STAGE_TONE[l.status]}>{STAGE_LABEL[l.status]}</StatusBadge>
+              <StatusBadge tone={STAGE_TONE[l.status]}>{leadStageLabel(l)}</StatusBadge>
             </div>
-            <p className="mt-1 truncate text-sm text-muted-foreground">{l.phone ?? '—'}</p>
+            <p className="mt-1 truncate text-sm text-muted-foreground">
+              {l.phone ?? '—'}
+              {l.deal_value !== null ? ` · ${formatINR(l.deal_value)}` : ''}
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {l.is_hot && (
                 <StatusBadge tone="danger">
@@ -117,6 +161,88 @@ export function LeadTable({
   }
 
   const allChecked = selected ? leads.length > 0 && leads.every((l) => selected.has(l.id)) : false
+  // The lead column anchors the row (name + checkbox side), so it is always
+  // first even when someone's saved order says otherwise.
+  const cols = columns.includes('lead') ? columns : (['lead', ...columns] as readonly InboxColumn[])
+  const pad = density === 'compact' ? 'px-3 py-1' : 'px-4 py-2'
+
+  function header(key: InboxColumn) {
+    const label = INBOX_COLUMNS.find((c) => c.key === key)?.label ?? key
+    return (
+      <th key={key} className={`${pad} font-medium ${key === 'lead' ? 'min-w-48' : ''} ${key === 'value' ? 'text-right' : ''}`}>
+        {label}
+      </th>
+    )
+  }
+
+  function cell(key: InboxColumn, l: CrmLead) {
+    switch (key) {
+      case 'lead':
+        return (
+          <td key={key} className={pad}>
+            <span className="flex items-center gap-2 font-medium">
+              {l.is_hot && <Flame className="size-3.5 shrink-0 text-destructive" aria-label="Hot" />}
+              {l.is_archived && <Archive className="size-3.5 shrink-0 text-muted-foreground" aria-label="Archived" />}
+              {l.name ?? 'Unnamed lead'}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {l.phone ?? '—'}
+              {l.crm_company_name ? ` · ${l.crm_company_name}` : ''}
+            </span>
+          </td>
+        )
+      case 'stage':
+        return (
+          <td key={key} className={pad}>
+            <StatusBadge tone={STAGE_TONE[l.status]}>{leadStageLabel(l)}</StatusBadge>
+          </td>
+        )
+      case 'score':
+        return (
+          <td key={key} className={pad}>
+            <ScoreBadge score={l.score} hotScore={hotScore} />
+          </td>
+        )
+      case 'source':
+        return (
+          <td key={key} className={pad}>
+            <StatusBadge tone={SOURCE_TONE[l.source] ?? 'neutral'}>{l.source}</StatusBadge>
+          </td>
+        )
+      case 'owner':
+        return (
+          <td key={key} className={`${pad} text-muted-foreground`}>
+            {l.assignee_name ? (
+              <span className="flex items-center gap-2">
+                <Avatar name={l.assignee_name} size="sm" />
+                <span className="truncate">{l.assignee_name}</span>
+              </span>
+            ) : (
+              <span className="text-warning">Unassigned</span>
+            )}
+          </td>
+        )
+      case 'value':
+        return (
+          <td key={key} className={`${pad} text-right tabular-nums text-muted-foreground`}>
+            {l.deal_value !== null ? formatINR(l.deal_value) : '—'}
+          </td>
+        )
+      case 'close':
+        return <td key={key} className={`${pad} tabular-nums text-muted-foreground`}>{l.close_date ? prettyDate(l.close_date) : '—'}</td>
+      case 'company':
+        return <td key={key} className={`${pad} text-muted-foreground`}>{l.crm_company_name ?? '—'}</td>
+      case 'follow_up':
+        return (
+          <td key={key} className={pad}>
+            <DueBadge lead={l} now={now} />
+          </td>
+        )
+      case 'created':
+        return <td key={key} className={`${pad} tabular-nums text-muted-foreground`}>{prettyDate(l.created_at.slice(0, 10))}</td>
+    }
+  }
+
   return (
     <div className="table-wrap rounded-lg border border-border">
       <table className="table-sticky w-full text-sm">
@@ -127,11 +253,7 @@ export function LeadTable({
                 <input type="checkbox" checked={allChecked} onChange={(e) => onToggleAll(e.target.checked)} aria-label="Select all" />
               </th>
             )}
-            <th className="min-w-48 px-4 py-2 font-medium">Lead</th>
-            <th className="px-4 py-2 font-medium">Stage</th>
-            <th className="px-4 py-2 font-medium">Source</th>
-            <th className="px-4 py-2 font-medium">Owner</th>
-            <th className="px-4 py-2 font-medium">Follow-up</th>
+            {cols.map(header)}
           </tr>
         </thead>
         <tbody>
@@ -151,33 +273,7 @@ export function LeadTable({
                   />
                 </td>
               )}
-              <td className="px-4 py-2">
-                <span className="flex items-center gap-2 font-medium">
-                  {l.is_hot && <Flame className="size-3.5 shrink-0 text-destructive" aria-label="Hot" />}
-                  {l.is_archived && <Archive className="size-3.5 shrink-0 text-muted-foreground" aria-label="Archived" />}
-                  {l.name ?? 'Unnamed lead'}
-                </span>
-                <span className="text-xs text-muted-foreground">{l.phone ?? '—'}</span>
-              </td>
-              <td className="px-4 py-2">
-                <StatusBadge tone={STAGE_TONE[l.status]}>{STAGE_LABEL[l.status]}</StatusBadge>
-              </td>
-              <td className="px-4 py-2">
-                <StatusBadge tone={SOURCE_TONE[l.source] ?? 'neutral'}>{l.source}</StatusBadge>
-              </td>
-              <td className="px-4 py-2 text-muted-foreground">
-                {l.assignee_name ? (
-                  <span className="flex items-center gap-2">
-                    <Avatar name={l.assignee_name} size="sm" />
-                    <span className="truncate">{l.assignee_name}</span>
-                  </span>
-                ) : (
-                  <span className="text-warning">Unassigned</span>
-                )}
-              </td>
-              <td className="px-4 py-2">
-                <DueBadge lead={l} now={now} />
-              </td>
+              {cols.map((key) => cell(key, l))}
             </tr>
           ))}
         </tbody>
@@ -232,10 +328,14 @@ export function BoardColumn({
 
 /** Downloads the given leads as a spreadsheet-friendly CSV. */
 export function exportLeadsCsv(leads: readonly CrmLead[], filename = 'leads.csv') {
-  const header = 'name,phone,email,status,source,owner,follow_up_at,created_at\n'
+  const header = 'name,phone,email,stage,status,source,owner,company,title,deal_value,probability,close_date,lost_reason,follow_up_at,created_at\n'
   const rows = leads
     .map((l) =>
-      [l.name ?? '', l.phone ?? '', l.email ?? '', l.status, l.source, l.assignee_name ?? '', l.follow_up_at ?? '', l.created_at]
+      [
+        l.name ?? '', l.phone ?? '', l.email ?? '', leadStageLabel(l), l.status, l.source, l.assignee_name ?? '',
+        l.crm_company_name ?? '', l.title ?? '', l.deal_value ?? '', l.probability ?? '', l.close_date ?? '',
+        l.lost_reason ?? '', l.follow_up_at ?? '', l.created_at,
+      ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(','),
     )

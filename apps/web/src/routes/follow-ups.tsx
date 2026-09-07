@@ -24,18 +24,24 @@ import { TeamTab } from '@/features/crm/tabs/TeamTab'
 import { ImportsTab } from '@/features/crm/tabs/ImportsTab'
 import { DuplicatesTab } from '@/features/crm/tabs/DuplicatesTab'
 import { CrmSettingsTab } from '@/features/crm/tabs/SettingsTab'
+import { ActivitiesTab } from '@/features/crm/tabs/ActivitiesTab'
+import { ForecastTab } from '@/features/crm/tabs/ForecastTab'
+import { QuotesTab } from '@/features/crm/tabs/QuotesTab'
 
-/** Every tab of the CRM. All eleven are built. */
+/** Every tab of the CRM. All fourteen are built. */
 const TABS = [
   { key: 'inbox', label: 'Lead Inbox' },
   { key: 'today', label: "Today's Work" },
   { key: 'board', label: 'Follow-up Board' },
   { key: 'pipeline', label: 'Pipeline View' },
+  { key: 'activities', label: 'Activities' },
   { key: 'distribution', label: 'Distribution Rules' },
   { key: 'templates', label: 'Templates' },
   { key: 'reports', label: 'Reports' },
+  { key: 'forecast', label: 'Forecast' },
+  { key: 'quotes', label: 'Quotes' },
   { key: 'team', label: 'Team Dashboard' },
-  { key: 'imports', label: 'Imports & Automations' },
+  { key: 'imports', label: 'Imports & Workflows' },
   { key: 'duplicates', label: 'Duplicate Management' },
   { key: 'settings', label: 'CRM Settings' },
 ] as const
@@ -68,6 +74,7 @@ function Crm() {
   const [openLead, setOpenLead] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
 
   const active = useLeads(false)
   // The full list, archived included, is only fetched when a tab needs it.
@@ -90,12 +97,12 @@ function Crm() {
       <PageHeader
         title="CRM"
         description="Manage new leads, follow-ups, reminders, and your lead pipeline in one place."
-        actions={<AddLeadDialog onAdded={(id) => setOpenLead(id)} />}
+        actions={<AddLeadDialog open={addOpen} onOpenChange={setAddOpen} onAdded={(id) => setOpenLead(id)} />}
       />
 
       <SummaryStrip totals={totals} leads={leads} expanded={showSummary} onToggle={() => setShowSummary((s) => !s)} />
 
-      <SetupChecklist leads={leads} onAddLead={() => setTab('inbox')} />
+      <SetupChecklist leads={leads} onAddLead={() => setAddOpen(true)} />
 
       <div role="tablist" aria-label="CRM sections" className="no-print mt-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
         {TABS.map((t) => (
@@ -139,18 +146,24 @@ function Crm() {
           <FollowUpBoardTab leads={leads} now={now} onOpen={setOpenLead} />
         ) : tab === 'pipeline' ? (
           <PipelineTab leads={leads} onOpen={setOpenLead} />
+        ) : tab === 'activities' ? (
+          <ActivitiesTab leads={leads} onOpen={setOpenLead} />
         ) : tab === 'distribution' ? (
           <DistributionTab />
         ) : tab === 'templates' ? (
           <TemplatesTab />
         ) : tab === 'reports' ? (
           <ReportsTab leads={leads} />
+        ) : tab === 'forecast' ? (
+          <ForecastTab />
+        ) : tab === 'quotes' ? (
+          <QuotesTab onOpen={setOpenLead} />
         ) : tab === 'team' ? (
           <TeamTab />
         ) : tab === 'imports' ? (
           <ImportsTab />
         ) : tab === 'duplicates' ? (
-          <DuplicatesTab archivedLeads={archived} />
+          <DuplicatesTab archivedLeads={archived} allLeads={allLeads} />
         ) : (
           <CrmSettingsTab leads={leads} archived={archived} />
         )}

@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useImportCommit, useImportPreview } from '../api'
-import { AutomationsSection } from './AutomationsSection'
+import { WorkflowsSection } from './WorkflowsSection'
 import { CadencesSection } from './CadencesSection'
 
 const SAMPLE = 'name,phone,email,notes\nPriya Sharma,9876543210,priya@example.in,Wedding in December\n'
@@ -28,7 +28,7 @@ export function ImportsTab() {
         </Card>
       )}
       <CadencesSection />
-      <AutomationsSection />
+      <WorkflowsSection />
     </div>
   )
 }

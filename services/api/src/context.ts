@@ -26,6 +26,14 @@ export interface Env {
   /** WhatsApp Cloud API: the sending phone number id and its access token. */
   WHATSAPP_PHONE_NUMBER_ID: string
   WHATSAPP_ACCESS_TOKEN: string
+  /** Twilio Programmable Voice for click-to-call (lib/twilio.ts). All three or none. */
+  TWILIO_ACCOUNT_SID: string
+  TWILIO_AUTH_TOKEN: string
+  TWILIO_FROM_NUMBER: string
+  /** Mailbox sync (lib/email-sync.ts): 'gmail' | 'o365', a bearer token, and the mailbox address. */
+  EMAIL_SYNC_PROVIDER: string
+  EMAIL_SYNC_TOKEN: string
+  EMAIL_SYNC_MAILBOX: string
   /**
    * Refresh-token cookie mode. '1' moves the refresh token into an HttpOnly
    * cookie on the API origin (see lib/session-cookie.ts). Unset = body token.

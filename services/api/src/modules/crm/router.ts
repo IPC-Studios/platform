@@ -1,19 +1,19 @@
 import { Hono } from 'hono'
 import type { TransactionSql } from 'postgres'
 import {
-  automationRule,
   bulkLeadPatch,
   bulkPatchResponse,
   bulkUndoRequest,
   bulkUndoResponse,
   cadence,
+  cadenceStartResponse,
   convertLeadRequest,
   convertLeadResponse,
-  createAutomationRequest,
   createCadenceRequest,
   createSavedViewRequest,
   createDistributionRequest,
   createLeadRequest,
+  createLeadResponse,
   createLeadSourceRequest,
   createTemplateRequest,
   crmLead,
@@ -28,8 +28,8 @@ import {
   csvImportPreviewResponse,
   distributionRule,
   duplicateGroup,
+  idResponse,
   leadCadence,
-  leadEvent,
   leadSourceRow,
   leadsQuery,
   mergeLeadsRequest,
@@ -41,7 +41,6 @@ import {
   unmergeLeadsRequest,
   startCadenceRequest,
   unmergeLeadsResponse,
-  updateAutomationRequest,
   updateCadenceRequest,
   updateCrmSettingsRequest,
   updateDistributionRequest,
@@ -60,6 +59,10 @@ import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 import { sendWhatsAppText, whatsappConfigured, whatsappLink } from '../../lib/whatsapp'
+import { crmObjectsRouter } from './objects'
+import { crmActivitiesRouter } from './activities'
+import { crmWorkflowsRouter } from './workflows'
+import { crmQuotesRouter } from './quotes'
 
 const list = crmLead.array()
 const edit = requireAction('crm', 'edit')
@@ -69,10 +72,14 @@ const remove = requireAction('crm', 'delete')
 const selectLead = (sql: TransactionSql) => sql`
   select l.id, l.name, l.phone, l.email, l.source, l.status, l.assigned_to, l.notes,
          l.follow_up_at, l.last_contacted_at, l.converted_at, l.is_hot, l.is_archived,
-         l.merged_into, l.converted_project_id, l.deal_value, l.probability, l.lost_reason, l.sla_due_at, l.created_at,
+         l.merged_into, l.converted_project_id, l.deal_value, l.probability, l.lost_reason, l.lost_competitor,
+         l.sla_due_at, l.pipeline_id, l.stage_id, s.name as stage_name, l.contact_id, l.crm_company_id,
+         co.name as crm_company_name, l.title, l.close_date, l.currency, l.score, l.created_at,
          u.name as assignee_name
   from crm_leads l
-  left join users u on u.user_id = l.assigned_to`
+  left join users u on u.user_id = l.assigned_to
+  left join crm_pipeline_stages s on s.id = l.stage_id
+  left join crm_companies co on co.id = l.crm_company_id`
 
 const dateRange = (c: { req: { query: (k: string) => string | undefined } }) => {
   const today = new Date()
@@ -96,9 +103,15 @@ export const crmRouter = new Hono<AppEnv>()
     const q = leadsQuery.safeParse({
       include_archived: c.req.query('include_archived'),
       limit: c.req.query('limit'),
+      pipeline_id: c.req.query('pipeline_id'),
+      stage_id: c.req.query('stage_id'),
+      contact_id: c.req.query('contact_id'),
+      crm_company_id: c.req.query('crm_company_id'),
+      q: c.req.query('q'),
     })
     if (!q.success) fail(422, 'Invalid query.')
-    const { include_archived, limit } = q.data
+    const { include_archived, limit, pipeline_id, stage_id, contact_id, crm_company_id, q: text } = q.data
+    const needle = text ? `%${text.replace(/[%_]/g, '')}%` : null
     const rows = await attempt(c, 'crm.leads', () =>
       withUser(
         c.env,
@@ -106,31 +119,17 @@ export const crmRouter = new Hono<AppEnv>()
         (sql) => sql`
           ${selectLead(sql)}
           where ${include_archived ? sql`true` : sql`l.is_archived = false`}
+            and ${pipeline_id ? sql`l.pipeline_id = ${pipeline_id}` : sql`true`}
+            and ${stage_id ? sql`l.stage_id = ${stage_id}` : sql`true`}
+            and ${contact_id ? sql`l.contact_id = ${contact_id}` : sql`true`}
+            and ${crm_company_id ? sql`l.crm_company_id = ${crm_company_id}` : sql`true`}
+            and ${needle ? sql`(l.name ilike ${needle} or l.phone ilike ${needle} or l.email ilike ${needle} or l.title ilike ${needle})` : sql`true`}
           order by l.created_at desc
           limit ${limit}`,
       ),
     )
     if (!rows) fail(400, 'We could not load leads.')
     return c.json(list.parse(rows))
-  })
-
-  .get('/leads/:id/events', async (c) => {
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.lead_events', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`
-          select e.id, e.lead_id, e.from_status, e.to_status, e.actor_id, u.name as actor_name, e.note, e.created_at
-          from crm_lead_events e
-          left join users u on u.user_id = e.actor_id
-          where e.lead_id = ${id}
-          order by e.created_at desc
-          limit 100`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not load history.')
-    return c.json(leadEvent.array().parse(rows))
   })
 
   // Manual entry. add_lead carries the dedupe and round-robin the webhook path
@@ -141,8 +140,15 @@ export const crmRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the lead details.')
     const v = parsed.data
 
+    // add_lead() dedupes on the normalised number and returns the row that
+    // already exists, so ask first — otherwise the client cannot tell a new
+    // lead from one it just re-opened.
+    const norm = normalizePhone(v.phone)
     const row = await attempt(c, 'crm.lead_create', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [known] = norm
+          ? await sql<{ id: string }[]>`select id from crm_leads where phone_norm = ${norm} limit 1`
+          : []
         const [created] = await sql<{ id: string }[]>`
           select add_lead(
             ${v.name ?? null}, ${v.phone}, ${v.email ?? null},
@@ -154,15 +160,24 @@ export const crmRouter = new Hono<AppEnv>()
         if (v.follow_up_at) extra.follow_up_at = v.follow_up_at
         if (v.deal_value !== undefined) extra.deal_value = v.deal_value
         if (v.probability !== undefined) extra.probability = v.probability
+        if (v.title !== undefined) extra.title = v.title
+        if (v.close_date !== undefined) extra.close_date = v.close_date
+        if (v.crm_company_id !== undefined) extra.crm_company_id = v.crm_company_id
+        // A known number hands back the existing row; only a fresh one is
+        // placed in the pipeline the caller asked for.
+        if (!known && v.pipeline_id !== undefined) extra.pipeline_id = v.pipeline_id
+        if (!known && v.stage_id !== undefined) extra.stage_id = v.stage_id
         if (Object.keys(extra).length) await sql`update crm_leads set ${sql(extra)} where id = ${id}`
         const [lead] = await sql`${selectLead(sql)} where l.id = ${id}`
-        return lead ?? null
+        return lead ? { lead, created: !known } : null
       }),
     )
     if (!row) fail(400, 'We could not add this lead.')
-    const lead = crmLead.parse(row)
-    await audit(c, { action: 'lead.create', entityType: 'crm_lead', entityId: lead.id, after: { phone: v.phone, source: v.source } })
-    return c.json(lead, 201)
+    const body = createLeadResponse.parse(row)
+    if (body.created) {
+      await audit(c, { action: 'lead.create', entityType: 'crm_lead', entityId: body.lead.id, after: { phone: v.phone, source: v.source } })
+    }
+    return c.json(body, body.created ? 201 : 200)
   })
 
   // Stage moves carry timestamps with them: leaving 'new' is the moment someone
@@ -196,7 +211,9 @@ export const crmRouter = new Hono<AppEnv>()
         await sql`update crm_leads set ${sql({ ...patch, ...stamps })} where id = ${id}`
         return { from: current.status }
       }),
+      { onCode: (code) => (code === '22023' ? ('rule' as const) : undefined) },
     )
+    if (result === 'rule') fail(422, 'Tell us why it was lost (3+ chars).')
     if (result === 'missing') fail(404, 'That lead was not found.')
     if (!result) fail(400, 'We could not update the lead.')
     // Money, reason and notes are material to the story; follow-up shuffles
@@ -220,13 +237,19 @@ export const crmRouter = new Hono<AppEnv>()
     const parsed = bulkLeadPatch.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid bulk patch.')
     const { ids, patch } = parsed.data
-    const previous = await attempt(c, 'crm.bulk', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`select * from crm_bulk_patch(${sql.array(ids)}::uuid[], ${sql.json(patch)})`,
-      ),
+    if (patch.status === 'lost' && !patch.lost_reason) fail(422, 'Moving to Lost needs a reason.')
+    const previous = await attempt(
+      c,
+      'crm.bulk',
+      () =>
+        withUser(
+          c.env,
+          c.get('auth').userId,
+          (sql) => sql`select * from crm_bulk_patch(${sql.array(ids)}::uuid[], ${sql.json(patch)})`,
+        ),
+      { onCode: (code) => (code === '22023' ? ('rule' as const) : undefined) },
     )
+    if (previous === 'rule') fail(422, 'Moving to Lost needs a reason.')
     if (!previous) fail(400, 'Bulk update failed.')
     await audit(c, { action: 'lead.bulk_update', entityType: 'crm_lead', after: { ids: ids.length, patch } })
     return c.json(bulkPatchResponse.parse({ updated: previous.length, previous }))
@@ -498,6 +521,11 @@ export const crmRouter = new Hono<AppEnv>()
           insert into crm_lead_events (company_id, lead_id, from_status, to_status, actor_id, note)
           values (get_current_company_id(), ${leadId}, null, null, ${c.get('auth').userId},
                   ${`sent "${result.templateName}" via ${channel}${delivery === 'api' ? ' (delivered)' : ''}`})`
+        // The message itself is an activity on the timeline.
+        await sql`
+          insert into crm_activities (company_id, lead_id, type, direction, subject, body, provider, started_at)
+          values (get_current_company_id(), ${leadId}, ${channel}, 'out', ${result.templateName}, ${result.rendered},
+                  ${delivery === 'api' ? 'whatsapp' : 'manual'}, now())`
       }),
     )
     await audit(c, { action: 'lead.send_template', entityType: 'crm_lead', entityId: leadId, after: { template_id, channel, delivery } })
@@ -518,7 +546,7 @@ export const crmRouter = new Hono<AppEnv>()
         withUser(c.env, c.get('auth').userId, async (sql) => {
           const rows = await sql<{ client_id: string; project_id: string }[]>`
             select * from convert_lead_to_project(
-              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${sql.json(v.project)})`
+              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${sql.json(v.project)}, ${v.quote_id ?? null})`
           return rows[0] ?? null
         }),
       { onCode: (code, err) => (code === '22023' && String((err as { message?: string })?.message ?? '').includes('already') ? ('done' as const) : undefined) },
@@ -573,7 +601,7 @@ export const crmRouter = new Hono<AppEnv>()
     )
     if (!id) fail(400, 'We could not save this cadence.')
     await audit(c, { action: 'cadence.create', entityType: 'crm_cadence', entityId: id, after: { name: v.name, steps: v.steps.length } })
-    return c.json({ id }, 201)
+    return c.json(idResponse.parse({ id }), 201)
   })
 
   .patch('/cadences/:id', edit, async (c) => {
@@ -631,7 +659,7 @@ export const crmRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not start the cadence.')
     await audit(c, { action: 'lead.cadence_start', entityType: 'crm_lead', entityId: leadId, after: parsed.data })
-    return c.json({ next_at: rows[0]?.next_at ?? null })
+    return c.json(cadenceStartResponse.parse({ next_at: rows[0]?.next_at ?? null }))
   })
 
   .delete('/leads/:id/cadence', edit, async (c) => {
@@ -646,11 +674,17 @@ export const crmRouter = new Hono<AppEnv>()
     return c.body(null, 204)
   })
 
-  // ── Saved views (mine) ──────────────────────────────────────
+  // ── Saved views: mine, plus the ones shared with the studio ─
+  // A private view is anyone's to keep; publishing one to the team is an
+  // edit on the shared workspace and is gated like one. RLS lets only the
+  // creator or the owner change or remove a view.
   .get('/views', async (c) => {
     const rows = await attempt(c, 'crm.views', () =>
       withUser(c.env, c.get('auth').userId, (sql) => sql`
-        select id, user_id, name, query, visibility, created_at from crm_saved_views order by created_at`),
+        select v.id, v.name, v.query, v.visibility, v.user_id, u.name as owner_name, v.created_at
+        from crm_saved_views v
+        left join users u on u.user_id = v.user_id
+        order by (v.visibility = 'private') desc, v.created_at`),
     )
     if (!rows) fail(400, 'We could not load your views.')
     return c.json(savedView.array().parse(rows))
@@ -660,37 +694,57 @@ export const crmRouter = new Hono<AppEnv>()
     const parsed = createSavedViewRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Name the view.')
     const auth = c.get('auth')
-    const row = await attempt(c, 'crm.view_save', () =>
-      withUser(c.env, auth.userId, async (sql) => {
-        const rows = await sql`
-          insert into crm_saved_views (company_id, user_id, name, query, visibility)
-          values (get_current_company_id(), ${auth.userId}, ${parsed.data.name}, ${sql.json(parsed.data.query)}, ${parsed.data.visibility})
-          on conflict (user_id, name) do update set query = excluded.query, visibility = excluded.visibility
-          returning id, user_id, name, query, visibility, created_at`
-        return rows[0] ?? null
-      }),
+    const v = parsed.data
+    if (v.visibility !== 'private' && !auth.access.hasAction('crm', 'edit')) fail(403, 'You cannot publish views to the team.')
+    const row = await attempt(
+      c,
+      'crm.view_save',
+      () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const [existing] = await sql<{ id: string }[]>`
+            select id from crm_saved_views
+            where name = ${v.name} and ((${v.visibility} = 'private' and user_id = ${auth.userId} and visibility = 'private')
+                                       or (${v.visibility} <> 'private' and visibility <> 'private'))`
+          const rows = existing
+            ? await sql`
+                update crm_saved_views set query = ${sql.json(v.query)}, visibility = ${v.visibility}
+                where id = ${existing.id}
+                returning id, name, query, visibility, user_id, created_at`
+            : await sql`
+                insert into crm_saved_views (company_id, user_id, created_by, name, query, visibility)
+                values (get_current_company_id(), ${auth.userId}, ${auth.userId}, ${v.name}, ${sql.json(v.query)}, ${v.visibility})
+                returning id, name, query, visibility, user_id, created_at`
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? ('taken' as const) : undefined) },
     )
+    if (row === 'taken') fail(409, 'A shared view with that name already exists.')
     if (!row) fail(400, 'We could not save this view.')
-    return c.json(savedView.parse(row), 201)
+    const saved = savedView.parse({ ...row, owner_name: null })
+    await audit(c, { action: 'view.save', entityType: 'crm_saved_view', entityId: saved.id, after: { name: v.name, visibility: v.visibility } })
+    return c.json(saved, 201)
   })
 
   .patch('/views/:id', async (c) => {
     const parsed = updateSavedViewRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid update.')
+    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
     const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.view_update', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => {
-        // jsonb columns need the driver's json wrapper; everything else maps directly.
-        const patch = parsed.data.query
-          ? { ...parsed.data, query: sql.json(parsed.data.query) }
-          : parsed.data
-        return sql<{ id: string }[]>`
-          update crm_saved_views set ${sql(patch)} where id = ${id} returning id`
-      }),
+    const auth = c.get('auth')
+    const v = parsed.data
+    if (v.visibility && v.visibility !== 'private' && !auth.access.hasAction('crm', 'edit')) fail(403, 'You cannot publish views to the team.')
+    const rows = await attempt(
+      c,
+      'crm.view_update',
+      () =>
+        withUser(c.env, auth.userId, (sql) => sql<{ id: string }[]>`
+          update crm_saved_views set ${sql({ ...v, ...(v.query ? { query: sql.json(v.query) } : {}) })} where id = ${id} returning id`),
+      { onCode: (code) => (code === '23505' ? ('taken' as const) : undefined) },
     )
+    if (rows === 'taken') fail(409, 'A view with that name already exists.')
     if (!rows) fail(400, 'We could not update this view.')
-    if (!rows.length) fail(404, 'That view was not found.')
-    await audit(c, { action: 'view.update', entityType: 'crm_saved_view', entityId: id, after: parsed.data })
+    if (!rows.length) fail(404, 'That view was not found, or it is not yours to change.')
+    await audit(c, { action: 'view.update', entityType: 'crm_saved_view', entityId: id, after: v })
     return c.body(null, 204)
   })
 
@@ -701,32 +755,42 @@ export const crmRouter = new Hono<AppEnv>()
         delete from crm_saved_views where id = ${id} returning id`),
     )
     if (!rows) fail(400, 'We could not delete this view.')
-    if (!rows.length) fail(404, 'That view was not found.')
+    if (!rows.length) fail(404, 'That view was not found, or it is not yours to remove.')
+    await audit(c, { action: 'view.delete', entityType: 'crm_saved_view', entityId: id })
     return c.body(null, 204)
   })
 
   // ── Settings ────────────────────────────────────────────────
   .get('/settings', async (c) => {
     const rows = await attempt(c, 'crm.settings', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => sql<{ sla_hours: number }[]>`select crm_sla_hours() as sla_hours`),
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ sla_hours: number; hot_score: number }[]>`
+        select crm_sla_hours() as sla_hours,
+               coalesce((select s.hot_score from crm_settings s where s.company_id = get_current_company_id()), 60) as hot_score`),
     )
     if (!rows) fail(400, 'We could not load CRM settings.')
-    return c.json(crmSettings.parse(rows[0] ?? { sla_hours: 24 }))
+    return c.json(crmSettings.parse(rows[0] ?? { sla_hours: 24, hot_score: 60 }))
   })
 
   .patch('/settings', edit, async (c) => {
     const parsed = updateCrmSettingsRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, 'The SLA must be between 1 and 720 hours.')
-    if (parsed.data.sla_hours === undefined) return c.body(null, 204)
+    if (!parsed.success) fail(422, 'The SLA must be between 1 and 720 hours, the hot score between 1 and 1000.')
+    if (parsed.data.sla_hours === undefined && parsed.data.hot_score === undefined) return c.body(null, 204)
     const auth = c.get('auth')
     if (!auth.isOwner) fail(403, 'Only the studio owner can change CRM settings.')
-    const sla = parsed.data.sla_hours
+    const { sla_hours: sla, hot_score: hot } = parsed.data
+    // crm_set_sla_hours() also moves sla_due_at on every lead still waiting,
+    // so a tighter target shows up on the board the same minute.
     const row = await attempt(c, 'crm.settings_update', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const rows = await sql<{ sla_hours: number }[]>`
-          insert into crm_settings (company_id, sla_hours) values (get_current_company_id(), ${sla})
-          on conflict (company_id) do update set sla_hours = excluded.sla_hours
-          returning sla_hours`
+        if (sla !== undefined) await sql`select crm_set_sla_hours(${sla})`
+        if (hot !== undefined) {
+          await sql`
+            insert into crm_settings (company_id, hot_score) values (get_current_company_id(), ${hot})
+            on conflict (company_id) do update set hot_score = excluded.hot_score`
+        }
+        const rows = await sql<{ sla_hours: number; hot_score: number }[]>`
+          select crm_sla_hours() as sla_hours,
+                 coalesce((select s.hot_score from crm_settings s where s.company_id = get_current_company_id()), 60) as hot_score`
         return rows[0] ?? null
       }),
     )
@@ -780,7 +844,7 @@ export const crmRouter = new Hono<AppEnv>()
     if (row === 'exists') fail(409, 'They are already on the rota.')
     if (!row) fail(404, 'We could not find that team member.')
     await audit(c, { action: 'distribution.add', entityType: 'crm_distribution_rule', entityId: row.id, after: parsed.data })
-    return c.json({ id: row.id }, 201)
+    return c.json(idResponse.parse({ id: row.id }), 201)
   })
 
   .patch('/distribution/:id', edit, async (c) => {
@@ -814,74 +878,6 @@ export const crmRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not remove them from the rota.')
     if (!rows.length) fail(404, 'Not found.')
     await audit(c, { action: 'distribution.remove', entityType: 'crm_distribution_rule', entityId: id })
-    return c.body(null, 204)
-  })
-
-  // ── Automations ─────────────────────────────────────────────
-  .get('/automations', async (c) => {
-    const rows = await attempt(c, 'crm.automations', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`
-          select id, name, trigger, condition, action, action_value, is_active, created_at
-          from crm_automation_rules order by created_at`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not load automations.')
-    return c.json(automationRule.array().parse(rows))
-  })
-
-  .post('/automations', edit, async (c) => {
-    const parsed = createAutomationRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, parsed.error.issues[0]?.message ?? 'Please check the rule.')
-    const v = parsed.data
-    const row = await attempt(c, 'crm.automation_create', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        const [r] = await sql`
-          insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value, is_active)
-          values (get_current_company_id(), ${v.name}, ${v.trigger}, ${sql.json(v.condition)}, ${v.action}, ${sql.json(v.action_value)}, ${v.is_active})
-          returning id, name, trigger, condition, action, action_value, is_active, created_at`
-        return r ?? null
-      }),
-    )
-    if (!row) fail(400, 'We could not save this rule.')
-    const created = automationRule.parse(row)
-    await audit(c, { action: 'automation.create', entityType: 'crm_automation_rule', entityId: created.id, after: v })
-    return c.json(created, 201)
-  })
-
-  .patch('/automations/:id', edit, async (c) => {
-    const parsed = updateAutomationRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, 'Invalid update.')
-    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.automation_update', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql<{ id: string }[]>`
-          update crm_automation_rules set ${sql(parsed.data)} where id = ${id} returning id`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not update this rule.')
-    if (!rows.length) fail(404, 'That rule was not found.')
-    await audit(c, { action: 'automation.update', entityType: 'crm_automation_rule', entityId: id, after: parsed.data })
-    return c.body(null, 204)
-  })
-
-  .delete('/automations/:id', remove, async (c) => {
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.automation_delete', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql<{ id: string }[]>`delete from crm_automation_rules where id = ${id} returning id`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not delete this rule.')
-    if (!rows.length) fail(404, 'That rule was not found.')
-    await audit(c, { action: 'automation.delete', entityType: 'crm_automation_rule', entityId: id })
     return c.body(null, 204)
   })
 
@@ -964,3 +960,12 @@ export const crmRouter = new Hono<AppEnv>()
     await audit(c, { action: 'lead_source.delete', entityType: 'crm_webhook_source', entityId: id })
     return c.body(null, 204)
   })
+
+  // Pipelines, stages, contacts, companies, lost reasons, forecast.
+  .route('/', crmObjectsRouter)
+  // Activities, timeline, calls, meetings, mailbox sync, integrations.
+  .route('/', crmActivitiesRouter)
+  // Workflows, enrollments, scoring.
+  .route('/', crmWorkflowsRouter)
+  // Quotes and per-person preferences.
+  .route('/', crmQuotesRouter)

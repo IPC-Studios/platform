@@ -194,3 +194,34 @@ export async function callApi<TOut extends z.ZodTypeAny>(
 
   return opts.responseSchema.parse(json)
 }
+
+/**
+ * Fetch a file the API guards and hand it to the browser as a download.
+ *
+ * A plain <a href download> cannot carry the Authorization header — the
+ * access token is never a cookie — so every such link came back 401. This
+ * asks with the header, rotates once like any other call, and saves the
+ * bytes it gets.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const send = () => {
+    const token = getToken()
+    return fetch(`${config.apiBaseUrl}${path}`, {
+      credentials: 'same-origin',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+  }
+  let res = await send()
+  if (res.status === 401 && (await rotateTokens())) res = await send()
+  if (!res.ok) {
+    throw new ApiError(res.status, res.status === 404 ? 'That file is no longer available.' : 'We could not download that file.')
+  }
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.append(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

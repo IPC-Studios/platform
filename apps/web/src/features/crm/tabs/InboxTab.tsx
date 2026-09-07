@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Download, Pencil, Search, X } from 'lucide-react'
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Pencil, Save, Search, Users, X } from 'lucide-react'
+import type { CrmLead, InboxColumn, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 import { useAuth } from '@/shared/auth/AuthProvider'
-import { useBulkPatch, useDeleteView, useSaveView, useSavedViews, useUpdateView } from '../api'
+import { useAccess } from '@/shared/auth/useAccess'
+import { useBulkPatch, useCrmPrefs, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useUpdateCrmPrefs, useUpdateView, useWorkflows } from '../api'
+import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
-import { LeadTable, exportLeadsCsv } from './shared'
-import { LostReasonDialog } from '../LostReasonDialog'
+import { DEFAULT_INBOX_COLUMNS, INBOX_COLUMNS, LeadTable, exportLeadsCsv } from './shared'
+
+const SCOPE_LABEL: Record<SavedViewVisibility, string> = { private: 'Only me', team: 'My team', everyone: 'Everyone' }
 
 export function InboxTab({
   leads,
@@ -34,16 +37,22 @@ export function InboxTab({
   const saveView = useSaveView()
   const updateView = useUpdateView()
   const deleteView = useDeleteView()
-  const { session } = useAuth()
   const [naming, setNaming] = useState(false)
   const [viewName, setViewName] = useState('')
-  const [viewVisibility, setViewVisibility] = useState<'private' | 'team' | 'everyone'>('private')
+  const [viewScope, setViewScope] = useState<SavedViewVisibility>('private')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [dismissed, setDismissed] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [losing, setLosing] = useState(false)
   const bulk = useBulkPatch()
+  const workflows = useWorkflows()
+  const enroll = useEnrollWorkflow()
+  const settings = useCrmSettings()
+  const { session } = useAuth()
+  const access = useAccess()
+  const canShare = access.hasAction('crm', 'edit')
+  const myId = session?.user_id ?? null
 
   // Views saved before they lived on the API were in this browser only. Push
   // them up once, so nothing someone set up is lost in the move.
@@ -55,6 +64,37 @@ export function InboxTab({
       if (!views.some((s) => s.name === v.name)) saveView.mutate({ name: v.name, query: v.query, visibility: 'private' })
     }
   }, [views, saveView])
+
+  // Personal layout: which columns show, remembered per person on the API.
+  const { data: prefs } = useCrmPrefs()
+  const updatePrefs = useUpdateCrmPrefs()
+  const [showColumns, setShowColumns] = useState(false)
+  const columns = prefs?.columns ?? DEFAULT_INBOX_COLUMNS
+  const density = prefs?.density ?? 'comfortable'
+
+  function toggleColumn(key: InboxColumn, on: boolean) {
+    if (key === 'lead') return
+    const next = on ? [...columns, key] : columns.filter((c) => c !== key)
+    // Keep the canonical left-to-right order so a toggled column lands where
+    // the eye expects it rather than appended at the end.
+    const order = INBOX_COLUMNS.map((c) => c.key)
+    next.sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    updatePrefs.mutate({ columns: next })
+  }
+
+  // The default view opens itself on arrival — but only when the person
+  // hasn't already filtered; a shared link's filters always win.
+  const appliedDefault = useRef(false)
+  useEffect(() => {
+    if (appliedDefault.current || !prefs?.default_view_id || !views) return
+    if (isSaveable(query)) {
+      appliedDefault.current = true
+      return
+    }
+    const v = views.find((s) => s.id === prefs.default_view_id)
+    if (v) onQuery(toLeadQuery(v.query))
+    appliedDefault.current = true
+  }, [prefs, views, query, onQuery])
 
   const rows = useMemo(() => applyQuery(leads, query, now), [leads, query, now])
   const assignees = useMemo(() => {
@@ -119,26 +159,21 @@ export function InboxTab({
         {naming ? (
           <span className="flex flex-wrap items-center gap-2">
             <Input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" className="w-48" autoFocus aria-label="View name" />
-            <Select
-              value={viewVisibility}
-              onChange={(e) => setViewVisibility(e.target.value as 'private' | 'team' | 'everyone')}
-              className="w-36"
-              aria-label="Who can see this view"
-            >
+            <Select value={viewScope} onChange={(e) => setViewScope(e.target.value as SavedViewVisibility)} className="w-36" aria-label="Who can see this view">
               <option value="private">Only me</option>
-              <option value="team">My team</option>
-              <option value="everyone">Everyone</option>
+              {canShare && <option value="team">My team</option>}
+              {canShare && <option value="everyone">Everyone</option>}
             </Select>
             <Button
               size="sm"
               disabled={!viewName.trim() || saveView.isPending}
               onClick={() =>
                 saveView.mutate(
-                  { name: viewName.trim(), query: toSavedQuery(query), visibility: viewVisibility },
+                  { name: viewName.trim(), query: toSavedQuery(query), visibility: viewScope },
                   {
                     onSuccess: () => {
                       setViewName('')
-                      setViewVisibility('private')
+                      setViewScope('private')
                       setNaming(false)
                     },
                   },
@@ -166,12 +201,12 @@ export function InboxTab({
         {(views ?? []).length > 0 && (
           <span className="flex flex-wrap items-center gap-1">
             {(views ?? []).map((v) => {
-              // Only the creator (or studio owner) can change a view — the API
-              // enforces the same rule, this just avoids offering a dead button.
-              const mine = v.user_id === session?.user_id || !!session?.is_owner
+              const mine = v.user_id === myId
+              const canManage = mine || !!session?.is_owner
+              const scope = `${SCOPE_LABEL[v.visibility]}${!mine && v.owner_name ? ` · by ${v.owner_name}` : ''}`
               return (
-                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs">
-                  <Bookmark className="size-3" />
+                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs" title={scope}>
+                  {v.visibility === 'everyone' ? <Globe className="size-3" /> : v.visibility === 'team' ? <Users className="size-3" /> : <Bookmark className="size-3" />}
                   {renamingId === v.id ? (
                     <span className="flex items-center gap-1">
                       <Input
@@ -190,10 +225,7 @@ export function InboxTab({
                         className="h-6 px-1.5 text-xs"
                         disabled={!renameValue.trim() || updateView.isPending}
                         onClick={() =>
-                          updateView.mutate(
-                            { id: v.id, patch: { name: renameValue.trim() } },
-                            { onSuccess: () => setRenamingId(null) },
-                          )
+                          updateView.mutate({ id: v.id, patch: { name: renameValue.trim() } }, { onSuccess: () => setRenamingId(null) })
                         }
                       >
                         Save
@@ -208,7 +240,7 @@ export function InboxTab({
                       <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
                         {v.name}
                       </button>
-                      {mine && (
+                      {canManage && (
                         <button
                           type="button"
                           onClick={() => {
@@ -221,11 +253,40 @@ export function InboxTab({
                           <span className="sr-only">Rename {v.name}</span>
                         </button>
                       )}
-                      {mine && (
+                      {canManage && isSaveable(query) && (
+                        <button
+                          type="button"
+                          title={`Save the filters on screen into ${v.name}`}
+                          onClick={() => updateView.mutate({ id: v.id, patch: { query: toSavedQuery(query) } })}
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Save className="size-3" />
+                          <span className="sr-only">Update {v.name} with the current filters</span>
+                        </button>
+                      )}
+                      {canManage && canShare && (
+                        <button
+                          type="button"
+                          title={`Shared with ${SCOPE_LABEL[v.visibility]} — click to change`}
+                          onClick={() =>
+                            updateView.mutate({
+                              id: v.id,
+                              patch: { visibility: v.visibility === 'private' ? 'team' : v.visibility === 'team' ? 'everyone' : 'private' },
+                            })
+                          }
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Users className="size-3" />
+                          <span className="sr-only">Change who can see {v.name}</span>
+                        </button>
+                      )}
+                      {canManage ? (
                         <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
                           <X className="size-3" />
                           <span className="sr-only">Delete {v.name}</span>
                         </button>
+                      ) : (
+                        <span className="w-1" />
                       )}
                     </>
                   )}
@@ -234,6 +295,37 @@ export function InboxTab({
             })}
           </span>
         )}
+
+        <span className="relative">
+          <Button variant="outline" size="sm" onClick={() => setShowColumns((s) => !s)} aria-expanded={showColumns}>
+            <Columns3 /> Columns
+          </Button>
+          {showColumns && (
+            <span className="absolute left-0 top-full z-20 mt-1 flex w-48 flex-col gap-0.5 rounded-lg border border-border bg-card p-2 shadow-lg">
+              {INBOX_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+                  <input
+                    type="checkbox"
+                    checked={columns.includes(c.key)}
+                    disabled={c.key === 'lead'}
+                    onChange={(e) => toggleColumn(c.key, e.target.checked)}
+                  />
+                  {c.label}
+                  {c.key === 'lead' && <span className="text-xs text-muted-foreground">(always)</span>}
+                </label>
+              ))}
+              <span className="mt-1 flex items-center gap-2 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
+                Density
+                <button type="button" onClick={() => updatePrefs.mutate({ density: 'comfortable' })} className={cn('rounded px-1.5 py-0.5', density === 'comfortable' ? 'bg-primary/10 font-medium text-primary' : 'hover:underline')}>
+                  Roomy
+                </button>
+                <button type="button" onClick={() => updatePrefs.mutate({ density: 'compact' })} className={cn('rounded px-1.5 py-0.5', density === 'compact' ? 'bg-primary/10 font-medium text-primary' : 'hover:underline')}>
+                  Compact
+                </button>
+              </span>
+            </span>
+          )}
+        </span>
 
         <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
           <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} />
@@ -343,6 +435,44 @@ export function InboxTab({
           <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => runBulk({ is_hot: true })}>
             Mark hot
           </Button>
+          <Select
+            value=""
+            aria-label="Set the follow-up"
+            className="w-40"
+            onChange={(e) => {
+              const days = e.target.value
+              if (!days) return
+              if (days === 'clear') return runBulk({ follow_up_at: null })
+              const at = new Date()
+              at.setDate(at.getDate() + Number(days))
+              at.setHours(10, 0, 0, 0)
+              runBulk({ follow_up_at: at.toISOString() })
+            }}
+          >
+            <option value="">Follow up…</option>
+            <option value="0">Today</option>
+            <option value="1">Tomorrow</option>
+            <option value="3">In 3 days</option>
+            <option value="7">Next week</option>
+            <option value="clear">Clear the date</option>
+          </Select>
+          {(workflows.data ?? []).some((w) => w.is_active) && (
+            <Select
+              value=""
+              aria-label="Enroll in workflow"
+              onChange={(e) => {
+                if (e.target.value) enroll.mutate({ workflowId: e.target.value, lead_ids: [...selected] }, { onSuccess: () => setSelected(new Set()) })
+              }}
+              className="w-44"
+            >
+              <option value="">Enroll in…</option>
+              {(workflows.data ?? []).filter((w) => w.is_active).map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => runBulk({ is_archived: !showArchived })}>
             {showArchived ? 'Restore' : 'Archive'}
           </Button>
@@ -355,16 +485,21 @@ export function InboxTab({
         </div>
       )}
 
-      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+      {leads.length >= 2000 && (
+        <p className="text-xs text-muted-foreground">
+          Showing the {leads.length.toLocaleString('en-IN')} most recent leads. Older ones are still in reports and on a contact.
+        </p>
+      )}
+      <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} hotScore={settings.data?.hot_score ?? 60} columns={columns} density={density} />
 
       <LostReasonDialog
         open={losing}
         count={selected.size}
         pending={bulk.isPending}
         onCancel={() => setLosing(false)}
-        onConfirm={(reason) => {
+        onConfirm={(d) => {
           setLosing(false)
-          runBulk({ status: 'lost', lost_reason: reason })
+          runBulk({ status: 'lost', ...d })
         }}
       />
     </div>

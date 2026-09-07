@@ -78,11 +78,41 @@ async function freshDb() {
   await db.exec(mig('0042_client_documents.sql'))
   await db.exec(mig('0043_enquiries.sql'))
   await db.exec(mig('0044_crm_bulk_lost.sql'))
+  await db.exec(mig('0045_crm_objects.sql'))
+  await db.exec(mig('0046_crm_activities.sql'))
+  await db.exec(mig('0047_crm_workflows.sql'))
+  await db.exec(mig('0048_crm_quotes_prefs.sql'))
+  await db.exec(mig('0049_crm_gaps.sql'))
   return db
 }
 
 async function asUser(db: PGlite, uid: string) {
   await db.exec(`set request.jwt.claim.sub = '${uid}';`)
+}
+
+/** Insert a workflow with its steps (in order) for the current company; returns its id. */
+async function workflow(
+  db: PGlite,
+  name: string,
+  trigger: string,
+  condition: Record<string, unknown>,
+  steps: Array<{ kind: 'action' | 'delay' | 'branch' | 'exit'; config?: Record<string, unknown> }>,
+  opts: { allow_reenroll?: boolean; exit_on_reply?: boolean } = {},
+): Promise<string> {
+  const id = (
+    await db.query<{ id: string }>(
+      `insert into crm_workflows (company_id, name, trigger, condition, allow_reenroll, exit_on_reply)
+       values (get_current_company_id(), '${name}', '${trigger}', '${JSON.stringify(condition)}', ${opts.allow_reenroll ?? false}, ${opts.exit_on_reply ?? true})
+       returning id;`,
+    )
+  ).rows[0]!.id
+  for (const [i, step] of steps.entries()) {
+    await db.exec(
+      `insert into crm_workflow_steps (workflow_id, company_id, step_no, kind, config)
+       values ('${id}', get_current_company_id(), ${i + 1}, '${step.kind}', '${JSON.stringify(step.config ?? {})}');`,
+    )
+  }
+  return id
 }
 
 describe('tenancy migrations + functions', () => {
@@ -2133,7 +2163,7 @@ describe('CRM v2 — events, archive, merge, stats (0032 + 0034)', () => {
 
   it('crm_stats counts only unarchived leads', async () => {
     const stats = await db.query<{ s: { total: number; byStatus: Record<string, number> } }>(
-      `select crm_stats(30) as s;`,
+      `select crm_stats(current_date - 30, current_date) as s;`,
     )
     expect(stats.rows[0]!.s.total).toBe(2)
     expect(stats.rows[0]!.s.byStatus.contacted).toBe(1)
@@ -2313,27 +2343,26 @@ describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations
     expect(meera.open).toBe(0)
   })
 
-  it('a rule fires on arrival, and its own update does not re-fire it', async () => {
-    await db.exec(
-      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
-       values (get_current_company_id(), 'Hot enquiries', 'lead_created', '{"source":"enquiry"}', 'mark_hot', '{}'),
-              (get_current_company_id(), 'Assign Meera', 'lead_created', '{}', 'assign_to', '{"user_id":"${member}"}'),
-              (get_current_company_id(), 'Quote follow-up', 'stage_changed', '{"to_status":"proposal_sent"}', 'set_follow_up_days', '{"days":2}');`,
-    )
+  it('a one-step workflow fires on arrival, and its own update does not re-fire it', async () => {
+    await workflow(db, 'Hot enquiries', 'lead_created', { source: 'enquiry' }, [{ kind: 'action', config: { action: 'mark_hot' } }])
+    await workflow(db, 'Assign Meera', 'lead_created', {}, [{ kind: 'action', config: { action: 'assign_to', user_id: member } }])
+    await workflow(db, 'Quote follow-up', 'stage_changed', { to_status: 'proposal_sent' }, [
+      { kind: 'action', config: { action: 'set_follow_up_days', days: 2 } },
+    ])
     const id = await add('Auto', '9876700030')
     const l = await lead(id)
     expect(l.is_hot).toBe(true)
     expect(l.assigned_to).toBe(member)
     const trail = await db.query<{ note: string | null }>(
-      `select note from crm_lead_events where lead_id = '${id}' and note like 'automation:%' order by created_at;`,
+      `select note from crm_lead_events where lead_id = '${id}' and note like 'workflow:%' order by created_at;`,
     )
-    expect(trail.rows.map((r) => r.note)).toEqual(['automation: Hot enquiries', 'automation: Assign Meera'])
+    expect(trail.rows.map((r) => r.note)).toEqual(['workflow: Hot enquiries · mark_hot', 'workflow: Assign Meera · assign_to'])
 
     await db.exec(`update crm_leads set status = 'proposal_sent' where id = '${id}';`)
     expect((await lead(id)).follow_up_at).not.toBeNull()
-    // Exactly one application per rule: the nested updates did not loop.
+    // Exactly one application per workflow: the nested updates did not loop.
     const applied = await db.query<{ n: number }>(
-      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'automation:%';`,
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'workflow:%';`,
     )
     expect(applied.rows[0]!.n).toBe(3)
   })
@@ -2540,17 +2569,16 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     ).toBe(false)
   })
 
-  it('an automation can start a cadence on arrival', async () => {
+  it('a workflow can start a cadence on arrival', async () => {
     await asUser(db, owner)
     const cad = (
       await db.query<{ id: string }>(
         `select id from crm_cadences where name = 'Wedding follow-up';`,
       )
     ).rows[0]!.id
-    await db.exec(
-      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
-       values (get_current_company_id(), 'Auto cadence', 'lead_created', '{"source":"enquiry"}', 'start_cadence', '{"cadence_id":"${cad}"}');`,
-    )
+    await workflow(db, 'Auto cadence', 'lead_created', { source: 'enquiry' }, [
+      { kind: 'action', config: { action: 'start_cadence', cadence_id: cad } },
+    ])
     const lead = await add('Auto cadence lead', '9876800020')
     const lc = await db.query<{ cadence_id: string }>(`select cadence_id from crm_lead_cadences where lead_id = '${lead}';`)
     expect(lc.rows[0]!.cadence_id).toBe(cad)
@@ -2628,6 +2656,785 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     const meera = team.rows.find((r) => r.user_name === 'Meera')!
     expect(meera.sla_hours).toBe(4)
     expect(meera.within_sla).toBe(1)
+  })
+})
+
+describe('CRM objects — pipelines, stages, contacts, forecast, SLA sweep (0038)', () => {
+  let db: PGlite
+  const owner = '56565656-5656-5656-5656-565656565656'
+  const member = '78787878-7878-7878-7878-787878787878'
+  const stages: Record<string, string> = {}
+  let pipeline = ''
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const lead = async (id: string) =>
+    (
+      await db.query<{
+        status: string
+        stage_id: string
+        pipeline_id: string
+        contact_id: string
+        probability: number
+        lost_reason: string | null
+        phone_norm: string | null
+      }>(`select status, stage_id, pipeline_id, contact_id, probability, lost_reason, phone_norm from crm_leads where id = '${id}';`)
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm5.test'),('${member}','member@crm5.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM5 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm5.test');`,
+    )
+    const rows = await db.query<{ id: string; key: string; pipeline_id: string }>(
+      `select id, key, pipeline_id from crm_pipeline_stages where company_id = get_current_company_id() order by position;`,
+    )
+    for (const r of rows.rows) stages[r.key] = r.id
+    pipeline = rows.rows[0]!.pipeline_id
+  })
+
+  it('a new studio gets the Sales pipeline, six stages and a lost-reason list', async () => {
+    expect(Object.keys(stages)).toEqual(['new', 'contacted', 'qualified', 'proposal_sent', 'converted', 'lost'])
+    const p = await db.query<{ name: string; is_default: boolean }>(`select name, is_default from crm_pipelines;`)
+    expect(p.rows).toEqual([{ name: 'Sales', is_default: true }])
+    const reasons = await db.query<{ n: number }>(`select count(*)::int as n from crm_lost_reasons;`)
+    expect(reasons.rows[0]!.n).toBe(5)
+  })
+
+  it('a lead lands in the default pipeline, in the stage for its status, with a contact', async () => {
+    const id = await add('Aanya', '9876900001')
+    const l = await lead(id)
+    expect(l.pipeline_id).toBe(pipeline)
+    expect(l.stage_id).toBe(stages.new)
+    expect(l.probability).toBe(10)
+    expect(l.contact_id).not.toBeNull()
+    const c = await db.query<{ name: string; phone_norm: string; lifecycle: string }>(
+      `select name, phone_norm, lifecycle from crm_contacts where id = '${l.contact_id}';`,
+    )
+    expect(c.rows[0]).toEqual({ name: 'Aanya', phone_norm: '919876900001', lifecycle: 'lead' })
+
+    // A second row with the same number (an import beside a known lead) shares the contact.
+    await db.exec(
+      `insert into crm_leads (company_id, name, phone, phone_norm, source) values (get_current_company_id(), 'Aanya again', '9876900001', null, 'manual');`,
+    )
+    const shared = await db.query<{ n: number }>(
+      `select count(distinct contact_id)::int as n from crm_leads where phone_norm = '919876900001';`,
+    )
+    expect(shared.rows[0]!.n).toBe(1)
+  })
+
+  it('moving the stage derives the status, and moving the status derives the stage', async () => {
+    const id = await add('Stage lead', '9876900002')
+    await db.exec(`update crm_leads set stage_id = '${stages.qualified}' where id = '${id}';`)
+    let l = await lead(id)
+    expect(l.status).toBe('qualified')
+    expect(l.probability).toBe(50)
+    const events = await db.query<{ to_status: string }>(
+      `select to_status from crm_lead_events where lead_id = '${id}' and from_status = 'new';`,
+    )
+    expect(events.rows[0]!.to_status).toBe('qualified')
+
+    await db.exec(`update crm_leads set status = 'converted' where id = '${id}';`)
+    l = await lead(id)
+    expect(l.stage_id).toBe(stages.converted)
+    expect(l.probability).toBe(100)
+    const c = await db.query<{ lifecycle: string }>(`select lifecycle from crm_contacts where id = '${l.contact_id}';`)
+    expect(c.rows[0]!.lifecycle).toBe('customer')
+  })
+
+  it('crm_move_stage refuses lost without a reason, another pipeline, a full stage and missing fields', async () => {
+    const id = await add('Move lead', '9876900003')
+    await expect(db.query(`select crm_move_stage('${id}', '${stages.lost}');`)).rejects.toThrow(/lost_reason/)
+    expect(
+      (await db.query<{ s: string }>(`select crm_move_stage('${id}', '${stages.lost}', 'Budget', 'Other Studio') as s;`)).rows[0]!.s,
+    ).toBe('lost')
+    const l = await db.query<{ lost_reason: string; lost_competitor: string }>(
+      `select lost_reason, lost_competitor from crm_leads where id = '${id}';`,
+    )
+    expect(l.rows[0]).toEqual({ lost_reason: 'Budget', lost_competitor: 'Other Studio' })
+    // Back to open clears the reason.
+    await db.query(`select crm_move_stage('${id}', '${stages.contacted}');`)
+    expect((await lead(id)).lost_reason).toBeNull()
+
+    // A stage from another pipeline is refused.
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipelines (company_id, name) values (get_current_company_id(), 'Corporate') returning id;`,
+      )
+    ).rows[0]!.id
+    const foreign = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position) values ('${other}', get_current_company_id(), 'Brief', 'brief', 0) returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(db.query(`select crm_move_stage('${id}', '${foreign}');`)).rejects.toThrow(/another pipeline/)
+
+    // WIP limit counts the deals already there.
+    await db.exec(`update crm_pipeline_stages set wip_limit = 1 where id = '${stages.qualified}';`)
+    const second = await add('Second', '9876900004')
+    await db.query(`select crm_move_stage('${id}', '${stages.qualified}');`)
+    await expect(db.query(`select crm_move_stage('${second}', '${stages.qualified}');`)).rejects.toThrow(/full/)
+    await db.exec(`update crm_pipeline_stages set wip_limit = null where id = '${stages.qualified}';`)
+
+    // Required fields gate the move until they are filled.
+    await db.exec(`update crm_pipeline_stages set required_fields = '{deal_value,close_date}' where id = '${stages.proposal_sent}';`)
+    await expect(db.query(`select crm_move_stage('${second}', '${stages.proposal_sent}');`)).rejects.toThrow(/deal_value, close_date/)
+    await db.exec(`update crm_leads set deal_value = 50000, close_date = current_date + 30 where id = '${second}';`)
+    expect(
+      (await db.query<{ s: string }>(`select crm_move_stage('${second}', '${stages.proposal_sent}') as s;`)).rows[0]!.s,
+    ).toBe('proposal_sent')
+  })
+
+  it('a custom open stage still maps to a legacy status by rank', async () => {
+    const custom = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position, kind, probability_default)
+         values ('${pipeline}', get_current_company_id(), 'Negotiation', 'negotiation', 3, 'open', 80) returning id;`,
+      )
+    ).rows[0]!.id
+    expect((await db.query<{ s: string }>(`select crm_stage_status('${custom}') as s;`)).rows[0]!.s).toBe('proposal_sent')
+    const id = await add('Custom stage', '9876900005')
+    await db.exec(`update crm_leads set stage_id = '${custom}' where id = '${id}';`)
+    const l = await lead(id)
+    expect(l.status).toBe('proposal_sent')
+    expect(l.probability).toBe(80)
+    await db.exec(`delete from crm_pipeline_stages where id = '${custom}';`)
+  })
+
+  it('editing the phone re-normalises it and relinks the contact', async () => {
+    const id = await add('Renumber', '9876900006')
+    const before = await lead(id)
+    await db.exec(`update crm_leads set phone = '+91 98769 00007' where id = '${id}';`)
+    const after = await lead(id)
+    expect(after.phone_norm).toBe('919876900007')
+    expect(after.contact_id).not.toBe(before.contact_id)
+  })
+
+  it('a bulk edit can lose leads with a reason, and undo puts the deal fields back', async () => {
+    const a = await add('Bulk lost A', '9876900010')
+    const b = await add('Bulk lost B', '9876900011')
+    await db.exec(`update crm_leads set deal_value = 12000 where id = '${a}';`)
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost"}'::jsonb);`),
+    ).rejects.toThrow(/lost_reason/)
+    const snap = await db.query<{ id: string; deal_value: string | null; stage_id: string; lost_reason: string | null }>(
+      `select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost","lost_reason":"No response"}'::jsonb);`,
+    )
+    expect(snap.rows).toHaveLength(2)
+    expect(Number(snap.rows.find((r) => r.id === a)!.deal_value)).toBe(12000)
+    expect((await lead(a)).status).toBe('lost')
+    expect((await lead(a)).lost_reason).toBe('No response')
+    await db.query(`select crm_restore_leads('${JSON.stringify(snap.rows)}'::jsonb);`)
+    const restored = await lead(a)
+    expect(restored.status).toBe('new')
+    expect(restored.stage_id).toBe(stages.new)
+    expect(restored.lost_reason).toBeNull()
+
+    // Moving by stage works the same way.
+    const snap2 = await db.query(
+      `select * from crm_bulk_patch(array['${b}']::uuid[], '{"stage_id":"${stages.contacted}"}'::jsonb);`,
+    )
+    expect(snap2.rows).toHaveLength(1)
+    expect((await lead(b)).status).toBe('contacted')
+  })
+
+  it('two people can share a team view under the same name; one person cannot repeat a private name', async () => {
+    await asUser(db, owner)
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Hot this week', '{}', 'private');`,
+    )
+    await expect(
+      db.exec(
+        `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Hot this week', '{}', 'private');`,
+      ),
+    ).rejects.toThrow()
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${owner}', 'Team overdue', '{}', 'team');`,
+    )
+    // The old unique (user_id, name) would have refused this second row.
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query, visibility) values (get_current_company_id(), '${member}', 'Hot this week', '{}', 'private');`,
+    )
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_saved_views where name = 'Hot this week';`)
+    expect(n.rows[0]!.n).toBe(2)
+  })
+
+  it('the forecast weights open deals by probability and groups by stage', async () => {
+    const x = await add('Forecast X', '9876900020')
+    const y = await add('Forecast Y', '9876900021')
+    await db.exec(`update crm_leads set deal_value = 100000, stage_id = '${stages.qualified}' where id = '${x}';`)
+    await db.exec(`update crm_leads set deal_value = 40000, stage_id = '${stages.converted}' where id = '${y}';`)
+    const f = await db.query<{
+      f: { count: number; total_value: number; weighted: number; won_value: number; by_stage: Array<{ name: string; count: number }> }
+    }>(`select crm_forecast(current_date - 1, current_date + 1) as f;`)
+    const r = f.rows[0]!.f
+    expect(Number(r.won_value)).toBe(40000)
+    expect(Number(r.total_value)).toBeGreaterThanOrEqual(140000)
+    // 100000 at 50% + 40000 at 100%, plus whatever earlier leads carry.
+    expect(Number(r.weighted)).toBeGreaterThanOrEqual(90000)
+    expect(r.by_stage.find((s) => s.name === 'Won')!.count).toBeGreaterThanOrEqual(1)
+  })
+
+  it('the SLA sweep notifies once a day and writes the breach once', async () => {
+    const id = await add('SLA lead', '9876900030')
+    await db.exec(`update crm_leads set sla_due_at = now() - interval '2 hours', assigned_to = null where id = '${id}';`)
+    const first = await db.query<{ s: { sla: { breached: number; notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(first.rows[0]!.s.sla.breached).toBeGreaterThanOrEqual(1)
+    expect(first.rows[0]!.s.sla.notified).toBeGreaterThanOrEqual(1)
+    const again = await db.query<{ s: { sla: { notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(again.rows[0]!.s.sla.notified).toBe(0)
+    // Unassigned: the studio owner hears about it.
+    const notif = await db.query<{ n: number }>(
+      `select count(*)::int as n from notifications where recipient_uid = '${owner}' and entity_id = '${id}' and type = 'crm_sla';`,
+    )
+    expect(notif.rows[0]!.n).toBe(1)
+    const ev = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note = 'SLA breached';`,
+    )
+    expect(ev.rows[0]!.n).toBe(1)
+  })
+
+  it('changing the SLA target moves the deadline on every lead still waiting', async () => {
+    const id = await add('SLA target', '9876900031')
+    await db.query(`select crm_set_sla_hours(4);`)
+    const l = await db.query<{ ok: boolean }>(
+      `select sla_due_at = created_at + interval '4 hours' as ok from crm_leads where id = '${id}';`,
+    )
+    expect(l.rows[0]!.ok).toBe(true)
+    await asUser(db, member)
+    await expect(db.query(`select crm_set_sla_hours(8);`)).rejects.toThrow(/not allowed/)
+    await asUser(db, owner)
+  })
+})
+
+describe('CRM activities — timeline, replies, tasks, integrations (0039)', () => {
+  let db: PGlite
+  const owner = '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a'
+  const member = '8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm6.test'),('${member}','member@crm6.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM6 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm6.test');`,
+    )
+  })
+
+  it('an activity takes its actor, contact and task owner from context', async () => {
+    const lead = await add('Activity lead', '9876950001')
+    await db.exec(`update crm_leads set assigned_to = '${member}' where id = '${lead}';`)
+    const a = await db.query<{ actor_id: string; contact_id: string; assigned_to: string; duration_s: number }>(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject, started_at, ended_at)
+       values (get_current_company_id(), '${lead}', 'call', 'out', 'Intro call', now() - interval '10 minutes', now())
+       returning actor_id, contact_id, assigned_to, duration_s;`,
+    )
+    expect(a.rows[0]!.actor_id).toBe(owner)
+    expect(a.rows[0]!.contact_id).not.toBeNull()
+    expect(a.rows[0]!.duration_s).toBe(600)
+    const t = await db.query<{ assigned_to: string }>(
+      `insert into crm_activities (company_id, lead_id, type, subject, due_at)
+       values (get_current_company_id(), '${lead}', 'task', 'Send quote', now() + interval '1 day') returning assigned_to;`,
+    )
+    expect(t.rows[0]!.assigned_to).toBe(member)
+    // An outbound call is the first contact.
+    const l = await db.query<{ last_contacted_at: string | null }>(`select last_contacted_at from crm_leads where id = '${lead}';`)
+    expect(l.rows[0]!.last_contacted_at).not.toBeNull()
+  })
+
+  it('an inbound reply stops the cadence and notes it on the trail', async () => {
+    const cad = (
+      await db.query<{ id: string }>(
+        `insert into crm_cadences (company_id, name) values (get_current_company_id(), 'Reply test') returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(
+      `insert into crm_cadence_steps (cadence_id, company_id, step_no, day_offset, note) values ('${cad}', get_current_company_id(), 1, 0, 'Call');`,
+    )
+    const lead = await add('Replies', '9876950002')
+    await db.query(`select start_lead_cadence('${lead}', '${cad}');`)
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject) values (get_current_company_id(), '${lead}', 'whatsapp', 'in', 'Yes please');`,
+    )
+    const lc = await db.query<{ stopped_at: string | null }>(`select stopped_at from crm_lead_cadences where lead_id = '${lead}';`)
+    expect(lc.rows[0]!.stopped_at).not.toBeNull()
+    const ev = await db.query<{ note: string }>(
+      `select note from crm_lead_events where lead_id = '${lead}' and note like 'replied via whatsapp%';`,
+    )
+    expect(ev.rows[0]!.note).toContain('cadence stopped: Reply test')
+  })
+
+  it('a due task notifies its owner once a day through the hourly tick', async () => {
+    const lead = await add('Task lead', '9876950003')
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, subject, due_at, assigned_to)
+       values (get_current_company_id(), '${lead}', 'task', 'Call back', now() - interval '1 hour', '${member}');`,
+    )
+    const first = await db.query<{ s: { tasks: { due: number; notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(first.rows[0]!.s.tasks).toMatchObject({ due: 1, notified: 1 })
+    const again = await db.query<{ s: { tasks: { notified: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(again.rows[0]!.s.tasks.notified).toBe(0)
+    const n = await db.query<{ title: string }>(
+      `select title from notifications where recipient_uid = '${member}' and type = 'crm_task';`,
+    )
+    expect(n.rows[0]!.title).toBe('Task due: Call back')
+    // Done tasks are not chased.
+    await db.exec(`update crm_activities set done_at = now() where type = 'task' and lead_id = '${lead}';`)
+    const dry = await db.query<{ s: { tasks: { due: number } } }>(`select run_crm_followup_cron(true) as s;`)
+    expect(dry.rows[0]!.s.tasks.due).toBe(0)
+  })
+
+  it('a synced message is filed once per provider id', async () => {
+    const lead = await add('Synced', '9876950004')
+    const ins = `insert into crm_activities (company_id, lead_id, type, direction, subject, provider, external_id)
+       values (get_current_company_id(), '${lead}', 'email', 'in', 'Re: quote', 'gmail', 'msg-1')
+       on conflict (company_id, provider, external_id) where external_id is not null do nothing returning id;`
+    expect((await db.query(ins)).rows).toHaveLength(1)
+    expect((await db.query(ins)).rows).toHaveLength(0)
+  })
+
+  it('one integration row per provider', async () => {
+    await asUser(db, owner)
+    await db.exec(
+      `insert into crm_integrations (company_id, provider, status, connected_by) values (get_current_company_id(), 'twilio', 'connected', '${owner}');`,
+    )
+    const r = await db.query<{ status: string }>(`select status from crm_integrations where provider = 'twilio';`)
+    expect(r.rows[0]!.status).toBe('connected')
+    await expect(
+      db.exec(`insert into crm_integrations (company_id, provider, status) values (get_current_company_id(), 'twilio', 'error');`),
+    ).rejects.toThrow()
+  })
+})
+
+describe('CRM workflows — delays, branches, replies, scoring, outbox (0040)', () => {
+  let db: PGlite
+  const owner = '7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c'
+  const member = '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d'
+
+  const add = async (name: string, phone: string, email: string | null = null, source = 'enquiry') =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', ${email ? `'${email}'` : 'null'}, '${source}', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const enrollment = async (wf: string, lead: string) =>
+    (
+      await db.query<{ status: string; current_step: number; next_at: string | null; exit_reason: string | null; steps_run: number }>(
+        `select status, current_step, next_at, exit_reason, steps_run from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}' order by enrolled_at desc limit 1;`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm7.test'),('${member}','member@crm7.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM7 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm7.test');`,
+    )
+  })
+
+  it('existing rules were migrated into one-step workflows and switched off', async () => {
+    // The migration ran before this studio existed; prove the shape by hand.
+    await db.exec(
+      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
+       values (get_current_company_id(), 'Legacy rule', 'lead_created', '{}', 'mark_hot', '{}');`,
+    )
+    await db.exec(readMig('0047_crm_workflows.sql'))
+    const wf = await db.query<{ name: string; is_active: boolean; kind: string; config: { action: string } }>(
+      `select w.name, w.is_active, s.kind, s.config from crm_workflows w join crm_workflow_steps s on s.workflow_id = w.id where w.name = 'Legacy rule';`,
+    )
+    expect(wf.rows[0]).toMatchObject({ name: 'Legacy rule', is_active: true, kind: 'action', config: { action: 'mark_hot' } })
+    const rule = await db.query<{ is_active: boolean }>(`select is_active from crm_automation_rules where name = 'Legacy rule';`)
+    expect(rule.rows[0]!.is_active).toBe(false)
+    await db.exec(`update crm_workflows set is_active = false where name = 'Legacy rule';`)
+  })
+
+  it('a delay pauses the enrollment and a branch picks the path when it resumes', async () => {
+    const wf = await workflow(db, 'Nurture', 'lead_created', {}, [
+      { kind: 'action', config: { action: 'add_note', note: 'welcome' } },
+      { kind: 'delay', config: { amount: 1, unit: 'hours' } },
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: true }], yes_step: 4, no_step: 5 } },
+      { kind: 'action', config: { action: 'add_score', points: 10 } },
+      { kind: 'exit' },
+    ])
+    const cold = await add('Cold', '9876960001')
+    const hot = await add('Hot', '9876960002')
+    let e = await enrollment(wf, cold)
+    expect(e.status).toBe('active')
+    expect(e.current_step).toBe(3)
+    expect(e.next_at).not.toBeNull()
+    expect((await db.query<{ notes: string }>(`select notes from crm_leads where id = '${cold}';`)).rows[0]!.notes).toContain('welcome')
+
+    // Nothing runs before the delay is up.
+    const early = await db.query<{ s: { workflows: { due: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(early.rows[0]!.s.workflows.due).toBe(0)
+
+    await db.exec(`update crm_leads set is_hot = true where id = '${hot}';`)
+    await db.exec(`update crm_workflow_enrollments set next_at = now() - interval '1 minute' where workflow_id = '${wf}';`)
+    const run = await db.query<{ s: { workflows: { due: number; ran: number; completed: number } } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(run.rows[0]!.s.workflows).toMatchObject({ due: 2, ran: 2, completed: 2 })
+    e = await enrollment(wf, cold)
+    expect(e.status).toBe('completed')
+    e = await enrollment(wf, hot)
+    expect(e.status).toBe('completed')
+    const adj = await db.query<{ id: string; score_adjust: number }>(
+      `select id, score_adjust from crm_leads where id in ('${cold}','${hot}') order by name;`,
+    )
+    expect(adj.rows.find((r) => r.id === cold)!.score_adjust).toBe(0)
+    expect(adj.rows.find((r) => r.id === hot)!.score_adjust).toBe(10)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('a reply from the lead exits the enrollment', async () => {
+    const wf = await workflow(db, 'Chase', 'lead_created', {}, [
+      { kind: 'delay', config: { amount: 2, unit: 'days' } },
+      { kind: 'action', config: { action: 'notify_assignee' } },
+    ])
+    const lead = await add('Chased', '9876960003')
+    expect((await enrollment(wf, lead)).status).toBe('active')
+    await db.exec(
+      `insert into crm_activities (company_id, lead_id, type, direction, subject) values (get_current_company_id(), '${lead}', 'email', 'in', 'Sounds good');`,
+    )
+    const e = await enrollment(wf, lead)
+    expect(e.status).toBe('exited')
+    expect(e.exit_reason).toBe('replied')
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('manual enrollment runs at once and does not double-enroll an active lead', async () => {
+    const wf = await workflow(db, 'By hand', 'manual', {}, [
+      { kind: 'action', config: { action: 'create_task', subject: 'Send brochure', days: 1 } },
+      { kind: 'delay', config: { amount: 1, unit: 'days' } },
+    ])
+    const lead = await add('Manual', '9876960004')
+    expect((await db.query<{ n: number }>(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]) as n;`)).rows[0]!.n).toBe(1)
+    expect((await db.query<{ n: number }>(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]) as n;`)).rows[0]!.n).toBe(0)
+    const task = await db.query<{ subject: string; assigned_to: string | null }>(
+      `select subject, assigned_to from crm_activities where lead_id = '${lead}' and type = 'task';`,
+    )
+    expect(task.rows[0]!.subject).toBe('Send brochure')
+    await asUser(db, member)
+    await expect(db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)).resolves.toBeDefined()
+    await asUser(db, owner)
+  })
+
+  it('an overdue follow-up enrolls once a day', async () => {
+    const wf = await workflow(db, 'Overdue nudge', 'follow_up_overdue', {}, [{ kind: 'action', config: { action: 'notify_assignee' } }], { allow_reenroll: true })
+    const lead = await add('Overdue', '9876960005')
+    await db.exec(`update crm_leads set assigned_to = '${member}', follow_up_at = now() - interval '1 day' where id = '${lead}';`)
+    await db.query(`select run_crm_followup_cron(false);`)
+    await db.query(`select run_crm_followup_cron(false);`)
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`)
+    expect(n.rows[0]!.n).toBe(1)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+
+  it('scoring follows the studio rules and a score change can start a workflow', async () => {
+    const rules = await db.query<{ n: number }>(`select count(*)::int as n from crm_scoring_rules;`)
+    expect(rules.rows[0]!.n).toBe(7)
+    const wf = await workflow(db, 'Hot score', 'score_changed', { conditions: [{ field: 'score', op: 'gte', value: 40 }] }, [
+      { kind: 'action', config: { action: 'mark_hot' } },
+    ])
+    const lead = await add('Scored', '9876960006', 'scored@x.in', 'referral')
+    // email +10, referral +15
+    let l = await db.query<{ score: number; is_hot: boolean }>(`select score, is_hot from crm_leads where id = '${lead}';`)
+    expect(l.rows[0]!.score).toBe(25)
+    expect(l.rows[0]!.is_hot).toBe(false)
+    await db.exec(`update crm_leads set deal_value = 60000 where id = '${lead}';`)
+    l = await db.query<{ score: number; is_hot: boolean }>(`select score, is_hot from crm_leads where id = '${lead}';`)
+    // +20 for the value, then the workflow marks it hot (+20 more on the next recompute)
+    expect(l.rows[0]!.score).toBeGreaterThanOrEqual(45)
+    expect(l.rows[0]!.is_hot).toBe(true)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+    const hot = await db.query<{ h: number }>(`select coalesce((select hot_score from crm_settings where company_id = get_current_company_id()), 60) as h;`)
+    expect(hot.rows[0]!.h).toBe(60)
+  })
+
+  it('a send_template step queues the outbox for the API to drain', async () => {
+    const tpl = (
+      await db.query<{ id: string }>(
+        `insert into crm_templates (company_id, name, body, kind) values (get_current_company_id(), 'Welcome', 'Hi {{name}}', 'whatsapp') returning id;`,
+      )
+    ).rows[0]!.id
+    const wf = await workflow(db, 'Welcome message', 'lead_created', {}, [
+      { kind: 'action', config: { action: 'send_template', template_id: tpl, channel: 'whatsapp' } },
+    ])
+    const lead = await add('Welcomed', '9876960007')
+    const box = await db.query<{ status: string; channel: string }>(`select status, channel from crm_outbox where lead_id = '${lead}';`)
+    expect(box.rows[0]).toEqual({ status: 'pending', channel: 'whatsapp' })
+    const claimed = await db.query<{ lead_id: string }>(`select lead_id from crm_outbox_claim(10);`)
+    expect(claimed.rows.map((r) => r.lead_id)).toContain(lead)
+    await db.exec(`update crm_workflows set is_active = false where id = '${wf}';`)
+  })
+})
+
+describe('CRM quotes, preferences, lost analysis (0041)', () => {
+  let db: PGlite
+  const owner = '5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+  const items = JSON.stringify([
+    { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+  ])
+  const quote = async (lead: string) =>
+    (
+      await db.query<{ id: string; quote_number: string }>(
+        `select * from create_quote('${lead}', 'Wedding package', current_date + 14, 'MH', true, 120000, 0, 120000, 21600, 141600, '${items}'::jsonb, 'Thanks!', 'Half in advance.');`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}','owner@crm8.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM8 Studio','Owner');`)
+  })
+
+  it('quotes are numbered per studio and set the deal value', async () => {
+    const lead = await add('Quoted', '9876970001')
+    const q1 = await quote(lead)
+    const q2 = await quote(lead)
+    expect(q1.quote_number).toBe('Q-0001')
+    expect(q2.quote_number).toBe('Q-0002')
+    const l = await db.query<{ deal_value: string }>(`select deal_value from crm_leads where id = '${lead}';`)
+    expect(Number(l.rows[0]!.deal_value)).toBe(141600)
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_quote_items where quote_id = '${q1.id}';`)
+    expect(n.rows[0]!.n).toBe(2)
+    await expect(
+      db.query(`select * from create_quote('${lead}', null, null, 'MH', true, 0, 0, 0, 0, 0, '[]'::jsonb);`),
+    ).rejects.toThrow(/at least one line/)
+  })
+
+  it('a sent quote is accepted once through its public link, then read-only', async () => {
+    const lead = await add('Accepts', '9876970002')
+    const q = await quote(lead)
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}', 48) as t;`)).rows[0]!.t
+    expect((await db.query<{ status: string }>(`select status from crm_quotes where id = '${q.id}';`)).rows[0]!.status).toBe('sent')
+    const shown = await db.query<{ q: { quote_number: string; items: unknown[]; studio: string; total: number } }>(
+      `select get_quote_for_token('${token}') as q;`,
+    )
+    expect(shown.rows[0]!.q.quote_number).toBe(q.quote_number)
+    expect(shown.rows[0]!.q.items).toHaveLength(2)
+    expect(shown.rows[0]!.q.studio).toBe('CRM8 Studio')
+    expect((await db.query<{ ok: boolean }>(`select accept_quote('${token}', 'Priya', 'p@x.in', '1.2.3.4', 'ua') as ok;`)).rows[0]!.ok).toBe(true)
+    expect((await db.query<{ ok: boolean }>(`select accept_quote('${token}', 'Priya') as ok;`)).rows[0]!.ok).toBe(false)
+    const after = await db.query<{ status: string; accepted_by_name: string }>(`select status, accepted_by_name from crm_quotes where id = '${q.id}';`)
+    expect(after.rows[0]).toEqual({ status: 'accepted', accepted_by_name: 'Priya' })
+    // Still viewable after acceptance.
+    const again = await db.query<{ q: { status: string } }>(`select get_quote_for_token('${token}') as q;`)
+    expect(again.rows[0]!.q.status).toBe('accepted')
+    const ev = await db.query<{ n: number }>(`select count(*)::int as n from crm_lead_events where lead_id = '${lead}' and note like 'quote % accepted%';`)
+    expect(ev.rows[0]!.n).toBe(1)
+    await expect(db.query(`select issue_quote_link('${q.id}');`)).rejects.toThrow(/already closed/)
+  })
+
+  it('a quote can be declined with a reason, and an old quote expires', async () => {
+    const lead = await add('Declines', '9876970003')
+    const q = await quote(lead)
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}') as t;`)).rows[0]!.t
+    expect((await db.query<{ ok: boolean }>(`select decline_quote('${token}', 'Too pricey') as ok;`)).rows[0]!.ok).toBe(true)
+    const d = await db.query<{ status: string; decline_reason: string }>(`select status, decline_reason from crm_quotes where id = '${q.id}';`)
+    expect(d.rows[0]).toEqual({ status: 'declined', decline_reason: 'Too pricey' })
+
+    const q2 = await quote(lead)
+    await db.query(`select issue_quote_link('${q2.id}');`)
+    await db.exec(`update crm_quotes set valid_until = current_date - 1 where id = '${q2.id}';`)
+    expect((await db.query<{ n: number }>(`select crm_expire_quotes() as n;`)).rows[0]!.n).toBe(1)
+    expect((await db.query<{ status: string }>(`select status from crm_quotes where id = '${q2.id}';`)).rows[0]!.status).toBe('expired')
+  })
+
+  it('converting with a quote carries its lines into the project', async () => {
+    const lead = await add('Converts', '9876970004')
+    const q = await quote(lead)
+    const r = await db.query<{ client_id: string; project_id: string }>(
+      `select * from convert_lead_to_project('${lead}', null, '{}'::jsonb, '{}'::jsonb, '${q.id}');`,
+    )
+    const { project_id } = r.rows[0]!
+    const p = await db.query<{ name: string; package_cost: string; show_quotation: boolean }>(
+      `select name, package_cost, show_quotation from projects where id = '${project_id}';`,
+    )
+    expect(p.rows[0]!.name).toBe('Wedding package')
+    expect(Number(p.rows[0]!.package_cost)).toBe(141600)
+    expect(p.rows[0]!.show_quotation).toBe(true)
+    const d = await db.query<{ title: string; description: string | null }>(
+      `select title, description from deliverables where project_id = '${project_id}' order by title;`,
+    )
+    expect(d.rows.map((x) => x.title)).toEqual(['Album', 'Wedding coverage'])
+    expect(d.rows[0]!.description).toBe('2.00 × 10000.00')
+  })
+
+  it('lost analysis groups by reason and competitor; the forecast reports win rate', async () => {
+    const a = await add('Lost A', '9876970010')
+    const b = await add('Lost B', '9876970011')
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Budget', lost_competitor = 'Studio X' where id = '${a}';`)
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Budget' where id = '${b}';`)
+    const s = await db.query<{ s: { byLostReason: Record<string, number>; byCompetitor: Record<string, number>; lost: number } }>(
+      `select crm_stats(current_date - 1, current_date) as s;`,
+    )
+    expect(s.rows[0]!.s.byLostReason.Budget).toBe(2)
+    expect(s.rows[0]!.s.byCompetitor['Studio X']).toBe(1)
+    const f = await db.query<{ f: { won_count: number; lost_count: number; win_rate: number | null; avg_cycle_days: number | null } }>(
+      `select crm_forecast(current_date - 1, current_date) as f;`,
+    )
+    expect(f.rows[0]!.f.lost_count).toBe(2)
+    expect(f.rows[0]!.f.won_count).toBeGreaterThanOrEqual(1)
+    expect(f.rows[0]!.f.win_rate).not.toBeNull()
+  })
+
+  it('preferences are one row per person', async () => {
+    await db.exec(`insert into crm_user_prefs (company_id, user_id, prefs) values (get_current_company_id(), '${owner}', '{"columns":["name","stage"]}');`)
+    await db.exec(`insert into crm_user_prefs (company_id, user_id, prefs) values (get_current_company_id(), '${owner}', '{"columns":["name"]}') on conflict (company_id, user_id) do update set prefs = excluded.prefs;`)
+    const p = await db.query<{ prefs: { columns: string[] } }>(`select prefs from crm_user_prefs where user_id = '${owner}';`)
+    expect(p.rows[0]!.prefs.columns).toEqual(['name'])
+  })
+})
+
+describe('CRM guards — execute privileges and cross-studio calls', () => {
+  let db: PGlite
+  const ownerA = '1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a'
+  const ownerB = '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b'
+  let leadB = ''
+  let stageA = ''
+  let otherPipelineStageA = ''
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${ownerA}','a@guards.test'),('${ownerB}','b@guards.test');`,
+    )
+    await asUser(db, ownerA)
+    await db.query(`select register_company_and_admin('Studio A','Owner A');`)
+    stageA = (
+      await db.query<{ id: string }>(
+        `select id from crm_pipeline_stages where company_id = get_current_company_id() and key = 'qualified';`,
+      )
+    ).rows[0]!.id
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipelines (company_id, name) values (get_current_company_id(), 'Corporate') returning id;`,
+      )
+    ).rows[0]!.id
+    otherPipelineStageA = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position)
+         values ('${other}', get_current_company_id(), 'Brief', 'brief', 0) returning id;`,
+      )
+    ).rows[0]!.id
+
+    await asUser(db, ownerB)
+    await db.query(`select register_company_and_admin('Studio B','Owner B');`)
+    leadB = (await db.query<{ id: string }>(`select add_lead('B lead', '9876990001', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+  })
+
+  // The helpers that take a company id or a whole row and write with it must
+  // not be reachable from a session at all — the trigger is their only caller.
+  it('the internal definer helpers are not executable by anon or authenticated', async () => {
+    const internal = [
+      'crm_link_contact(uuid, uuid, text, text, text, text, uuid, text)',
+      'crm_workflow_do_action(crm_leads, jsonb, crm_workflows)',
+      'crm_lead_facts(crm_leads)',
+      'crm_cond_matches(jsonb, crm_leads, text)',
+      'crm_ensure_default_pipeline(uuid)',
+      'crm_ensure_scoring_defaults(uuid)',
+    ]
+    for (const sig of internal) {
+      const r = await db.query<{ a: boolean; n: boolean }>(
+        `select has_function_privilege('authenticated', '${sig}', 'execute') as a,
+                has_function_privilege('anon', '${sig}', 'execute') as n;`,
+      )
+      expect(r.rows[0], sig).toEqual({ a: false, n: false })
+    }
+  })
+
+  it('no CRM definer function is executable by anon except the tokened quote pages', async () => {
+    const rows = await db.query<{ name: string; args: string }>(
+      `select p.proname as name, pg_get_function_identity_arguments(p.oid) as args
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.prosecdef and p.prorettype <> 'trigger'::regtype
+         and p.proname like 'crm%'
+         and has_function_privilege('anon', p.oid, 'execute');`,
+    )
+    expect(rows.rows.map((r) => r.name)).toEqual([])
+  })
+
+  it('a studio cannot score, enroll or run a workflow on another studio’s lead', async () => {
+    await asUser(db, ownerA)
+    await expect(db.query(`select crm_score_lead('${leadB}');`)).rejects.toThrow(/not allowed/)
+    await expect(db.query(`select crm_enroll_workflows('${leadB}', 'manual', null);`)).rejects.toThrow(/not allowed/)
+    // Its own lead is fine.
+    const mine = (await db.query<{ id: string }>(`select add_lead('A lead', '9876990002', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await expect(db.query(`select crm_score_lead('${mine}');`)).resolves.toBeDefined()
+  })
+
+  it('a bulk move refuses a stage from another pipeline', async () => {
+    await asUser(db, ownerA)
+    const lead = (await db.query<{ id: string }>(`select add_lead('Bulk pipe', '9876990003', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${lead}']::uuid[], '{"stage_id":"${otherPipelineStageA}"}'::jsonb);`),
+    ).rejects.toThrow(/another pipeline/)
+    // The same move inside the deal's own pipeline is allowed.
+    const ok = await db.query(`select * from crm_bulk_patch(array['${lead}']::uuid[], '{"stage_id":"${stageA}"}'::jsonb);`)
+    expect(ok.rows).toHaveLength(1)
+    const after = await db.query<{ status: string }>(`select status from crm_leads where id = '${lead}';`)
+    expect(after.rows[0]!.status).toBe('qualified')
+  })
+
+  it('a branch that names a step which no longer exists errors the enrollment instead of completing it', async () => {
+    await asUser(db, ownerA)
+    const wf = await workflow(db, 'Broken branch', 'manual', {}, [
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: false }], yes_step: 9, no_step: 9 } },
+    ])
+    const lead = (await db.query<{ id: string }>(`select add_lead('Broken', '9876990004', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)
+    const e = await db.query<{ status: string; exit_reason: string }>(
+      `select status, exit_reason from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`,
+    )
+    expect(e.rows[0]!.status).toBe('errored')
+    expect(e.rows[0]!.exit_reason).toContain('does not exist')
+  })
+
+  it('a branch that simply runs off the end still completes normally', async () => {
+    await asUser(db, ownerA)
+    const wf = await workflow(db, 'Open branch', 'manual', {}, [
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: false }], yes_step: null, no_step: null } },
+    ])
+    const lead = (await db.query<{ id: string }>(`select add_lead('Runs off', '9876990005', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)
+    const e = await db.query<{ status: string }>(
+      `select status from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`,
+    )
+    expect(e.rows[0]!.status).toBe('completed')
   })
 })
 
@@ -3175,5 +3982,93 @@ describe('migrations re-apply cleanly (idempotency)', () => {
       { tablename: 'deliverable_sets', n: 2 },
       { tablename: 'shoot_presets', n: 2 },
     ])
+  })
+})
+
+describe('CRM quote answered off the link (0049)', () => {
+  let db: PGlite
+  const owner = '3f3f3f3f-3f3f-4f3f-8f3f-3f3f3f3f3f3f'
+  let lead = ''
+
+  const items = JSON.stringify([
+    { description: 'Coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+  ])
+  const newQuote = async () =>
+    (
+      await db.query<{ id: string; quote_number: string }>(
+        `select * from create_quote('${lead}', 'Package', current_date + 14, 'MH', true, 100000, 0, 100000, 18000, 118000, '${items}'::jsonb);`,
+      )
+    ).rows[0]!
+  const statusOf = async (id: string) =>
+    (await db.query<{ status: string }>(`select status from crm_quotes where id = '${id}';`)).rows[0]!.status
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}','owner@crm9.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM9 Studio','Owner');`)
+    lead = (await db.query<{ id: string }>(`select add_lead('Phone yes', '9876980001', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+  })
+
+  it('a draft cannot be answered before it is sent', async () => {
+    const q = await newQuote()
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'accepted');`)).rejects.toThrow(/before recording an answer/)
+  })
+
+  it('the studio records an acceptance given on the phone, and it sets the deal value', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    expect((await db.query<{ s: string }>(`select crm_set_quote_outcome('${q.id}', 'accepted', 'Priya on the phone') as s;`)).rows[0]!.s).toBe('accepted')
+    const row = await db.query<{ status: string; accepted_by_name: string; accepted_at: string | null }>(
+      `select status, accepted_by_name, accepted_at from crm_quotes where id = '${q.id}';`,
+    )
+    expect(row.rows[0]!.status).toBe('accepted')
+    expect(row.rows[0]!.accepted_by_name).toBe('Priya on the phone')
+    expect(row.rows[0]!.accepted_at).not.toBeNull()
+    const l = await db.query<{ deal_value: string }>(`select deal_value from crm_leads where id = '${lead}';`)
+    expect(Number(l.rows[0]!.deal_value)).toBe(118000)
+    const ev = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_lead_events where lead_id = '${lead}' and note like 'quote % marked accepted%';`,
+    )
+    expect(ev.rows[0]!.n).toBe(1)
+  })
+
+  it('a decline carries its reason, and a mistake can be put back', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    await db.query(`select crm_set_quote_outcome('${q.id}', 'declined', null, 'Went with a cheaper studio');`)
+    const d = await db.query<{ status: string; decline_reason: string }>(
+      `select status, decline_reason from crm_quotes where id = '${q.id}';`,
+    )
+    expect(d.rows[0]).toEqual({ status: 'declined', decline_reason: 'Went with a cheaper studio' })
+
+    expect((await db.query<{ s: string }>(`select crm_set_quote_outcome('${q.id}', 'sent') as s;`)).rows[0]!.s).toBe('sent')
+    const back = await db.query<{ status: string; declined_at: string | null; decline_reason: string | null }>(
+      `select status, declined_at, decline_reason from crm_quotes where id = '${q.id}';`,
+    )
+    expect(back.rows[0]).toEqual({ status: 'sent', declined_at: null, decline_reason: null })
+  })
+
+  it('an unknown status is refused, and another studio cannot answer this quote', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'expired');`)).rejects.toThrow(/unknown quote status/)
+    const stranger = '4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e4e'
+    await db.exec(`insert into auth.users (id, email) values ('${stranger}','stranger@crm9.test');`)
+    await asUser(db, stranger)
+    await db.query(`select register_company_and_admin('Other Studio','Stranger');`)
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'accepted');`)).rejects.toThrow(/unknown quote/)
+    await asUser(db, owner)
+    expect(await statusOf(q.id)).toBe('sent')
+  })
+
+  it('the public page states which state the tax was worked out for', async () => {
+    const q = await newQuote()
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}') as t;`)).rows[0]!.t
+    const shown = await db.query<{ q: { place_of_supply: string; intra_state: boolean } }>(
+      `select get_quote_for_token('${token}') as q;`,
+    )
+    expect(shown.rows[0]!.q.place_of_supply).toBe('MH')
+    expect(shown.rows[0]!.q.intra_state).toBe(true)
   })
 })

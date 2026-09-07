@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { useAddLead } from './api'
+import { useCrmAccess } from './access'
 
 type Field = 'name' | 'phone' | 'email'
 
@@ -18,14 +19,31 @@ const LABELS: Record<Field, string> = { name: 'Name', phone: 'Phone', email: 'Em
  * what the server dedupes on. Everything else can be filled in from the drawer
  * once there is time.
  */
-export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
+export function AddLeadDialog({
+  onAdded,
+  open: openProp,
+  onOpenChange,
+}: {
+  onAdded?: (id: string) => void
+  /** Controlled when given, so the setup checklist can open it. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const add = useAddLead()
-  const [open, setOpen] = useState(false)
+  const { canCreate } = useCrmAccess()
+  const [openSelf, setOpenSelf] = useState(false)
+  const open = openProp ?? openSelf
+  const setOpen = (v: boolean) => {
+    setOpenSelf(v)
+    onOpenChange?.(v)
+  }
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [source, setSource] = useState<CreateLeadRequest['source']>('enquiry')
   const [notes, setNotes] = useState('')
+  const [value, setValue] = useState('')
+  const [closeDate, setCloseDate] = useState('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -34,6 +52,8 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
     setEmail('')
     setSource('enquiry')
     setNotes('')
+    setValue('')
+    setCloseDate('')
     setErrors({})
   }
 
@@ -45,19 +65,25 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
       ...(name.trim() ? { name: name.trim() } : {}),
       ...(email.trim() ? { email: email.trim() } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(value.trim() && Number(value) >= 0 ? { deal_value: Number(value) } : {}),
+      ...(closeDate ? { close_date: closeDate } : {}),
     }
     const found = fieldErrors<Field>(createLeadRequest, body, { labels: LABELS })
     setErrors(found)
     if (Object.keys(found).length > 0) return
 
     add.mutate(createLeadRequest.parse(body), {
-      onSuccess: (lead) => {
+      onSuccess: (r) => {
         setOpen(false)
         reset()
-        onAdded?.(lead.id)
+        onAdded?.(r.lead.id)
       },
     })
   }
+
+  // The endpoint needs crm:create; a view-only account was being shown the
+  // page's main call to action and refused on submit.
+  if (!canCreate) return null
 
   return (
     <Dialog
@@ -126,6 +152,17 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
                 <option value="webform">Web form</option>
                 <option value="facebook">Facebook</option>
               </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Deal value (₹)</Label>
+              <Input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Expected close</Label>
+              <Input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)} />
             </div>
           </div>
 

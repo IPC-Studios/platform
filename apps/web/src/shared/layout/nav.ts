@@ -119,6 +119,8 @@ export const NAV: NavEntry[] = [
     children: [
       leaf('Enquiries', '/enquiries', Inbox, { module: 'crm' }),
       leaf('CRM', '/follow-ups', Bell, { module: 'crm' }),
+      leaf('Contacts', '/crm/contacts', Users, { module: 'crm' }),
+      leaf('Companies', '/crm/companies', Building2, { module: 'crm' }),
       leaf('Clients', '/clients', Contact, { module: 'clients' }),
       leaf('Lead Sources', '/lead-sources', Megaphone, { module: 'lead_sources' }),
     ],

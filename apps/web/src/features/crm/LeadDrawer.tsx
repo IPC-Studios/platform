@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
   Archive,
   ArchiveRestore,
+  Building2,
   Check,
+  Contact,
   Copy,
   Flame,
   FolderPlus,
@@ -14,28 +16,42 @@ import {
   Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import type { CrmLead } from '@ipc/contracts'
+import { REQUIRED_FIELD_LABEL, missingForStage, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
+import { formatINR } from '@/shared/ui/format'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useMembers } from '@/features/allocation/api'
 import { useClients } from '@/features/clients/api'
 import {
   useCadences,
   useConvertLead,
+  useCrmCompanies,
+  useCrmSettings,
+  useEnrollWorkflow,
+  useExitEnrollment,
   useLeadCadence,
-  useLeadEvents,
+  useLeadEnrollments,
+  useMoveStage,
+  usePipelines,
+  useQuotes,
   useSendTemplate,
   useStartCadence,
   useStopCadence,
   useTemplates,
   useUpdateLead,
+  useWorkflows,
 } from './api'
-import { STAGES, STAGE_LABEL, dueBucket } from './leads'
+import { QuoteBuilder } from './QuoteBuilder'
+import { QuoteRow } from './tabs/QuotesTab'
+import { ScoreBadge } from './tabs/shared'
 import { LostReasonDialog } from './LostReasonDialog'
+import { Timeline } from './Timeline'
+import { STAGE_LABEL, dueBucket } from './leads'
 
 /** A datetime-local value from an ISO string, in the viewer's own timezone. */
 function toLocalInput(iso: string | null): string {
@@ -64,13 +80,33 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const send = useSendTemplate()
   const { data: members } = useMembers()
   const { data: templates } = useTemplates()
-  const { data: events } = useLeadEvents(lead.id)
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
   const [notes, setNotes] = useState(lead.notes ?? '')
   const [followUp, setFollowUp] = useState(toLocalInput(lead.follow_up_at))
   const [copied, setCopied] = useState(false)
-  const [losing, setLosing] = useState(false)
+  const move = useMoveStage()
+  const { data: pipelines } = usePipelines()
+  const { data: companies } = useCrmCompanies()
+  const { data: settings } = useCrmSettings()
+  const [losingTo, setLosingTo] = useState<string | null>(null)
+  const pipeline = (pipelines ?? []).find((p) => p.id === lead.pipeline_id) ?? (pipelines ?? []).find((p) => p.is_default)
+  const stages = pipeline ? sortStages(pipeline.stages) : []
+
+  function moveTo(stageId: string) {
+    const stage = stages.find((s) => s.id === stageId)
+    if (!stage || stage.id === lead.stage_id) return
+    if (stage.kind === 'lost') {
+      setLosingTo(stage.id)
+      return
+    }
+    const missing = missingForStage(stage.required_fields, lead)
+    if (missing.length > 0) {
+      toast.error(`Fill in ${missing.map((m) => REQUIRED_FIELD_LABEL[m] ?? m).join(', ')} before moving to ${stage.name}.`)
+      return
+    }
+    move.mutate({ leadId: lead.id, stage_id: stage.id })
+  }
 
   // A refetch can land while this is open; take the server's version unless the
   // person is mid-edit on that field.
@@ -113,6 +149,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
         <div className="flex max-h-[75vh] flex-col gap-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge tone={lead.is_hot ? 'danger' : 'neutral'}>{lead.is_hot ? 'Hot lead' : 'Normal'}</StatusBadge>
+            <ScoreBadge score={lead.score} hotScore={settings?.hot_score ?? 60} />
             {lead.is_archived && <StatusBadge tone="neutral">Archived</StatusBadge>}
             {bucket === 'overdue' && <StatusBadge tone="danger">Follow-up overdue</StatusBadge>}
             {bucket === 'today' && <StatusBadge tone="warning">Due today</StatusBadge>}
@@ -121,6 +158,20 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
               <Button size="sm" variant="ghost" asChild>
                 <Link to="/projects/$id" params={{ id: lead.converted_project_id }}>
                   Open project
+                </Link>
+              </Button>
+            )}
+            {lead.contact_id && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/crm/contacts" search={{ contact: lead.contact_id } as never}>
+                  <Contact /> Contact
+                </Link>
+              </Button>
+            )}
+            {lead.crm_company_id && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/crm/companies" search={{ company: lead.crm_company_id } as never}>
+                  <Building2 /> {lead.crm_company_name ?? 'Company'}
                 </Link>
               </Button>
             )}
@@ -190,21 +241,27 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="lead-stage">Stage</Label>
-              <Select id="lead-stage" value={lead.status} onChange={(e) => {
-                const v = e.target.value as LeadStatus
-                // Controlled by value={lead.status}, so cancelling the dialog
-                // snaps the visible selection straight back.
-                if (v === 'lost') setLosing(true)
-                else patch({ status: v })
-              }} disabled={update.isPending || !canEdit}>
-                {STAGES.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
+              <Label htmlFor="lead-stage">Stage{pipeline ? ` · ${pipeline.name}` : ''}</Label>
+              <Select
+                id="lead-stage"
+                value={lead.stage_id ?? ''}
+                onChange={(e) => moveTo(e.target.value)}
+                disabled={move.isPending || !canEdit || stages.length === 0}
+              >
+                {stages.length === 0 && <option value="">{STAGE_LABEL[lead.status]}</option>}
+                {stages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.required_fields.length > 0 ? ' *' : ''}
                   </option>
                 ))}
               </Select>
-              {lead.lost_reason && <p className="text-xs text-muted-foreground">Lost: {lead.lost_reason}</p>}
+              {lead.lost_reason && (
+                <p className="text-xs text-muted-foreground">
+                  Lost: {lead.lost_reason}
+                  {lead.lost_competitor ? ` · to ${lead.lost_competitor}` : ''}
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-owner">Owner</Label>
@@ -220,6 +277,24 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-title">Deal title</Label>
+              <Input id="lead-title" defaultValue={lead.title ?? ''} placeholder={`${lead.name ?? 'New'} wedding`} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.title) patch({ title: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-company">Company</Label>
+              <Select id="lead-company" value={lead.crm_company_id ?? ''} onChange={(e) => patch({ crm_company_id: e.target.value || null })} disabled={update.isPending || !canEdit}>
+                <option value="">None</option>
+                {(companies ?? []).map((co) => (
+                  <option key={co.id} value={co.id}>
+                    {co.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-value">Deal value (₹)</Label>
               <Input id="lead-value" type="number" min={0} defaultValue={lead.deal_value ?? ''} placeholder="0" disabled={!canEdit}
                 onBlur={(e)=>{ const v = e.target.value ? Number(e.target.value) : null; if (v !== lead.deal_value) patch({ deal_value: v })}} />
@@ -229,7 +304,21 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
               <Input id="lead-prob" type="number" min={0} max={100} defaultValue={lead.probability ?? ''} placeholder="auto" disabled={!canEdit}
                 onBlur={(e)=>{ const v = e.target.value === '' ? null : Number(e.target.value); if (v !== lead.probability) patch({ probability: v })}} />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-close">Expected close</Label>
+              <Input id="lead-close" type="date" defaultValue={lead.close_date ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value || null; if (v !== lead.close_date) patch({ close_date: v }) }} />
+            </div>
           </div>
+          <LostReasonDialog
+            open={losingTo !== null}
+            pending={move.isPending}
+            onCancel={() => setLosingTo(null)}
+            onConfirm={(d) => {
+              if (!losingTo) return
+              move.mutate({ leadId: lead.id, stage_id: losingTo, ...d }, { onSuccess: () => setLosingTo(null) })
+            }}
+          />
           {lead.sla_due_at && !['converted','lost'].includes(lead.status) && (
             <p className={`text-xs font-medium ${new Date(lead.sla_due_at).getTime() < Date.now() ? 'text-destructive' : 'text-muted-foreground'}`}>
               SLA {new Date(lead.sla_due_at).getTime() < Date.now() ? 'breached' : 'due'} {when.format(new Date(lead.sla_due_at))} · {lead.probability ?? 10}% · ₹{lead.deal_value ?? 0}
@@ -278,6 +367,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           </div>
 
           {canEdit && <CadencePanel lead={lead} />}
+          {canEdit && <WorkflowPanel lead={lead} />}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="lead-notes">Notes</Label>
@@ -301,22 +391,9 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 
           {canEdit && !lead.converted_project_id && lead.status !== 'lost' && <ConvertPanel lead={lead} onDone={onClose} />}
 
-          {events && events.length > 0 && (
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">History</p>
-              <ul className="mt-2 flex flex-col gap-1.5">
-                {events.slice(0, 12).map((e) => (
-                  <li key={e.id} className="text-xs text-muted-foreground">
-                    <span className="tabular-nums">{when.format(new Date(e.created_at))}</span>
-                    {' — '}
-                    {e.to_status ? `${e.from_status ? STAGE_LABEL[e.from_status] : 'Arrived'} → ${STAGE_LABEL[e.to_status]}` : (e.note ?? 'note')}
-                    {e.to_status && e.note ? ` · ${e.note}` : ''}
-                    {e.actor_name ? ` · ${e.actor_name}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <QuotesPanel lead={lead} canEdit={canEdit} />
+
+          <Timeline lead={lead} />
 
           {canEdit && (
             <div className="flex justify-end border-t border-border pt-3">
@@ -335,17 +412,41 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           )}
         </div>
       </DialogContent>
-      <LostReasonDialog
-        open={losing}
-        count={1}
-        pending={update.isPending}
-        onCancel={() => setLosing(false)}
-        onConfirm={(reason) => {
-          setLosing(false)
-          patch({ status: 'lost', lost_reason: reason })
-        }}
-      />
     </Dialog>
+  )
+}
+
+/** Priced offers on this deal: build one, send its link, watch it land. */
+function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
+  const { data: quotes } = useQuotes(lead.id)
+  const [building, setBuilding] = useState(false)
+  const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Quotes ({rows.length})
+        </p>
+        {canEdit && (
+          <Button size="sm" variant="outline" onClick={() => setBuilding(true)}>
+            New quote
+          </Button>
+        )}
+      </div>
+      {rows.length > 0 ? (
+        <ul className="mt-2 divide-y divide-border">
+          {rows.map((q) => (
+            <QuoteRow key={q.id} quote={q} compact />
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          No quotes yet. One becomes the number the project is built from.
+        </p>
+      )}
+      {building && <QuoteBuilder lead={lead} open onClose={() => setBuilding(false)} />}
+    </div>
   )
 }
 
@@ -406,12 +507,60 @@ function CadencePanel({ lead }: { lead: CrmLead }) {
   )
 }
 
+/** The workflows this deal is in, and the one to put it in. */
+function WorkflowPanel({ lead }: { lead: CrmLead }) {
+  const { data: enrollments } = useLeadEnrollments(lead.id)
+  const { data: workflows } = useWorkflows()
+  const enroll = useEnrollWorkflow()
+  const exit = useExitEnrollment()
+  const [pick, setPick] = useState('')
+  const active = (enrollments ?? []).filter((e) => e.status === 'active')
+  const options = (workflows ?? []).filter((w) => w.is_active && !active.some((e) => e.workflow_id === w.id))
+  if (options.length === 0 && active.length === 0) return null
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Workflows</p>
+      {active.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 text-sm">
+          {active.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{e.workflow_name ?? 'Workflow'}</span>
+              <StatusBadge tone="info">step {e.current_step}</StatusBadge>
+              {e.next_at && <span className="text-xs text-muted-foreground">next {when.format(new Date(e.next_at))}</span>}
+              <Button size="sm" variant="ghost" className="ml-auto" disabled={exit.isPending} onClick={() => exit.mutate(e.id)}>
+                <Square /> Stop
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {options.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Select value={pick} onChange={(e) => setPick(e.target.value)} className="w-56" aria-label="Workflow">
+            <option value="">Enroll in a workflow…</option>
+            {options.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </Select>
+          <Button size="sm" disabled={!pick || enroll.isPending} onClick={() => enroll.mutate({ workflowId: pick, lead_ids: [lead.id] }, { onSuccess: () => setPick('') })}>
+            Enroll
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Won it? Make it a project, with the client it belongs to. */
 function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
   const convert = useConvertLead()
   const { data: clients } = useClients()
+  const { data: quotes } = useQuotes(lead.id)
   const [open, setOpen] = useState(false)
   const [clientId, setClientId] = useState('')
+  const [quoteId, setQuoteId] = useState('')
   const [name, setName] = useState(`${lead.name ?? 'New'} project`)
   const [cost, setCost] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -419,10 +568,23 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
   // A client with this number is very likely the same person.
   const digits = (lead.phone ?? '').replace(/\D/g, '').slice(-10)
   const match = digits ? (clients ?? []).find((c) => (c.phone ?? '').replace(/\D/g, '').endsWith(digits)) : undefined
+  const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
+  const accepted = rows.find((q) => q.status === 'accepted')
 
   useEffect(() => {
     if (match && !clientId) setClientId(match.id)
   }, [match, clientId])
+
+  // The accepted quote is what the client agreed to, so it is the default —
+  // once. `picked` latches so choosing "no quote" afterwards sticks.
+  const picked = useRef(false)
+  useEffect(() => {
+    if (picked.current || !accepted) return
+    picked.current = true
+    setQuoteId(accepted.id)
+    setCost(String(accepted.total))
+    if (accepted.title) setName(accepted.title)
+  }, [accepted])
 
   if (!open) {
     return (
@@ -443,6 +605,7 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
       {
         leadId: lead.id,
         ...(clientId ? { client_id: clientId } : {}),
+        ...(quoteId ? { quote_id: quoteId } : {}),
         project: { name: name.trim(), package_cost: amount, status: 'active' },
       },
       { onSuccess: () => onDone() },
@@ -478,6 +641,30 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
           <Label htmlFor="conv-cost">Package (₹)</Label>
           <Input id="conv-cost" type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" />
         </div>
+        {rows.length > 0 && (
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <Label htmlFor="conv-quote">Build it from a quote</Label>
+            <Select
+              id="conv-quote"
+              value={quoteId}
+              onChange={(e) => {
+                setQuoteId(e.target.value)
+                const q = rows.find((x) => x.id === e.target.value)
+                if (q) setCost(String(q.total))
+              }}
+            >
+              <option value="">No quote — package cost only</option>
+              {rows.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.quote_number} · {q.status} · {formatINR(q.total)}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              The quote's lines become the project's deliverables and show on its quotation.
+            </p>
+          </div>
+        )}
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-3 flex justify-end gap-2">

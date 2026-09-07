@@ -26,6 +26,7 @@ export function TemplatesTab() {
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const [name, setName] = useState('')
   const [body, setBody] = useState('')
   const [kind, setKind] = useState<TemplateKind>('whatsapp')
@@ -119,7 +120,7 @@ export function TemplatesTab() {
                 </p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{t.body}</p>
               </div>
-              {canEdit && (
+              {canDelete && (
                 <Button size="sm" variant="ghost" onClick={() => void onDelete(t.id, t.name)}>
                   <Trash2 />
                   <span className="sr-only">Delete {t.name}</span>

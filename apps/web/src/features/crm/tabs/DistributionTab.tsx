@@ -21,6 +21,7 @@ export function DistributionTab() {
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const [pick, setPick] = useState('')
 
   if (isLoading) return <SkeletonCards count={4} />
@@ -101,11 +102,13 @@ export function DistributionTab() {
                     <Button size="sm" variant="ghost" onClick={() => patch.mutate({ id: r.id, patch: { is_active: !r.is_active } })}>
                       {r.is_active ? 'Pause' : 'Activate'}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void onRemove(r.id, r.user_name ?? 'this member')}>
-                      <Trash2 />
-                      <span className="sr-only">Remove {r.user_name ?? 'member'} from the rota</span>
-                    </Button>
                   </>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" onClick={() => void onRemove(r.id, r.user_name ?? 'this member')}>
+                    <Trash2 />
+                    <span className="sr-only">Remove {r.user_name ?? 'member'} from the rota</span>
+                  </Button>
                 )}
               </li>
             ))}

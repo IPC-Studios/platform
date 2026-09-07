@@ -1,4 +1,5 @@
 import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import { LEGACY_STAGES, LEGACY_STAGE_LABEL } from '@ipc/domain'
 
 /**
  * The follow-up desk's arithmetic.
@@ -169,23 +170,13 @@ export function byUrgency(now: Date) {
   }
 }
 
-export const STAGES: ReadonlyArray<{ key: LeadStatus; label: string }> = [
-  { key: 'new', label: 'New' },
-  { key: 'contacted', label: 'Contacted' },
-  { key: 'qualified', label: 'Qualified' },
-  { key: 'proposal_sent', label: 'Proposal sent' },
-  { key: 'converted', label: 'Won' },
-  { key: 'lost', label: 'Lost' },
-]
-
-export const STAGE_LABEL: Record<LeadStatus, string> = {
-  new: 'New',
-  contacted: 'Contacted',
-  qualified: 'Qualified',
-  proposal_sent: 'Proposal sent',
-  converted: 'Won',
-  lost: 'Lost',
-}
+/**
+ * The six statuses every filter and report is keyed on. A studio's own
+ * pipeline stages (usePipelines) derive one of these; the list itself lives
+ * in @ipc/domain so nothing on this page can spell it differently.
+ */
+export const STAGES: ReadonlyArray<{ key: LeadStatus; label: string }> = LEGACY_STAGES
+export const STAGE_LABEL: Record<LeadStatus, string> = LEGACY_STAGE_LABEL
 
 /** Board columns for the follow-up view — by when, not by stage. */
 export const DUE_COLUMNS: ReadonlyArray<{ key: DueBucket; label: string; hint: string }> = [

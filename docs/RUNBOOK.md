@@ -221,4 +221,25 @@ follow-ups and their rules. Winning or losing a lead stops its cadence. There
 is no `pg_cron`; the `cron` compose container is the scheduler.
 
 Saved CRM views live in `crm_saved_views` per person; views saved in a browser
-before this are pushed up the first time the inbox loads.
+before this are pushed up the first time the inbox loads. Visibility is
+`private` (default), `team` or `everyone`; the inbox offers both on save when
+the person may edit the CRM, and the default view opens itself only when no
+filter is already set. Per-person inbox layout (columns, density, default
+view) lives in `crm_user_prefs` (`GET`/`PUT /crm/prefs`).
+
+## CRM quotes and forecast
+
+- A quote is built from invoice lines (`POST /crm/quotes`, totals from
+  `@ipc/domain` `computeInvoice`); `POST /crm/quotes/:id/send` issues the
+  public link (`/quote/accept?token=…`, `APP_URL` must be the web origin) and
+  optionally delivers it on WhatsApp or by email the way templates do.
+- The client page is public (`GET /public/quote/:token`, one-time
+  `POST …/accept|decline`); acceptance stamps the deal's value and notifies
+  its owner (skipped when the deal is unassigned). Sent quotes past
+  `valid_until` expire on the hourly tick (`crm_expire_quotes()`); only drafts
+  can be deleted. Converting with `quote_id` carries the quote's lines into
+  the project as deliverables and takes the name and cost from the quote.
+- `GET /crm/forecast` weights open deals by probability over their expected
+  close (`close_date`, else arrival); the Forecast tab breaks it by stage,
+  owner and month with win rate and average cycle. Reports adds lost analysis
+  (`byLostReason`, `byCompetitor` from `crm_stats`).

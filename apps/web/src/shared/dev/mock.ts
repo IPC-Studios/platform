@@ -314,9 +314,49 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/timeline/.test(path)) return crmTimelineFx
+  if (method === 'GET' && /^\/crm\/activities\/[^/]+\/ics$/.test(path)) return NOT_MOCKED
+  if (method === 'POST' && path === '/crm/activities/call') return { activity: crmActivitiesFx[0], placed: false, provider: 'manual', call_sid: null, dial_url: 'tel:+919876500001' }
+  if (method === 'POST' && path === '/crm/activities/meeting') return { activity: crmActivitiesFx[2], ics_url: '/crm/activities/x/ics' }
+  if (method === 'POST' && path === '/crm/activities/email/sync') return { status: 'not_configured', provider: null, fetched: 0, imported: 0, unmatched: 0, message: 'Mailbox sync is not configured in preview.' }
+  if (method === 'GET' && path.startsWith('/crm/activities')) return path.includes('open_tasks=1') ? crmActivitiesFx.filter((x) => x.type === 'task' && !x.done_at) : crmActivitiesFx
+  if (method === 'POST' && path === '/crm/activities') return { ...crmActivitiesFx[0], id: uid(0xe9), ...(body as Record<string, unknown>) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/activities/')) return {}
+  if (method === 'GET' && path === '/crm/integrations') return crmIntegrationsFx
+  if (method === 'PUT' && path.startsWith('/crm/integrations/')) return {}
+  if (method === 'GET' && path === '/crm/pipelines') return crmPipelinesFx
+  if (method === 'POST' && path === '/crm/pipelines') return { ...crmPipelinesFx[0], id: uid(0xd8), name: String((body as { name?: string }).name ?? 'Pipeline'), is_default: false }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/pipelines/') && !path.endsWith('/stages')) return {}
+  if (method === 'POST' && /^\/crm\/pipelines\/[^/]+\/stages$/.test(path)) return crmPipelinesFx[0]
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/stages/')) return {}
+  if (method === 'POST' && /^\/crm\/leads\/[^/]+\/stage$/.test(path))
+    return { status: 'contacted', stage_id: String((body as { stage_id?: string }).stage_id ?? STAGE.contacted) }
+  if (method === 'GET' && path === '/crm/lost-reasons') return crmLostReasonsFx
+  if (method === 'POST' && path === '/crm/lost-reasons') return { id: uid(0xd9), label: String((body as { label?: string }).label ?? 'Other'), position: 9, is_active: true }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/lost-reasons/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/contacts/')) return crmContactsFx[0]
+  if (method === 'GET' && path.startsWith('/crm/contacts')) return crmContactsFx
+  if (method === 'POST' && path === '/crm/contacts') return { ...crmContactsFx[0], id: uid(0xda), ...(body as Record<string, unknown>) }
+  if (method === 'PATCH' && path.startsWith('/crm/contacts/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/companies/')) return crmCompaniesFx[0]
+  if (method === 'GET' && path.startsWith('/crm/companies')) return crmCompaniesFx
+  if (method === 'POST' && path === '/crm/companies') return { ...crmCompaniesFx[0], id: uid(0xdb), ...(body as Record<string, unknown>) }
+  if (method === 'PATCH' && path.startsWith('/crm/companies/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/forecast')) return crmForecastFx
+  if (method === 'GET' && path.startsWith('/crm/quotes')) return crmQuotesFx
+  if (method === 'POST' && path === '/crm/quotes')
+    return { ...crmQuotesFx[0], id: uid(0xd0), ...(body as Record<string, unknown>) }
+  if (method === 'POST' && /^\/crm\/quotes\/[^/]+\/send$/.test(path))
+    return { url: 'https://app.example/quote/accept?token=demo', open_url: null, delivery: 'none' }
+  if (method === 'POST' && /^\/crm\/quotes\/[^/]+\/outcome$/.test(path))
+    return { status: String((body as { status?: string }).status ?? 'accepted') }
+  if (method === 'DELETE' && path.startsWith('/crm/quotes/')) return {}
+  if (method === 'GET' && path === '/crm/prefs') return crmPrefsFx
+  if (method === 'PUT' && path === '/crm/prefs') return { ...crmPrefsFx, ...(body as Record<string, unknown>) }
+  if (method === 'GET' && path.startsWith('/public/quote/')) return publicQuoteFx
+  if (method === 'POST' && path.includes('/public/quote/')) return { ok: true }
   if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
-    return atStage(leads, 'partial')
-  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/events$/.test(path)) return crmEventsFx
+    return atStage(dealLeads(), 'partial')
   if (method === 'POST' && /^\/crm\/leads\/[^/]+\/send-template$/.test(path))
     return { url: 'https://wa.me/919876543210?text=Hi', rendered: 'Hi', delivery: 'link' }
   if (method === 'POST' && path === '/crm/leads/bulk') return { updated: 0, previous: [] }
@@ -328,10 +368,18 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/templates')
     return { ...crmTemplatesFx[0], id: uid(0xc8), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/templates/')) return {}
-  if (method === 'GET' && path === '/crm/automations') return crmAutomationsFx
-  if (method === 'POST' && path === '/crm/automations')
-    return { ...crmAutomationsFx[0], id: uid(0xc9), ...(body as Record<string, unknown>) }
-  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/automations/')) return {}
+  if (method === 'GET' && path === '/crm/workflows') return crmWorkflowsFx
+  if (method === 'POST' && path === '/crm/workflows') return { ...crmWorkflowsFx[0], id: uid(0xf5), ...(body as Record<string, unknown>), steps: crmWorkflowsFx[0]!.steps }
+  if (method === 'POST' && /^\/crm\/workflows\/[^/]+\/enroll$/.test(path)) return { enrolled: 1 }
+  if (method === 'GET' && /^\/crm\/workflows\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx
+  if (method === 'GET' && path === '/crm/outbox') return crmOutboxFx
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx.filter((e) => e.status === 'active')
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/workflows/')) return {}
+  if (method === 'POST' && path.startsWith('/crm/enrollments/')) return {}
+  if (method === 'GET' && path === '/crm/scoring-rules') return crmScoringFx
+  if (method === 'POST' && path === '/crm/scoring-rules') return { ...crmScoringFx[0], id: uid(0xf6), ...(body as Record<string, unknown>) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/scoring-rules/')) return {}
+  if (method === 'POST' && path === '/crm/scoring/recompute') return { rescored: 4 }
   if (method === 'GET' && path.startsWith('/crm/stats')) return crmStatsFx
   if (method === 'GET' && path.startsWith('/crm/team-stats')) return crmTeamStatsFx
   if (method === 'POST' && path === '/crm/imports/preview') return crmPreviewFx
@@ -344,8 +392,8 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
     return { ...crmViewsFx[0], id: uid(0xcb), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/views/')) return {}
   if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
-  if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24 }
-  if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, ...(body as Record<string, unknown>) }
+  if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60 }
+  if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60, ...(body as Record<string, unknown>) }
   if (method === 'GET' && path === '/crm/cadences') return crmCadencesFx
   if (method === 'POST' && path === '/crm/cadences') return { id: uid(0xcc) }
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/cadences/')) return {}
@@ -374,11 +422,14 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/sources/')) return {}
   if (method === 'POST' && path === '/crm/leads')
     return {
-      ...leads[3],
-      id: uid(0xbf),
-      ...(body as Record<string, unknown>),
-      status: 'new',
-      assignee_name: null,
+      lead: {
+        ...dealLeads()[3],
+        id: uid(0xbf),
+        ...(body as Record<string, unknown>),
+        status: 'new',
+        assignee_name: null,
+      },
+      created: true,
     }
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
@@ -603,7 +654,32 @@ const daysFromNow = (n: number, hour = 10) => {
   return at.toISOString()
 }
 
-const leads = [
+const COMPANY = { verma: uid(0xde) }
+const PIPELINE = uid(0xd0)
+const STAGE = { new: uid(0xd1), contacted: uid(0xd2), qualified: uid(0xd3), proposal: uid(0xd4), won: uid(0xd5), lost: uid(0xd6) }
+/** Deal fields for the fixtures above: a stage per status, a value on most. */
+const STAGE_FOR: Record<string, string> = {
+  new: STAGE.new,
+  contacted: STAGE.contacted,
+  qualified: STAGE.qualified,
+  proposal_sent: STAGE.proposal,
+  converted: STAGE.won,
+  lost: STAGE.lost,
+}
+const withDeal = <T extends { status: string; name: string | null }>(l: T, i: number) => ({
+  ...l,
+  pipeline_id: PIPELINE,
+  stage_id: STAGE_FOR[l.status] ?? STAGE.new,
+  deal_value: i % 3 === 2 ? null : 60000 + i * 15000,
+  close_date: i % 2 === 0 ? '2026-10-15' : null,
+  title: i === 0 ? 'December wedding' : null,
+  score: [72, 35, 10, 55, 20, 65][i % 6] ?? 0,
+  crm_company_id: i === 1 ? COMPANY.verma : null,
+  crm_company_name: i === 1 ? 'Verma Weddings' : null,
+})
+const dealLeads = () => rawLeads.map(withDeal)
+
+const rawLeads = [
   {
     id: uid(0xb1),
     name: 'Priya & Arjun',
@@ -1459,18 +1535,252 @@ function delv(
 }
 
 
-const crmEventsFx = [
+const stageFx = (id: string, name: string, key: string, position: number, kind: 'open' | 'won' | 'lost', probability_default: number, deal_count: number) => ({
+  id,
+  pipeline_id: PIPELINE,
+  name,
+  key,
+  position,
+  kind,
+  probability_default,
+  wip_limit: key === 'proposal_sent' ? 5 : null,
+  required_fields: key === 'proposal_sent' ? ['deal_value'] : [],
+  deal_count,
+})
+const crmPipelinesFx = [
   {
-    id: uid(0xe0),
-    lead_id: uid(0xb1),
-    from_status: null,
-    to_status: 'new',
-    actor_id: null,
-    actor_name: null,
-    note: 'created',
+    id: PIPELINE,
+    name: 'Sales',
+    is_default: true,
+    position: 0,
+    created_at: '2026-08-01T09:00:00Z',
+    stages: [
+      stageFx(STAGE.new, 'New', 'new', 0, 'open', 10, 1),
+      stageFx(STAGE.contacted, 'Contacted', 'contacted', 1, 'open', 25, 1),
+      stageFx(STAGE.qualified, 'Qualified', 'qualified', 2, 'open', 50, 1),
+      stageFx(STAGE.proposal, 'Proposal sent', 'proposal_sent', 3, 'open', 75, 0),
+      stageFx(STAGE.won, 'Won', 'converted', 4, 'won', 100, 1),
+      stageFx(STAGE.lost, 'Lost', 'lost', 5, 'lost', 0, 0),
+    ],
+  },
+]
+const crmLostReasonsFx = [
+  { id: uid(0xd7), label: 'Budget', position: 0, is_active: true },
+  { id: uid(0xdc), label: 'Timing', position: 1, is_active: true },
+  { id: uid(0xdd), label: 'Went elsewhere', position: 2, is_active: true },
+]
+const crmCompaniesFx = [
+  {
+    id: COMPANY.verma,
+    name: 'Verma Weddings',
+    domain: 'vermaweddings.in',
+    phone: '9812345678',
+    city: 'Pune',
+    notes: null,
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    is_archived: false,
+    contact_count: 1,
+    deal_count: 1,
+    open_value: 90000,
     created_at: '2026-08-01T09:00:00Z',
   },
 ]
+const crmContactsFx = [
+  {
+    id: uid(0xdf),
+    name: 'Aanya Sharma',
+    phone: '9876543210',
+    email: 'aanya@example.in',
+    lifecycle: 'lead',
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    source: 'facebook',
+    crm_company_id: null,
+    crm_company_name: null,
+    notes: null,
+    is_archived: false,
+    deal_count: 1,
+    open_deal_count: 1,
+    last_contacted_at: null,
+    created_at: '2026-08-01T09:00:00Z',
+  },
+  {
+    id: uid(0xe1),
+    name: 'Rahul Verma',
+    phone: '9812345678',
+    email: null,
+    lifecycle: 'customer',
+    owner_id: uid(1),
+    owner_name: 'Demo Owner',
+    source: 'referral',
+    crm_company_id: COMPANY.verma,
+    crm_company_name: 'Verma Weddings',
+    notes: 'Repeat client',
+    is_archived: false,
+    deal_count: 2,
+    open_deal_count: 1,
+    last_contacted_at: '2026-08-20T09:00:00Z',
+    created_at: '2026-07-01T09:00:00Z',
+  },
+]
+const crmForecastFx = {
+  from: '2026-08-07',
+  to: '2026-12-05',
+  count: 3,
+  total_value: 330000,
+  weighted: 197500,
+  won_value: 90000,
+  open_value: 240000,
+  by_stage: [
+    { stage_id: STAGE.contacted, name: 'Contacted', kind: 'open', count: 1, total_value: 150000, weighted: 37500 },
+    { stage_id: STAGE.qualified, name: 'Qualified', kind: 'open', count: 1, total_value: 90000, weighted: 45000 },
+    { stage_id: STAGE.won, name: 'Won', kind: 'won', count: 1, total_value: 90000, weighted: 90000 },
+  ],
+  by_owner: [{ user_id: uid(1), name: 'Demo Owner', count: 3, total_value: 330000, weighted: 197500 }],
+  by_month: [
+    { month: '2026-09', count: 2, total_value: 240000, weighted: 82500 },
+    { month: '2026-10', count: 1, total_value: 90000, weighted: 90000 },
+  ],
+}
+
+const crmQuotesFx = [
+  {
+    id: uid(0xd1),
+    lead_id: uid(0xb1),
+    lead_name: 'Priya & Arjun',
+    quote_number: 'Q-0007',
+    title: 'Wedding package',
+    status: 'sent',
+    valid_until: '2026-09-20',
+    place_of_supply: 'Maharashtra',
+    intra_state: true,
+    subtotal: 120000,
+    discount: 0,
+    taxable: 120000,
+    tax: 21600,
+    total: 141600,
+    notes: 'Half in advance to confirm the date.',
+    terms: 'Balance before delivery.',
+    sent_at: '2026-09-04T09:00:00Z',
+    accepted_at: null,
+    accepted_by_name: null,
+    accepted_by_email: null,
+    accepted_ip: null,
+    declined_at: null,
+    decline_reason: null,
+    items: [
+      { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+      { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+    ],
+    created_at: '2026-09-04T09:00:00Z',
+  },
+  {
+    id: uid(0xd2),
+    lead_id: uid(0xb2),
+    lead_name: 'Meera',
+    quote_number: 'Q-0006',
+    title: 'Pre-wedding shoot',
+    status: 'accepted',
+    valid_until: '2026-09-10',
+    place_of_supply: 'Maharashtra',
+    intra_state: true,
+    subtotal: 50000,
+    discount: 5000,
+    taxable: 45000,
+    tax: 8100,
+    total: 53100,
+    notes: null,
+    terms: null,
+    sent_at: '2026-08-28T09:00:00Z',
+    accepted_at: '2026-08-30T09:00:00Z',
+    accepted_by_name: 'Meera',
+    accepted_by_email: 'meera@x.in',
+    accepted_ip: '203.0.113.7',
+    declined_at: null,
+    decline_reason: null,
+    items: [
+      { description: 'Pre-wedding shoot', quantity: 1, rate: 50000, amount: 50000, gst_rate: 18, taxable: 45000, cgst: 4050, sgst: 4050, igst: 0 },
+    ],
+    created_at: '2026-08-28T09:00:00Z',
+  },
+]
+
+const crmPrefsFx = {
+  columns: ['lead', 'stage', 'score', 'source', 'owner', 'value', 'follow_up'],
+  default_view_id: null,
+  density: 'comfortable',
+  pipeline_id: null,
+}
+
+const publicQuoteFx = {
+  quote_number: 'Q-0007',
+  title: 'Wedding package',
+  status: 'sent',
+  valid_until: '2026-09-20',
+  subtotal: 120000,
+  discount: 0,
+  taxable: 120000,
+  tax: 21600,
+  total: 141600,
+  notes: 'Half in advance to confirm the date.',
+  terms: 'Balance before delivery.',
+  accepted_at: null,
+  declined_at: null,
+  studio: 'Demo Studio',
+  client_name: 'Priya & Arjun',
+  items: [
+    { description: 'Wedding coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    { description: 'Album', quantity: 2, rate: 10000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+  ],
+  expired: false,
+}
+
+const activityFx = (id: string, over: Partial<Record<string, unknown>>) => ({
+  id,
+  lead_id: uid(0xb1),
+  lead_name: 'Priya & Arjun',
+  contact_id: uid(0xdf),
+  contact_name: 'Aanya Sharma',
+  type: 'note',
+  direction: 'none',
+  subject: null,
+  body: null,
+  outcome: null,
+  started_at: '2026-09-04T09:00:00Z',
+  ended_at: null,
+  duration_s: null,
+  due_at: null,
+  done_at: null,
+  assigned_to: uid(1),
+  assignee_name: 'Demo Owner',
+  actor_id: uid(1),
+  actor_name: 'Demo Owner',
+  provider: 'manual',
+  external_id: null,
+  location: null,
+  created_at: '2026-09-04T09:00:00Z',
+  ...over,
+})
+const crmActivitiesFx = [
+  activityFx(uid(0xe2), { type: 'call', direction: 'out', outcome: 'answered', duration_s: 660, body: 'Wants two photographers and a drone.' }),
+  activityFx(uid(0xe3), { type: 'task', subject: 'Send the album mock-up', due_at: '2026-09-05T04:30:00Z', created_at: '2026-09-03T09:00:00Z' }),
+  activityFx(uid(0xe4), { type: 'meeting', direction: 'out', subject: 'Venue recce', location: 'Taj Lands End, Bandra', started_at: '2026-09-10T04:30:00Z', ended_at: '2026-09-10T05:30:00Z', created_at: '2026-09-02T09:00:00Z' }),
+  activityFx(uid(0xe5), { type: 'whatsapp', direction: 'in', subject: 'Yes, Sunday works', provider: 'whatsapp', created_at: '2026-09-01T12:00:00Z', lead_id: uid(0xb2), lead_name: 'Meera' }),
+]
+const crmTimelineFx = {
+  items: [
+    ...crmActivitiesFx.filter((a) => a.lead_id === uid(0xb1)).map((a) => ({ kind: 'activity', at: a.created_at, activity: a })),
+    { kind: 'event', at: '2026-08-01T09:00:00Z', event: { id: uid(0xe0), lead_id: uid(0xb1), from_status: null, to_status: 'new', actor_id: null, actor_name: null, note: 'arrived via facebook', created_at: '2026-08-01T09:00:00Z' } },
+  ],
+  next_cursor: null,
+}
+const crmIntegrationsFx = [
+  { provider: 'gmail', status: 'not_configured', credentials_present: false, config: {}, last_error: null, last_sync_at: null, connected_by: null, updated_at: null },
+  { provider: 'o365', status: 'not_configured', credentials_present: false, config: {}, last_error: null, last_sync_at: null, connected_by: null, updated_at: null },
+  { provider: 'twilio', status: 'connected', credentials_present: true, config: {}, last_error: null, last_sync_at: null, connected_by: uid(1), updated_at: '2026-09-01T09:00:00Z' },
+]
+
 
 const crmTemplatesFx = [
   {
@@ -1482,17 +1792,65 @@ const crmTemplatesFx = [
   },
 ]
 
-const crmAutomationsFx = [
+const WF = uid(0xf0)
+const crmWorkflowsFx = [
   {
-    id: uid(0xc6),
-    name: 'Hot Facebook leads',
+    id: WF,
+    name: 'Facebook nurture',
     trigger: 'lead_created',
     condition: { source: 'facebook' },
-    action: 'mark_hot',
-    action_value: {},
     is_active: true,
+    allow_reenroll: false,
+    exit_on_reply: true,
+    steps: [
+      { id: uid(0xf1), step_no: 1, kind: 'action', config: { action: 'mark_hot' } },
+      { id: uid(0xf2), step_no: 2, kind: 'delay', config: { amount: 1, unit: 'days' } },
+      { id: uid(0xf3), step_no: 3, kind: 'branch', config: { conditions: [{ field: 'inbound_replies', op: 'gte', value: 1 }], yes_step: 5, no_step: 4 } },
+      { id: uid(0xf4), step_no: 4, kind: 'action', config: { action: 'notify_assignee', note: 'No reply yet — call them.' } },
+      { id: uid(0xf7), step_no: 5, kind: 'exit', config: {} },
+    ],
+    active_count: 1,
+    completed_count: 3,
+    errored_count: 0,
+    last_enrolled_at: '2026-09-04T09:00:00Z',
     created_at: '2026-08-01T09:00:00Z',
   },
+]
+const crmEnrollmentsFx = [
+  { id: uid(0xf8), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb1), lead_name: 'Priya & Arjun', current_step: 3, next_at: '2026-09-06T09:00:00Z', status: 'active', exit_reason: null, steps_run: 2, log: [{ step: 1, kind: 'action', result: 'mark_hot', at: '2026-09-04T09:00:00Z' }, { step: 2, kind: 'delay', at: '2026-09-04T09:00:01Z' }], enrolled_at: '2026-09-04T09:00:00Z' },
+  { id: uid(0xf9), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb2), lead_name: 'Meera', current_step: 5, next_at: null, status: 'completed', exit_reason: null, steps_run: 4, log: [{ step: 1, kind: 'action', result: 'mark_hot', at: '2026-08-20T09:00:00Z' }], enrolled_at: '2026-08-20T09:00:00Z' },
+]
+const crmOutboxFx = [
+  {
+    id: uid(0xb7),
+    lead_id: uid(0xb1),
+    lead_name: 'Priya & Arjun',
+    template_name: 'First follow-up',
+    channel: 'whatsapp',
+    status: 'manual',
+    error: null,
+    created_at: '2026-09-04T09:05:00Z',
+    sent_at: '2026-09-04T10:00:00Z',
+  },
+  {
+    id: uid(0xb8),
+    lead_id: uid(0xb2),
+    lead_name: 'Meera',
+    template_name: 'First follow-up',
+    channel: 'whatsapp',
+    status: 'failed',
+    error: 'whatsapp send failed 401: check the access token',
+    created_at: '2026-09-03T09:05:00Z',
+    sent_at: null,
+  },
+]
+
+const crmScoringFx = [
+  { id: uid(0xfa), label: 'Has an email address', field: 'has_email', op: 'eq', value: true, points: 10, is_active: true, position: 0 },
+  { id: uid(0xfb), label: 'Came by referral', field: 'source', op: 'eq', value: 'referral', points: 15, is_active: true, position: 1 },
+  { id: uid(0xfc), label: 'Deal worth 50,000 or more', field: 'deal_value', op: 'gte', value: 50000, points: 20, is_active: true, position: 2 },
+  { id: uid(0xfd), label: 'Has replied', field: 'inbound_replies', op: 'gte', value: 1, points: 25, is_active: true, position: 3 },
+  { id: uid(0xfe), label: 'Gone quiet for 14 days', field: 'days_since_contact', op: 'gte', value: 14, points: -15, is_active: true, position: 6 },
 ]
 
 const crmStatsFx = {

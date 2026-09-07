@@ -7,12 +7,15 @@ import { Button } from '@/shared/ui/button'
 import { cn } from '@/shared/ui/cn'
 import { useDirectory } from '@/features/team/api'
 import { useDistribution, useSavedViews } from './api'
+import { isOpen } from './leads'
 
 interface ChecklistItem {
   title: string
   where: string
   done: boolean
   to?: string
+  /** For the one step that is not a page: adding the first lead. */
+  action?: () => void
 }
 
 /**
@@ -22,7 +25,7 @@ interface ChecklistItem {
  * pressing a button here, because a checklist you can satisfy without doing the
  * work is worse than no checklist. It hides itself once everything is done.
  */
-export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead?: () => void }) {
+export function SetupChecklist({ leads, onAddLead }: { leads: readonly CrmLead[]; onAddLead?: () => void }) {
   const [open, setOpen] = useState(true)
   const { data: team } = useDirectory()
   const { data: rota } = useDistribution()
@@ -44,13 +47,12 @@ export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead
       title: 'Add your first lead',
       where: 'Add lead, or connect a web form',
       done: leads.length > 0,
+      ...(onAddLead ? { action: onAddLead } : {}),
     },
     {
       title: 'Give every open lead an owner',
       where: 'Lead drawer → Owner',
-      done:
-        leads.length > 0 &&
-        !leads.some((l) => l.assigned_to === null && l.status !== 'converted' && l.status !== 'lost'),
+      done: leads.length > 0 && !leads.some((l) => l.assigned_to === null && isOpen(l)),
     },
     {
       title: 'Contact a lead',
@@ -128,6 +130,11 @@ export function SetupChecklist({ leads }: { leads: readonly CrmLead[]; onAddLead
                 {!item.done && item.to && (
                   <Button size="sm" variant="outline" asChild>
                     <Link to={item.to}>Set up</Link>
+                  </Button>
+                )}
+                {!item.done && !item.to && item.action && (
+                  <Button size="sm" variant="outline" onClick={item.action}>
+                    Add lead
                   </Button>
                 )}
               </li>
