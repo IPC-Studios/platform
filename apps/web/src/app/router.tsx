@@ -39,6 +39,9 @@ import { TeamTermsPage } from '@/routes/settings/team-terms'
 import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { TeamTermsAcknowledgePage } from '@/routes/team-terms-acknowledge'
+import { QuotationPage } from '@/routes/quotation'
+import { ReceiptPage } from '@/routes/receipt'
+import { DeliveryPage } from '@/routes/delivery'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
@@ -112,6 +115,9 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/accept-invite', AcceptInvitePage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
   publicRoute('/team-terms', TeamTermsAcknowledgePage),
+  publicRoute('/quotation', QuotationPage),
+  publicRoute('/receipt', ReceiptPage),
+  publicRoute('/delivery', DeliveryPage),
 
   renewalLayout.addChildren([
     createRoute({
