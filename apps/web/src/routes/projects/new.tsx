@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -30,6 +30,12 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import {
+  DUE_BASIS_OPTIONS,
+  deliverableRuleForTitle,
+  internalLeadDaysForTitle,
+  type DueBasis,
+} from '@ipc/domain'
 import {
   z,
   type CreateShootRequest,
@@ -94,7 +100,7 @@ import {
   newShoot,
   nextStep,
   prevStep,
-  rememberLeadDays,
+  rememberDueDays,
   removeShootAt,
   saveDraft,
   shootIssues,
@@ -1343,6 +1349,8 @@ function InternalWorkBlock({
     (s) => !titles.has(s.toLowerCase()),
   )
   const presets = useShootPresets('internal_work')
+  /** Null = closed, -1 = adding, else the index in draft.deliverables to edit. */
+  const [editing, setEditing] = useState<number | null>(null)
 
   const addTitles = (names: string[]) =>
     patch({
@@ -1354,16 +1362,11 @@ function InternalWorkBlock({
       ],
     })
 
-  const setTitle = (at: number, title: string) =>
-    patch({
-      deliverables: draft.deliverables.map((d, i) => (i === at ? { ...d, title } : d)),
-    })
-
   return (
     <SubCard
       icon={Package}
-      title="Internal work for this shoot"
-      hint="These items help the team edit, sort, hand off and track. They never appear on the quotation."
+      title="Deliverables for this shoot"
+      hint="These items help the team edit, sort, hand off and track. They never appear on the quotation unless you say so."
       actions={
         <>
           <PresetMenu
@@ -1381,7 +1384,7 @@ function InternalWorkBlock({
               internal_work: work.map((w) => w.item.title.trim()).filter(Boolean),
             }}
           />
-          <Button size="sm" onClick={() => addTitles([''])}>
+          <Button size="sm" onClick={() => setEditing(-1)}>
             <Plus /> Add more deliverables
           </Button>
         </>
@@ -1390,30 +1393,70 @@ function InternalWorkBlock({
       {work.length === 0 ? (
         <Band>No deliverables added for this shoot yet.</Band>
       ) : (
-        <div className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-1.5">
           {work.map(({ at, item }) => (
-            <div key={at} className="flex items-center gap-2">
-              <Input
-                value={item.title}
-                onChange={(e) => setTitle(at, e.target.value)}
-                placeholder="Edited photos"
-                aria-label={`Internal work ${at + 1}`}
-                className="flex-1"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() =>
-                  patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })
-                }
-              >
-                <Trash2 />
-                <span className="sr-only">Remove internal work {at + 1}</span>
-              </Button>
-            </div>
+            <li
+              key={at}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
+            >
+              <CheckCircle2 className="size-3.5 shrink-0 text-primary" aria-hidden />
+              <span className="font-medium">{item.title.trim() || 'Untitled'}</span>
+              <span className="text-muted-foreground">· Starts after:</span>
+              <span>{startRuleShortLabel(item.start_rule)}</span>
+              {item.lead_days.trim() && (
+                <span className="text-muted-foreground">
+                  · Due in {item.lead_days.trim()} {item.lead_days.trim() === '1' ? 'day' : 'days'}
+                </span>
+              )}
+              {item.show_on_quotation && <StatusBadge tone="info">On quotation</StatusBadge>}
+              <span className="ml-auto flex items-center gap-0.5">
+                <Button variant="ghost" size="icon" onClick={() => setEditing(at)}>
+                  <Pencil />
+                  <span className="sr-only">Edit {item.title.trim() || 'this deliverable'}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() =>
+                    patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })
+                  }
+                >
+                  <X />
+                  <span className="sr-only">Remove {item.title.trim() || 'this deliverable'}</span>
+                </Button>
+              </span>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
+
+      <AddDeliverableDialog
+        open={editing !== null}
+        onOpenChange={(next) => setEditing(next ? editing : null)}
+        shootName={shoot.name}
+        // The row being edited is not a duplicate of itself.
+        existingTitles={
+          editing !== null && editing >= 0
+            ? new Set(
+                work
+                  .filter((w) => w.at !== editing)
+                  .map((w) => w.item.title.trim().toLowerCase()),
+              )
+            : titles
+        }
+        initial={editing !== null && editing >= 0 ? draft.deliverables[editing] : undefined}
+        onSubmit={(v) =>
+          patch({
+            deliverables:
+              editing !== null && editing >= 0
+                ? draft.deliverables.map((d, i) => (i === editing ? { ...d, ...v } : d))
+                : [
+                    ...draft.deliverables,
+                    { ...newInternalWork(index, v.title), ...v, shoot_index: index },
+                  ],
+          })
+        }
+      />
 
       {suggestions.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1959,15 +2002,49 @@ function DeliverableRow({
             placeholder="Wedding album"
           />
         </Field>
-        <Field label="Starts after">
+        {/* The client's clock, which is the one the quotation prints. */}
+        <Field label="Delivery days">
+          <Input
+            inputMode="numeric"
+            value={item.due_days}
+            onChange={(e) => set({ due_days: e.target.value })}
+            onBlur={(e) => rememberDueDays(item.title, e.target.value)}
+            placeholder="45"
+          />
+        </Field>
+        <Field label="Due basis">
+          <Select
+            value={item.due_basis}
+            onChange={(e) => set({ due_basis: e.target.value as DeliverableDraft['due_basis'] })}
+          >
+            {DUE_BASIS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {item.due_basis === 'custom' && (
+          <Field label="Estimated date">
+            <Input
+              type="date"
+              value={item.custom_date}
+              onChange={(e) => set({ custom_date: e.target.value })}
+            />
+          </Field>
+        )}
+
+        <Field label="When can this work start?">
           <Select
             value={item.start_rule}
             onChange={(e) => set({ start_rule: e.target.value as DeliverableDraft['start_rule'] })}
           >
-            <option value="whole_project">All shoots are done</option>
-            <option value="this_shoot">One specific shoot</option>
-            <option value="specific_shoots">Selected shoots</option>
-            <option value="no_data">No schedule</option>
+            {START_RULE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </Select>
         </Field>
 
@@ -1989,30 +2066,27 @@ function DeliverableRow({
         )}
 
         {item.start_rule !== 'no_data' && (
-          <Field label="Delivery lead time (days)">
+          <Field label="Days after work can start">
             <Input
               inputMode="numeric"
               value={item.lead_days}
               onChange={(e) => set({ lead_days: e.target.value })}
-              onBlur={(e) => rememberLeadDays(item.title, e.target.value)}
-              placeholder="45"
+              placeholder="7"
             />
           </Field>
         )}
       </div>
 
-      {item.start_rule !== 'no_data' && (
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CalendarDays className="size-3.5" />
-          {due ? (
-            <>
-              Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
-            </>
-          ) : (
-            'Estimated delivery appears once the shoot has a date and a lead time.'
-          )}
-        </p>
-      )}
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <CalendarDays className="size-3.5" />
+        {due ? (
+          <>
+            Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
+          </>
+        ) : (
+          'Estimated delivery appears once the shoot it counts from has a date.'
+        )}
+      </p>
 
       <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-border pt-4">
         <Switch
@@ -2284,3 +2358,282 @@ function ReviewTile({
 const countLabel = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 const summarise = (names: string[]) => (names.length === 0 ? 'None' : names.join(', '))
+
+/** What a piece of internal work is waiting on before it can begin. */
+const START_RULE_OPTIONS: { value: DeliverableDraft['start_rule']; label: string }[] = [
+  { value: 'this_shoot', label: "After this shoot's data is received" },
+  { value: 'whole_project', label: 'After whole project data is received' },
+  { value: 'specific_shoots', label: 'I will choose specific shoots' },
+  { value: 'no_data', label: 'No shoot data needed' },
+]
+
+/** The one-word version of a start rule, for a row that has no space. */
+function startRuleShortLabel(rule: DeliverableDraft['start_rule']): string {
+  switch (rule) {
+    case 'this_shoot':
+      return 'This shoot data'
+    case 'whole_project':
+      return 'Whole project data'
+    case 'specific_shoots':
+      return 'Selected shoots'
+    case 'no_data':
+      return 'No data needed'
+  }
+}
+
+export interface AddedDeliverable {
+  title: string
+  description: string
+  due_days: string
+  due_basis: DueBasis
+  custom_date: string
+  visibility_scope: 'client' | 'internal'
+  show_on_quotation: boolean
+  start_rule: DeliverableDraft['start_rule']
+  lead_days: string
+}
+
+/**
+ * Add one deliverable to a shoot.
+ *
+ * Two clocks, because a studio runs two. The top pair is what the client was
+ * told — "thirty days after the wedding" — and it is what lands on the
+ * quotation. The panel below is production's: nothing can be edited before the
+ * footage arrives, so that work is timed from when its data lands. Typing a
+ * title people recognise fills both, which is the point — those numbers are
+ * trade knowledge, not decisions worth stopping over.
+ */
+function AddDeliverableDialog({
+  open,
+  onOpenChange,
+  shootName,
+  existingTitles,
+  initial,
+  onSubmit: onSubmitValue,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  shootName: string
+  /** Titles already on this shoot, lowercased — to warn before duplicating. */
+  existingTitles: Set<string>
+  /** Given when reopening on a row: the same form, editing what is there. */
+  initial?: DeliverableDraft | undefined
+  onSubmit: (value: AddedDeliverable) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [dueDays, setDueDays] = useState('30')
+  const [dueBasis, setDueBasis] = useState<DueBasis>('after_wedding_day')
+  const [customDate, setCustomDate] = useState('')
+  const [description, setDescription] = useState('')
+  const [onQuotation, setOnQuotation] = useState(false)
+  const [startRule, setStartRule] = useState<DeliverableDraft['start_rule']>('this_shoot')
+  const [leadDays, setLeadDays] = useState('7')
+  const [advanced, setAdvanced] = useState(false)
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
+  /** Whether the title has been typed into since the dialog opened. */
+  const [typed, setTyped] = useState(false)
+
+  // Opening resets the form: to the row being edited, or to blank. A
+  // half-typed title left over from last time is worse than retyping one.
+  useEffect(() => {
+    if (!open) return
+    setTitle(initial?.title ?? '')
+    setDueDays(initial?.due_days || '30')
+    setDueBasis(initial?.due_basis ?? 'after_wedding_day')
+    setCustomDate(initial?.custom_date ?? '')
+    setDescription(initial?.description ?? '')
+    setOnQuotation(initial?.show_on_quotation ?? false)
+    setStartRule(initial?.start_rule ?? 'this_shoot')
+    setLeadDays(initial?.lead_days || '7')
+    setAdvanced(initial?.start_rule === 'specific_shoots')
+    setConfirmDuplicate(false)
+    setTyped(false)
+  }, [open, initial])
+
+  // Typing a name the trade knows fills in the timings behind it — but only
+  // once someone types, so reopening a row does not overwrite its numbers.
+  useEffect(() => {
+    const t = title.trim()
+    if (!typed || !t) return
+    const rule = deliverableRuleForTitle(t)
+    setDueDays(String(rule.due_days))
+    setDueBasis(rule.due_basis)
+    setLeadDays(String(internalLeadDaysForTitle(t)))
+  }, [title, typed])
+
+  const trimmed = title.trim()
+  const duplicate = trimmed.length > 0 && existingTitles.has(trimmed.toLowerCase())
+  const valid = trimmed.length > 0 && (!duplicate || confirmDuplicate)
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (!valid) return
+    onSubmitValue({
+      title: trimmed,
+      description: description.trim(),
+      due_days: dueDays.trim(),
+      due_basis: dueBasis,
+      custom_date: dueBasis === 'custom' ? customDate : '',
+      visibility_scope: onQuotation ? 'client' : 'internal',
+      show_on_quotation: onQuotation,
+      // Only internal work waits on data. A client line is a promise, not a
+      // production step, so it carries no readiness rule.
+      start_rule: onQuotation ? 'no_data' : startRule,
+      lead_days: onQuotation ? '' : leadDays.trim(),
+    })
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        // Two panels of fields is taller than a laptop dialog, so it scrolls
+        // rather than pushing its own buttons off the screen.
+        className="max-h-[88vh] overflow-y-auto"
+        title={initial ? 'Edit deliverable' : 'Add deliverable'}
+        description={
+          <>
+            Linked to{' '}
+            <span className="font-medium text-foreground">{shootName.trim() || 'this shoot'}</span>.
+            Will appear in the project deliverables list automatically.
+          </>
+        }
+      >
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Deliverable title *</Label>
+            <Input
+              autoFocus
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                setTyped(true)
+              }}
+              placeholder="e.g. Haldi Highlight Teaser"
+            />
+            {duplicate && (
+              <label className="flex items-center gap-2 text-xs text-warning">
+                <input
+                  type="checkbox"
+                  checked={confirmDuplicate}
+                  onChange={(e) => setConfirmDuplicate(e.target.checked)}
+                  className="size-3.5 accent-current"
+                />
+                Already on this shoot — add anyway
+              </label>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Delivery days</Label>
+              <Input
+                inputMode="numeric"
+                value={dueDays}
+                onChange={(e) => setDueDays(e.target.value)}
+                placeholder="30"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Due basis</Label>
+              <Select value={dueBasis} onChange={(e) => setDueBasis(e.target.value as DueBasis)}>
+                {DUE_BASIS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          {dueBasis === 'custom' && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Estimated date</Label>
+              <Input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Brief / instructions (optional)</Label>
+            <textarea
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What does the team need to know?"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <Switch
+              checked={onQuotation}
+              onChange={setOnQuotation}
+              label={onQuotation ? 'Show on quotation' : 'Internal only'}
+              description={
+                onQuotation
+                  ? 'Visible to the client and can affect the quotation.'
+                  : 'Used by your team and hidden from client quotation.'
+              }
+            />
+          </div>
+
+          {!onQuotation && (
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>When can this work start?</Label>
+                <Select
+                  value={startRule}
+                  onChange={(e) => setStartRule(e.target.value as DeliverableDraft['start_rule'])}
+                >
+                  {START_RULE_OPTIONS.filter((o) => advanced || o.value !== 'specific_shoots').map(
+                    (o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ),
+                  )}
+                </Select>
+                {!advanced && (
+                  <button
+                    type="button"
+                    onClick={() => setAdvanced(true)}
+                    className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  >
+                    Change / advanced
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Delivery time</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Due in</span>
+                  <Input
+                    inputMode="numeric"
+                    value={leadDays}
+                    onChange={(e) => setLeadDays(e.target.value)}
+                    className="w-20"
+                    aria-label="Days after work can start"
+                  />
+                  <span className="text-xs text-muted-foreground">days after work can start</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-1 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!valid}>
+              {initial ? 'Save changes' : 'Add deliverable'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
