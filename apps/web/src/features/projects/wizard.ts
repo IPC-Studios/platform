@@ -94,6 +94,44 @@ export const newShoot = (): ShootDraft => ({
   status: 'planned',
 })
 
+/**
+ * The shoot days an Indian wedding studio types over and over. Chips beat a
+ * blank Name field here: the wizard gets filled at a desk between calls, and
+ * the point is four rows in four taps, dates fixed after.
+ *
+ * Ordered the way the week runs, so the row reads as a schedule.
+ */
+export const COMMON_SHOOTS = [
+  'Engagement',
+  'Haldi',
+  'Mehendi',
+  'Wedding Day',
+  'Reception',
+  'Couple Shoot',
+] as const
+
+/** What "Apply preset" lays down — the spine of a standard wedding booking. */
+export const SHOOT_PRESET = ['Haldi', 'Mehendi', 'Wedding Day', 'Reception'] as const
+
+/**
+ * Append named shoots, skipping any name already on the list.
+ *
+ * The skip is what makes the preset safe to press twice. It compares trimmed
+ * and case-folded: a day typed by hand as "haldi" is the day the chip would
+ * otherwise add again.
+ */
+export function withShoots(existing: ShootDraft[], names: readonly string[]): ShootDraft[] {
+  const taken = new Set(existing.map((s) => s.name.trim().toLowerCase()))
+  const added: ShootDraft[] = []
+  for (const name of names) {
+    const key = name.trim().toLowerCase()
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    added.push({ ...newShoot(), name })
+  }
+  return added.length ? [...existing, ...added] : existing
+}
+
 export const newDeliverable = (): DeliverableDraft => ({
   title: '',
   is_additional_charge: false,

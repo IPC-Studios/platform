@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   EMPTY_DRAFT,
+  SHOOT_PRESET,
   canSubmit,
   draftTotals,
   estimatedDateFor,
@@ -13,6 +14,7 @@ import {
   stepErrors,
   toProjectRequest,
   toShootRequests,
+  withShoots,
   type ProjectDraft,
 } from './wizard'
 
@@ -113,7 +115,7 @@ describe('draftTotals', () => {
 })
 
 describe('estimatedDateFor', () => {
-  const withShoots = named({
+  const twoShoots = named({
     shoots: [
       { ...newShoot(), name: 'Haldi', shoot_date: '2026-11-20' },
       { ...newShoot(), name: 'Wedding', shoot_date: '2026-11-22' },
@@ -122,18 +124,18 @@ describe('estimatedDateFor', () => {
 
   it('dates a whole-project deliverable from the last shoot', () => {
     const d = { ...newDeliverable(), title: 'Album', lead_days: '45' }
-    expect(estimatedDateFor(withShoots, d)).toBe('2027-01-06')
+    expect(estimatedDateFor(twoShoots, d)).toBe('2027-01-06')
   })
 
   it('dates a pinned deliverable from its own shoot', () => {
     const d = { ...newDeliverable(), title: 'Teaser', start_rule: 'this_shoot' as const, shoot_index: 0, lead_days: '7' }
-    expect(estimatedDateFor(withShoots, d)).toBe('2026-11-27')
+    expect(estimatedDateFor(twoShoots, d)).toBe('2026-11-27')
   })
 
   it('stays unknown without shoots or without a lead time', () => {
     const d = { ...newDeliverable(), title: 'Album', lead_days: '45' }
     expect(estimatedDateFor(named(), d)).toBeNull()
-    expect(estimatedDateFor(withShoots, { ...d, lead_days: '' })).toBeNull()
+    expect(estimatedDateFor(twoShoots, { ...d, lead_days: '' })).toBeNull()
   })
 })
 
@@ -206,5 +208,41 @@ describe('draft housekeeping', () => {
     expect(nextStep('review')).toBe('review')
     expect(nextStep('client')).toBe('shoots')
     expect(prevStep('billing')).toBe('deliverables')
+  })
+})
+
+describe('quick-add shoots', () => {
+  const named = (...names: string[]) => names.map((name) => ({ ...newShoot(), name }))
+
+  it('appends the names it was given, in order', () => {
+    expect(withShoots([], SHOOT_PRESET).map((s) => s.name)).toEqual([
+      'Haldi',
+      'Mehendi',
+      'Wedding Day',
+      'Reception',
+    ])
+  })
+
+  it('skips a day already on the schedule, however it was typed', () => {
+    const existing = named('  haldi ', 'Sangeet')
+    const after = withShoots(existing, SHOOT_PRESET)
+    expect(after.map((s) => s.name)).toEqual([
+      '  haldi ',
+      'Sangeet',
+      'Mehendi',
+      'Wedding Day',
+      'Reception',
+    ])
+  })
+
+  // The preset button reads this: nothing to add means nothing to press.
+  it('returns the same array when every name is taken', () => {
+    const existing = named(...SHOOT_PRESET)
+    expect(withShoots(existing, SHOOT_PRESET)).toBe(existing)
+  })
+
+  it('leaves the blank rows the Add shoot button makes alone', () => {
+    const blank = [newShoot()]
+    expect(withShoots(blank, ['Haldi']).map((s) => s.name)).toEqual(['', 'Haldi'])
   })
 })

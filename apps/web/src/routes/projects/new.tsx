@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarDays,
   Camera,
+  Check,
   CheckCircle2,
   Package,
   Plus,
@@ -35,7 +36,9 @@ import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
 import { useCreateProject } from '@/features/projects/api'
 import {
+  COMMON_SHOOTS,
   EMPTY_DRAFT,
+  SHOOT_PRESET,
   STEP_HINTS,
   STEP_LABELS,
   WIZARD_STEPS,
@@ -55,6 +58,7 @@ import {
   stepIndex,
   toProjectRequest,
   toShootRequests,
+  withShoots,
   type DeliverableDraft,
   type ProjectDraft,
   type ShootDraft,
@@ -498,52 +502,123 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   )
 }
 
+/**
+ * The busiest step in the wizard, so it opens with the shortcuts rather than a
+ * blank row: a chip per common shoot day, and a preset that lays down the four
+ * a standard wedding books. "Add shoot" is still there for everything else.
+ */
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const set = (i: number, p: Partial<ShootDraft>) =>
     patch({ shoots: draft.shoots.map((s, idx) => (idx === i ? { ...s, ...p } : s)) })
 
+  const add = (names: readonly string[]) => patch({ shoots: withShoots(draft.shoots, names) })
+  const preset = withShoots(draft.shoots, SHOOT_PRESET)
+  const presetAdds = preset.length - draft.shoots.length
+
   return (
-    <RowList
-      items={draft.shoots}
-      empty="No shoots yet. You can add them later, but dating deliverables needs at least one."
-      addLabel="Add shoot"
-      onAdd={() => patch({ shoots: [...draft.shoots, newShoot()] })}
-    >
-      {draft.shoots.map((s, i) => (
-        <div key={i} className="rounded-lg border border-border p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Camera className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Shoot {i + 1}</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="ml-auto"
-              onClick={() => patch({ shoots: draft.shoots.filter((_, idx) => idx !== i) })}
-            >
-              <Trash2 />
-              <span className="sr-only">Remove shoot {i + 1}</span>
-            </Button>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Name" required>
-              <Input value={s.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Wedding day" />
-            </Field>
-            <Field label="Date">
-              <Input type="date" value={s.shoot_date} onChange={(e) => set(i, { shoot_date: e.target.value })} />
-            </Field>
-            <Field label="Location">
-              <Input value={s.location} onChange={(e) => set(i, { location: e.target.value })} placeholder="Taj Lands End" />
-            </Field>
-            <Field label="Status">
-              <Select value={s.status} onChange={(e) => set(i, { status: e.target.value as ShootDraft['status'] })}>
-                <option value="planned">Planned</option>
-                <option value="confirmed">Confirmed</option>
-              </Select>
-            </Field>
-          </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Shoot schedule</p>
+          <p className="text-xs text-muted-foreground">
+            Add every shoot day. Pick a common one below, or add a custom shoot.
+          </p>
         </div>
-      ))}
-    </RowList>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => patch({ shoots: [...draft.shoots, newShoot()] })}>
+            <Plus /> Add shoot
+          </Button>
+          {/* Disabled once it has nothing left to add, so a second press is
+              visibly a no-op instead of a silently ignored click. */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => patch({ shoots: preset })}
+            disabled={presetAdds === 0}
+            title={`Adds ${SHOOT_PRESET.join(', ')}`}
+          >
+            <Sparkles /> Apply preset
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Quick add
+        </span>
+        {COMMON_SHOOTS.map((name) => {
+          const already = draft.shoots.some(
+            (s) => s.name.trim().toLowerCase() === name.toLowerCase(),
+          )
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => add([name])}
+              disabled={already}
+              title={already ? `${name} is already on the schedule` : undefined}
+              className={cn(
+                'flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
+                already
+                  ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                  : 'hover:border-primary hover:bg-primary/10 hover:text-primary',
+              )}
+            >
+              {already ? <Check className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
+              {name}
+            </button>
+          )
+        })}
+      </div>
+
+      {draft.shoots.length === 0 ? (
+        <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-border px-6 py-10 text-center">
+          <CalendarDays className="size-5 text-muted-foreground" aria-hidden />
+          <p className="mt-1 font-medium">No shoots yet</p>
+          <p className="text-sm text-muted-foreground">
+            Add Haldi, Wedding Day, Reception and the rest with the buttons above. Deliverable
+            dates count forward from these.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {draft.shoots.map((s, i) => (
+            <div key={i} className="rounded-lg border border-border p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Camera className="size-4 text-muted-foreground" />
+                <span className="text-sm font-medium">{s.name.trim() || `Shoot ${i + 1}`}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto"
+                  onClick={() => patch({ shoots: draft.shoots.filter((_, idx) => idx !== i) })}
+                >
+                  <Trash2 />
+                  <span className="sr-only">Remove shoot {i + 1}</span>
+                </Button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Name" required>
+                  <Input value={s.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Wedding day" />
+                </Field>
+                <Field label="Date">
+                  <Input type="date" value={s.shoot_date} onChange={(e) => set(i, { shoot_date: e.target.value })} />
+                </Field>
+                <Field label="Location">
+                  <Input value={s.location} onChange={(e) => set(i, { location: e.target.value })} placeholder="Taj Lands End" />
+                </Field>
+                <Field label="Status">
+                  <Select value={s.status} onChange={(e) => set(i, { status: e.target.value as ShootDraft['status'] })}>
+                    <option value="planned">Planned</option>
+                    <option value="confirmed">Confirmed</option>
+                  </Select>
+                </Field>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
