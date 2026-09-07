@@ -27,6 +27,7 @@ import { subscriptionRouter } from './modules/subscription/router'
 import { termsRouter, publicTermsRouter } from './modules/terms/router'
 import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/router'
 import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
+import { enquiriesRouter } from './modules/enquiries/router'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
 
@@ -127,6 +128,7 @@ app.route('/terms', termsRouter)
 app.route('/team-terms', teamTermsRouter)
 app.route('/public', publicTermsRouter)
 app.route('/documents', documentsRouter)
+app.route('/enquiries', enquiriesRouter)
 app.route('/public', publicTeamTermsRouter)
 app.route('/public', publicDocumentsRouter)
 app.route('/settings', settingsRouter)
