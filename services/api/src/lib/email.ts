@@ -168,3 +168,52 @@ function brandedHtml({ title, preheader, body, cta, link, footer }: MailCopy): s
   </body>
 </html>`
 }
+
+/**
+ * Terms sent to someone the studio has booked.
+ *
+ * Returns whether it actually went: unlike the others, the caller shows the
+ * result on screen ("emailed" vs "copy the link"), so swallowing a failure
+ * here would be a lie rather than a graceful degradation.
+ */
+export async function sendTeamTermsEmail(
+  env: Env,
+  to: string,
+  link: string,
+  about: { companyName: string; shootName: string | null; title: string; mustSign: boolean },
+): Promise<boolean> {
+  if (!env.RESEND_API_KEY) return false
+  const forShoot = about.shootName ? ` for ${about.shootName}` : ''
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to,
+        subject: `${about.companyName}: ${about.title}${forShoot}`,
+        html: brandedHtml({
+          title: about.title,
+          preheader: `${about.companyName} sent you the terms${forShoot}.`,
+          body: about.mustSign
+            ? `${about.companyName} has sent you the terms${forShoot}. Please read them and confirm you agree.`
+            : `${about.companyName} has sent you the terms${forShoot}. Please read them before the day.`,
+          cta: about.mustSign ? 'Read and agree' : 'Read the terms',
+          link,
+          footer: 'If you were not expecting this, you can ignore this email.',
+        }),
+      }),
+    })
+    if (!res.ok) {
+      console.error(`[email] team terms send failed ${res.status}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error('[email] team terms send threw', e)
+    return false
+  }
+}
