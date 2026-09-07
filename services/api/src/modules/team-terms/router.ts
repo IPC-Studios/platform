@@ -221,10 +221,17 @@ export const teamTermsRouter = new Hono<AppEnv>()
             company_address: string | null
           }[]
         >`
+          -- companies has no single address column; the city/state/country
+          -- trio is what a studio actually fills in, so the undertaking's
+          -- "having its office at …" is built from those.
           select t.body, t.title, t.mode, t.validity_days,
                  sh.name as shoot_name, sh.shoot_date,
                  p.name as project_name,
-                 c.name as company_name, c.address as company_address
+                 c.name as company_name,
+                 nullif(
+                   concat_ws(', ', nullif(c.city, ''), nullif(c.state, ''), nullif(c.country, '')),
+                   ''
+                 ) as company_address
             from team_terms_templates t
             left join shoots sh on sh.id = ${d.shoot_id}
             left join projects p on p.id = sh.project_id
