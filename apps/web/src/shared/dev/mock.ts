@@ -179,6 +179,21 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/tasks/bundles') return { id: uid(0xd8) }
   if (method === 'DELETE' && path.startsWith('/tasks/bundles/')) return {}
   if (method === 'POST' && /\/tasks\/bundles\/[^/]+\/apply$/.test(path)) return { created: 4 }
+  if (method === 'GET' && path === '/shoots/services') return atStage(servicesFx, 'partial')
+  if (method === 'GET' && path.startsWith('/shoots/presets')) {
+    // The real endpoint filters on ?kind=; a mock that ignores it would show
+    // edit-room presets in the shoot menu and hide the difference.
+    const kind = new URLSearchParams(path.split('?')[1] ?? '').get('kind')
+    return atStage(
+      shootPresetsFx.filter((p) => !kind || p.kind === kind),
+      'partial',
+    )
+  }
+  // Echo what was sent: a preset that comes back under someone else's name
+  // makes the save look like it saved the wrong thing.
+  if (method === 'POST' && path === '/shoots/presets')
+    return { id: uid(0x5d), ...(body as object) }
+  if (method === 'DELETE' && path.startsWith('/shoots/presets/')) return {}
   if (method === 'GET' && (path === '/shoots' || path.startsWith('/shoots?'))) return shootsFx
   if (method === 'POST' && path === '/shoots') return { id: uid(0x5c) }
   if (method === 'PATCH' && path.startsWith('/shoots/')) return {}
@@ -803,6 +818,36 @@ const bundlesFx = [
       { id: uid(0xd71), title: 'Confirm call sheet', priority: 'urgent', sort_order: 0 },
       { id: uid(0xd72), title: 'Charge batteries and format cards', priority: 'high', sort_order: 1 },
     ],
+  },
+]
+
+const servicesFx = [
+  { id: uid(0x71), name: 'Photographer' },
+  { id: uid(0x72), name: 'Cinematographer' },
+  { id: uid(0x73), name: 'Drone Pilot' },
+  { id: uid(0x74), name: 'Candid Photographer' },
+  { id: uid(0x75), name: 'Light Assistant' },
+]
+
+const shootPresetsFx = [
+  {
+    id: uid(0x76),
+    kind: 'shoot' as const,
+    name: 'Wedding day (full crew)',
+    payload: {
+      requirements: [
+        { name: 'Photographer', quantity: 2 },
+        { name: 'Cinematographer', quantity: 2 },
+        { name: 'Drone Pilot', quantity: 1 },
+      ],
+      internal_work: ['Wedding Day Edited Photos', 'Wedding Day Reel', 'Data Sorting'],
+    },
+  },
+  {
+    id: uid(0x77),
+    kind: 'internal_work' as const,
+    name: 'Standard edit room',
+    payload: { requirements: [], internal_work: ['Edited Photos', 'Reel', 'Data Sorting'] },
   },
 ]
 

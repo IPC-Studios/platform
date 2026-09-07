@@ -2,23 +2,34 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
+  Bookmark,
   CalendarDays,
-  Camera,
   Check,
   CheckCircle2,
+  Clock,
+  MapPin,
   Package,
   Plus,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   UserPlus,
   Users,
   Wallet,
+  type LucideIcon,
 } from 'lucide-react'
-import { z, type CreateShootRequest } from '@ipc/contracts'
+import {
+  z,
+  type CreateShootRequest,
+  type ShootPreset,
+  type ShootPresetKind,
+  type ShootPresetPayload,
+} from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
@@ -36,6 +47,12 @@ import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
 import { useCreateProject } from '@/features/projects/api'
 import {
+  useDeleteShootPreset,
+  useSaveShootPreset,
+  useServices,
+  useShootPresets,
+} from '@/features/shoots/api'
+import {
   EMPTY_DRAFT,
   QUICK_SHOOTS,
   SHOOT_PRESET,
@@ -47,14 +64,20 @@ import {
   draftTotals,
   estimatedDateFor,
   isDirty,
+  internalWorkFor,
+  internalWorkSuggestions,
   loadDraft,
   matchShootTypes,
   newDeliverable,
+  newInternalWork,
   newPayment,
+  newRequirement,
   newShoot,
   nextStep,
   prevStep,
+  removeShootAt,
   saveDraft,
+  shootIssues,
   stepErrors,
   stepIndex,
   toProjectRequest,
@@ -63,6 +86,7 @@ import {
   type DeliverableDraft,
   type ProjectDraft,
   type ShootDraft,
+  type ShootRequirementDraft,
   type WizardStep,
 } from '@/features/projects/wizard'
 
@@ -374,10 +398,23 @@ function RowList({
 
 type Patch = (p: Partial<ProjectDraft>) => void
 
-function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  required,
+  hint,
+  icon: Icon,
+  children,
+}: {
+  label: string
+  required?: boolean
+  hint?: string
+  icon?: LucideIcon
+  children: ReactNode
+}) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>
+      <Label className="flex items-center gap-1.5">
+        {Icon && <Icon className="size-3.5 text-muted-foreground" aria-hidden />}
         {label}
         {required && <span className="ml-0.5 text-destructive">*</span>}
       </Label>
@@ -663,6 +700,9 @@ function AddShootMenu({
  * standard wedding books, and the whole searchable list behind Add shoot.
  */
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
+  const services = useServices()
+  const shootPresets = useShootPresets('shoot')
+
   const set = (i: number, p: Partial<ShootDraft>) =>
     patch({ shoots: draft.shoots.map((s, idx) => (idx === i ? { ...s, ...p } : s)) })
 
@@ -671,11 +711,40 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   // blank row to fill in, which withShoots would otherwise drop.
   const addNamed = (name: string) =>
     patch({ shoots: name ? withShoots(draft.shoots, [name]) : [...draft.shoots, newShoot()] })
-  const preset = withShoots(draft.shoots, SHOOT_PRESET)
-  const presetAdds = preset.length - draft.shoots.length
+  const wedding = withShoots(draft.shoots, SHOOT_PRESET)
+
+  /** A saved day, stamped out whole: its crew and its edit-room list with it. */
+  const applyShootPreset = (preset: ShootPreset) => {
+    const at = draft.shoots.length
+    patch({
+      shoots: [
+        ...draft.shoots,
+        {
+          ...newShoot(),
+          name: preset.name,
+          requirements: preset.payload.requirements.map((r) => ({
+            name: r.name,
+            quantity: String(r.quantity),
+          })),
+        },
+      ],
+      deliverables: [
+        ...draft.deliverables,
+        ...preset.payload.internal_work.map((title) => newInternalWork(at, title)),
+      ],
+    })
+  }
 
   return (
     <div className="flex flex-col gap-4">
+      {/* One list for every requirement input on the step: the browser reads
+          it by id, and rendering it per row would repeat it a dozen times. */}
+      <datalist id={SERVICE_LIST_ID}>
+        {(services.data ?? []).map((s) => (
+          <option key={s.id} value={s.name} />
+        ))}
+      </datalist>
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium">Shoot schedule</p>
@@ -685,17 +754,16 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
         </div>
         <div className="flex items-center gap-2">
           <AddShootMenu shoots={draft.shoots} onAdd={addNamed} />
-          {/* Disabled once it has nothing left to add, so a second press is
-              visibly a no-op instead of a silently ignored click. */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => patch({ shoots: preset })}
-            disabled={presetAdds === 0}
-            title={`Adds ${SHOOT_PRESET.join(', ')}`}
-          >
-            <Sparkles /> Apply preset
-          </Button>
+          <PresetMenu
+            label="Apply preset"
+            presets={shootPresets.data ?? []}
+            onApply={applyShootPreset}
+            builtIn={{
+              label: `Standard wedding — ${SHOOT_PRESET.join(', ')}`,
+              disabled: wedding.length === draft.shoots.length,
+              onApply: () => patch({ shoots: wedding }),
+            }}
+          />
         </div>
       </div>
 
@@ -740,38 +808,15 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
       ) : (
         <div className="flex flex-col gap-3">
           {draft.shoots.map((s, i) => (
-            <div key={i} className="rounded-lg border border-border p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <Camera className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{s.name.trim() || `Shoot ${i + 1}`}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto"
-                  onClick={() => patch({ shoots: draft.shoots.filter((_, idx) => idx !== i) })}
-                >
-                  <Trash2 />
-                  <span className="sr-only">Remove shoot {i + 1}</span>
-                </Button>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Name" required>
-                  <Input value={s.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Wedding day" />
-                </Field>
-                <Field label="Date">
-                  <Input type="date" value={s.shoot_date} onChange={(e) => set(i, { shoot_date: e.target.value })} />
-                </Field>
-                <Field label="Location">
-                  <Input value={s.location} onChange={(e) => set(i, { location: e.target.value })} placeholder="Taj Lands End" />
-                </Field>
-                <Field label="Status">
-                  <Select value={s.status} onChange={(e) => set(i, { status: e.target.value as ShootDraft['status'] })}>
-                    <option value="planned">Planned</option>
-                    <option value="confirmed">Confirmed</option>
-                  </Select>
-                </Field>
-              </div>
-            </div>
+            <ShootCard
+              key={i}
+              index={i}
+              shoot={s}
+              draft={draft}
+              patch={patch}
+              onChange={(p) => set(i, p)}
+              onRemove={() => patch(removeShootAt(draft, i))}
+            />
           ))}
         </div>
       )}
@@ -779,6 +824,524 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   )
 }
 
+/** Shared by every requirement input on the step. */
+const SERVICE_LIST_ID = 'ipc-shoot-services'
+
+/**
+ * One shoot day, whole: when it is, where it is, who it needs, and what the
+ * edit room owes off the back of it.
+ *
+ * The card tints when something is missing rather than blocking — a studio
+ * booking a date off a phone call has the day before it has the crew, and the
+ * wizard should take the booking either way. Only a missing title actually
+ * stops the step.
+ */
+function ShootCard({
+  index,
+  shoot,
+  draft,
+  patch,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  shoot: ShootDraft
+  draft: ProjectDraft
+  patch: Patch
+  onChange: (p: Partial<ShootDraft>) => void
+  onRemove: () => void
+}) {
+  const issues = shootIssues(shoot)
+  const work = internalWorkFor(draft, index)
+
+  const setRequirement = (at: number, p: Partial<ShootRequirementDraft>) =>
+    onChange({ requirements: shoot.requirements.map((r, i) => (i === at ? { ...r, ...p } : r)) })
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-4',
+        issues.length ? 'border-destructive/25 bg-destructive/5' : 'border-border',
+      )}
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          {index + 1}
+        </span>
+        <span className="font-medium">{shoot.name.trim() || `Shoot ${index + 1}`}</span>
+        {issues.map((issue) => (
+          <StatusBadge key={issue} tone={issue === 'No requirements' ? 'warning' : 'danger'}>
+            <AlertCircle className="mr-1 size-3" aria-hidden />
+            {issue}
+          </StatusBadge>
+        ))}
+        <div className="ml-auto flex items-center gap-1">
+          <SavePresetButton
+            kind="shoot"
+            defaultName={shoot.name.trim() || `Shoot ${index + 1}`}
+            label="Save as preset"
+            payload={{
+              requirements: shoot.requirements
+                .filter((r) => r.name.trim())
+                .map((r) => ({ name: r.name.trim(), quantity: Math.max(1, Number(r.quantity) || 1) })),
+              internal_work: work.map((w) => w.item.title.trim()).filter(Boolean),
+            }}
+          />
+          <Button variant="ghost" size="icon" onClick={onRemove}>
+            <Trash2 className="text-destructive" />
+            <span className="sr-only">Remove shoot {index + 1}</span>
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Field label="Shoot title" required>
+          <Input
+            value={shoot.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder="Wedding day"
+          />
+        </Field>
+        <Field label="Date" icon={CalendarDays}>
+          <Input
+            type="date"
+            value={shoot.shoot_date}
+            onChange={(e) => onChange({ shoot_date: e.target.value })}
+          />
+        </Field>
+        <Field label="Time" icon={Clock}>
+          <Input
+            type="time"
+            value={shoot.start_time}
+            onChange={(e) => onChange({ start_time: e.target.value })}
+          />
+        </Field>
+        <Field label="City / Venue" icon={MapPin}>
+          <Input
+            value={shoot.location}
+            onChange={(e) => onChange({ location: e.target.value })}
+            placeholder="e.g. Jaipur"
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="lg:col-span-3">
+          <Field
+            label="Google Map link"
+            icon={MapPin}
+            hint="Optional. Paste a Google Maps link only — the address text belongs in City / Venue."
+          >
+            <Input
+              type="url"
+              inputMode="url"
+              value={shoot.map_link}
+              onChange={(e) => onChange({ map_link: e.target.value })}
+              placeholder="Paste Google Maps link"
+            />
+          </Field>
+        </div>
+        <Field label="Status">
+          <Select
+            value={shoot.status}
+            onChange={(e) => onChange({ status: e.target.value as ShootDraft['status'] })}
+          >
+            <option value="planned">Planned</option>
+            <option value="confirmed">Confirmed</option>
+          </Select>
+        </Field>
+      </div>
+
+      {/* ── who this day needs ── */}
+      <SubCard
+        icon={Users}
+        title="Shoot requirements"
+        hint="Pick people or services and set how many of each this day needs."
+        actions={
+          <Button
+            size="sm"
+            onClick={() => onChange({ requirements: [...shoot.requirements, newRequirement()] })}
+          >
+            <SlidersHorizontal /> Add requirements
+          </Button>
+        }
+      >
+        {shoot.requirements.length === 0 ? (
+          <Band tone="warning">No requirements yet — tap “Add requirements” to plan the team.</Band>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {shoot.requirements.map((r, at) => (
+              <div key={at} className="flex items-center gap-2">
+                <Input
+                  list={SERVICE_LIST_ID}
+                  value={r.name}
+                  onChange={(e) => setRequirement(at, { name: e.target.value })}
+                  placeholder="Photographer"
+                  aria-label={`Requirement ${at + 1}`}
+                  className="flex-1"
+                />
+                <Input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={r.quantity}
+                  onChange={(e) => setRequirement(at, { quantity: e.target.value })}
+                  aria-label={`How many for requirement ${at + 1}`}
+                  className="w-20"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() =>
+                    onChange({ requirements: shoot.requirements.filter((_, i) => i !== at) })
+                  }
+                >
+                  <Trash2 />
+                  <span className="sr-only">Remove requirement {at + 1}</span>
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what the edit room owes off it ── */}
+      <InternalWorkBlock index={index} shoot={shoot} draft={draft} patch={patch} work={work} />
+    </div>
+  )
+}
+
+/**
+ * The team's own list for one shoot — culling, sorting, the reel — kept off
+ * the quotation because a client is not buying "data sorting", they are
+ * buying the album it feeds. Same deliverables array as step 3; this is the
+ * per-shoot window onto it.
+ */
+function InternalWorkBlock({
+  index,
+  shoot,
+  draft,
+  patch,
+  work,
+}: {
+  index: number
+  shoot: ShootDraft
+  draft: ProjectDraft
+  patch: Patch
+  work: { at: number; item: DeliverableDraft }[]
+}) {
+  const titles = new Set(work.map((w) => w.item.title.trim().toLowerCase()))
+  const suggestions = internalWorkSuggestions(shoot.name).filter(
+    (s) => !titles.has(s.toLowerCase()),
+  )
+  const presets = useShootPresets('internal_work')
+
+  const addTitles = (names: string[]) =>
+    patch({
+      deliverables: [
+        ...draft.deliverables,
+        ...names
+          .filter((n) => !n.trim() || !titles.has(n.trim().toLowerCase()))
+          .map((n) => newInternalWork(index, n.trim())),
+      ],
+    })
+
+  const setTitle = (at: number, title: string) =>
+    patch({
+      deliverables: draft.deliverables.map((d, i) => (i === at ? { ...d, title } : d)),
+    })
+
+  return (
+    <SubCard
+      icon={Package}
+      title="Internal work for this shoot"
+      hint="These items help the team edit, sort, hand off and track. They never appear on the quotation."
+      actions={
+        <>
+          <PresetMenu
+            label="Apply preset"
+            variant="ghost"
+            presets={presets.data ?? []}
+            onApply={(p) => addTitles([...p.payload.internal_work])}
+          />
+          <SavePresetButton
+            kind="internal_work"
+            defaultName={shoot.name.trim() ? `${shoot.name.trim()} edit room` : 'Edit room'}
+            label="Save preset"
+            payload={{
+              requirements: [],
+              internal_work: work.map((w) => w.item.title.trim()).filter(Boolean),
+            }}
+          />
+          <Button size="sm" onClick={() => addTitles([''])}>
+            <Plus /> Add more deliverables
+          </Button>
+        </>
+      }
+    >
+      {work.length === 0 ? (
+        <Band>No deliverables added for this shoot yet.</Band>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {work.map(({ at, item }) => (
+            <div key={at} className="flex items-center gap-2">
+              <Input
+                value={item.title}
+                onChange={(e) => setTitle(at, e.target.value)}
+                placeholder="Edited photos"
+                aria-label={`Internal work ${at + 1}`}
+                className="flex-1"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() =>
+                  patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })
+                }
+              >
+                <Trash2 />
+                <span className="sr-only">Remove internal work {at + 1}</span>
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Sparkles className="size-3.5" aria-hidden />
+            Suggested for {shoot.name.trim() || 'this shoot'}
+          </span>
+          {suggestions.map((title) => (
+            <button
+              key={title}
+              type="button"
+              onClick={() => addTitles([title])}
+              className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+            >
+              <Plus className="size-3.5" aria-hidden />
+              {title}
+            </button>
+          ))}
+        </div>
+      )}
+    </SubCard>
+  )
+}
+
+/** A titled block inside a shoot card: heading, hint, buttons, body. */
+function SubCard({
+  icon: Icon,
+  title,
+  hint,
+  actions,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  hint: string
+  actions: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-card p-3">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <Icon className="size-4 text-muted-foreground" aria-hidden />
+            {title}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** The dashed "nothing here yet" strip inside a sub-card. */
+function Band({ tone, children }: { tone?: 'warning'; children: ReactNode }) {
+  return (
+    <p
+      className={cn(
+        'rounded-md border border-dashed px-3 py-4 text-center text-sm',
+        tone === 'warning'
+          ? 'border-warning/40 bg-warning/10 text-warning'
+          : 'border-border text-muted-foreground',
+      )}
+    >
+      {children}
+    </p>
+  )
+}
+
+/**
+ * Saved shapes, listed. The built-in wedding preset rides in the same menu as
+ * the studio's own, because from the pressing end they are the same thing.
+ */
+function PresetMenu({
+  label,
+  presets,
+  onApply,
+  builtIn,
+  variant = 'outline',
+}: {
+  label: string
+  presets: ShootPreset[]
+  onApply: (preset: ShootPreset) => void
+  builtIn?: { label: string; disabled: boolean; onApply: () => void }
+  variant?: 'outline' | 'ghost'
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const remove = useDeleteShootPreset()
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={root} className="relative">
+      <Button size="sm" variant={variant} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <Sparkles /> {label}
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={label}
+          className="ipc-menu absolute right-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-3rem)] overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
+        >
+          {builtIn && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={builtIn.disabled}
+              onClick={() => {
+                builtIn.onApply()
+                setOpen(false)
+              }}
+              className={cn(
+                'w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                builtIn.disabled
+                  ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                  : 'hover:bg-muted',
+              )}
+            >
+              {builtIn.label}
+            </button>
+          )}
+          {presets.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">
+              No saved presets yet. Set a shoot up the way you like it, then save it.
+            </p>
+          ) : (
+            presets.map((p) => (
+              <div key={p.id} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onApply(p)
+                    setOpen(false)
+                  }}
+                  className="flex-1 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                >
+                  {p.name}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  onClick={() => remove.mutate(p.id)}
+                  disabled={remove.isPending}
+                >
+                  <Trash2 />
+                  <span className="sr-only">Delete preset {p.name}</span>
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Save this shape under a name. The name field opens in place rather than in a
+ * dialog: it is one short answer, and a modal over a wizard step is a lot of
+ * ceremony for a text box.
+ */
+function SavePresetButton({
+  kind,
+  defaultName,
+  label,
+  payload,
+}: {
+  kind: ShootPresetKind
+  defaultName: string
+  label: string
+  payload: ShootPresetPayload
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(defaultName)
+  const save = useSaveShootPreset()
+  const empty = payload.requirements.length === 0 && payload.internal_work.length === 0
+
+  const submit = () => {
+    if (!name.trim()) return
+    save.mutate({ kind, name: name.trim(), payload }, { onSuccess: () => setOpen(false) })
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setName(defaultName)
+          setOpen((v) => !v)
+        }}
+        disabled={empty}
+        title={empty ? 'Nothing to save yet' : undefined}
+      >
+        <Bookmark /> {label}
+      </Button>
+      {open && (
+        <div className="ipc-menu absolute right-0 top-full z-40 mt-2 flex w-64 items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-lg">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit()
+              if (e.key === 'Escape') setOpen(false)
+            }}
+            aria-label="Preset name"
+            placeholder="Preset name"
+          />
+          <Button size="sm" onClick={submit} disabled={!name.trim() || save.isPending}>
+            Save
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
 function DeliverablesStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const set = (i: number, p: Partial<DeliverableDraft>) =>
     patch({ deliverables: draft.deliverables.map((d, idx) => (idx === i ? { ...d, ...p } : d)) })
