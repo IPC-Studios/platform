@@ -72,6 +72,7 @@ async function freshDb() {
   await db.exec(mig('0036_crm_v4.sql'))
   await db.exec(mig('0038_shoot_details.sql'))
   await db.exec(mig('0039_deliverable_sets.sql'))
+  await db.exec(mig('0040_role_library.sql'))
   return db
 }
 
@@ -2566,5 +2567,68 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     const meera = team.rows.find((r) => r.user_name === 'Meera')!
     expect(meera.sla_hours).toBe(4)
     expect(meera.within_sla).toBe(1)
+  })
+})
+
+describe('role library (0040)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('ships a catalogue covering every stage of the job', async () => {
+    const rows = await db.query<{ stage: string; n: number }>(
+      `select stage, count(*)::int as n from role_library group by stage order by stage;`,
+    )
+    expect(rows.rows.map((r) => r.stage).sort()).toEqual(['other', 'post', 'pre', 'production'])
+    expect(rows.rows.every((r) => r.n > 0)).toBe(true)
+  })
+
+  // Re-running a migration must not double the catalogue.
+  it('seeds the same rows twice without duplicating them', async () => {
+    const before = await db.query<{ n: number }>(`select count(*)::int as n from role_library;`)
+    await db.exec(readMig('0040_role_library.sql'))
+    const after = await db.query<{ n: number }>(`select count(*)::int as n from role_library;`)
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n)
+  })
+
+  it('is readable by members and writable by none of them', async () => {
+    const policies = await db.query<{ policyname: string; cmd: string }>(
+      `select policyname, cmd from pg_policies where tablename = 'role_library';`,
+    )
+    expect(policies.rows).toEqual([{ policyname: 'role_library_select', cmd: 'SELECT' }])
+  })
+
+  it('lets a studio stage its own roles, and lets the stage stay unsaid', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into employee_roles (company_id, type_name, role_code, stage)
+       values ('${id}', 'Candid Photographer', 'candid_photographer', 'production');`,
+    )
+    await db.query(
+      `insert into employee_roles (company_id, type_name, role_code)
+       values ('${id}', 'Odd Job', 'odd_job');`,
+    )
+    const rows = await db.query<{ type_name: string; stage: string | null }>(
+      `select type_name, stage from employee_roles order by type_name;`,
+    )
+    expect(rows.rows).toEqual([
+      { type_name: 'Candid Photographer', stage: 'production' },
+      { type_name: 'Odd Job', stage: null },
+    ])
+  })
+
+  it('refuses a stage nobody renders', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    await expect(
+      db.query(
+        `insert into employee_roles (company_id, type_name, role_code, stage)
+         values ('${company.rows[0]!.id}', 'Bad', 'bad', 'during');`,
+      ),
+    ).rejects.toThrow()
   })
 })
