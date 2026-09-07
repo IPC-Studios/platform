@@ -1120,33 +1120,50 @@ const shootPresetsFx = [
   },
 ]
 
+/** The shoot day, as a plain date — the booking calendar groups on it. */
+const shootDay = (n: number) => daysFromNow(n).slice(0, 10)
+
 const shootsFx = [
   {
     id: uid(0x61),
     name: 'Engagement shoot',
     project_id: PROJ.p1,
     project_name: 'Sharma Wedding',
-    shoot_date: '2026-08-10',
+    client_name: 'Priya Sharma',
+    shoot_date: shootDay(3),
     location: 'Bandra, Mumbai',
     status: 'confirmed',
+    requirements: [
+      { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
+      { service_id: uid(0x72), name: 'Cinematographer', quantity: 1 },
+    ],
   },
   {
     id: uid(0x62),
     name: 'Wedding day',
     project_id: PROJ.p1,
     project_name: 'Sharma Wedding',
-    shoot_date: '2026-08-22',
+    client_name: 'Priya Sharma',
+    shoot_date: shootDay(9),
     location: 'Taj Lands End',
     status: 'planned',
+    requirements: [
+      { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
+      { service_id: uid(0x73), name: 'Drone Pilot', quantity: 1 },
+    ],
   },
+  // No requirements on purpose: the booking screen has to say so rather than
+  // showing a shoot that looks fully staffed because nothing was asked for.
   {
     id: uid(0x63),
     name: 'Product set A',
     project_id: PROJ.p3,
     project_name: 'Nova Product Shoot',
-    shoot_date: '2026-07-01',
+    client_name: 'Nova Retail',
+    shoot_date: shootDay(-4),
     location: 'Studio',
     status: 'completed',
+    requirements: [],
   },
 ]
 
@@ -1329,26 +1346,28 @@ const trackingRows = [
   },
 ]
 
+// Booked against the shoots above by id and role name, which is what the
+// booking screen counts: the engagement day is one candid short of its two.
 const slots = [
   {
     id: uid(0x51),
     user_id: uid(0xe1),
-    user_name: 'Rahul (Photographer)',
-    shoot_id: null,
-    service_name: 'Wedding day',
-    start_at: '2026-07-01T04:30:00Z',
-    end_at: '2026-07-01T16:30:00Z',
+    user_name: 'Rahul Verma',
+    shoot_id: uid(0x61),
+    service_name: 'Candid Photographer',
+    start_at: daysFromNow(3, 10),
+    end_at: daysFromNow(3, 22),
     status: 'booked',
     estimated_cost: 8000,
   },
   {
     id: uid(0x52),
     user_id: uid(0xe2),
-    user_name: 'Anita (Cinematographer)',
-    shoot_id: null,
-    service_name: 'Reception',
-    start_at: '2026-07-02T12:00:00Z',
-    end_at: '2026-07-02T18:00:00Z',
+    user_name: 'Anita Rao',
+    shoot_id: uid(0x61),
+    service_name: 'Cinematographer',
+    start_at: daysFromNow(3, 10),
+    end_at: daysFromNow(3, 22),
     status: 'booked',
     estimated_cost: 10000,
   },
