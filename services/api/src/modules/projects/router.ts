@@ -2,10 +2,12 @@ import { Hono } from 'hono'
 import {
   createProjectRequest,
   deliverableInput,
+  deliverableSet,
   paymentInput,
   projectDetail,
   projectListItem,
   projectTrackingRow,
+  saveDeliverableSetRequest,
   updateProjectRequest,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
@@ -119,6 +121,47 @@ export const projectsRouter = new Hono<AppEnv>()
     }).catch(() => null)
     if (!id) fail(400, 'We could not create this project.')
     return c.json({ id }, 201)
+  })
+
+  // Declared above /:id so "deliverable-sets" is never read as a project id.
+  .get('/deliverable-sets', requireAction('projects', 'view'), async (c) => {
+    const rows = await withUser(
+      c.env,
+      c.get('auth').userId,
+      (sql) => sql`select id, name, items from deliverable_sets order by name asc`,
+    ).catch(() => null)
+    if (!rows) fail(400, 'We could not load your saved sets.')
+    return c.json(deliverableSet.array().parse(rows))
+  })
+
+  .post('/deliverable-sets', requireAction('projects', 'edit'), async (c) => {
+    const parsed = saveDeliverableSetRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the set and give it at least one item.')
+    const auth = c.get('auth')
+    const row = await withUser(c.env, auth.userId, async (sql) => {
+      // Saving under a name that exists replaces it — a studio revising
+      // "Premium" means the package changed, not that there are two of them.
+      const rows = await sql`
+        insert into deliverable_sets ${sql({
+          company_id: auth.companyId,
+          name: parsed.data.name,
+          items: sql.json(parsed.data.items),
+        })}
+        on conflict (company_id, name) do update set items = excluded.items
+        returning id, name, items`
+      return rows[0]
+    }).catch(() => null)
+    if (!row) fail(400, 'We could not save the set.')
+    return c.json(deliverableSet.parse(row), 201)
+  })
+
+  .delete('/deliverable-sets/:id', requireAction('projects', 'edit'), async (c) => {
+    const ok = await withUser(c.env, c.get('auth').userId, async (sql) => {
+      await sql`delete from deliverable_sets where id = ${c.req.param('id')!}`
+      return true
+    }).catch(() => false)
+    if (!ok) fail(400, 'We could not delete the set.')
+    return c.body(null, 204)
   })
 
   .get('/:id', requireAction('projects', 'view'), async (c) => {

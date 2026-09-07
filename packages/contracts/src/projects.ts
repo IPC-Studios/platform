@@ -139,3 +139,30 @@ export const projectTrackingRow = z.object({
   last_activity_at: isoDateTime,
 })
 export type ProjectTrackingRow = z.infer<typeof projectTrackingRow>
+
+/**
+ * One line of a saved package. A set is a template, so it carries what the
+ * studio decided about the item — charged on top or included, printed on the
+ * quotation or not — and none of the scheduling, which belongs to the project
+ * it lands in, not to the package.
+ */
+export const deliverableSetItem = z.object({
+  title: z.string().trim().min(1).max(200),
+  is_additional_charge: z.boolean().default(false),
+  additional_charge_amount: money.default(0),
+  show_on_quotation: z.boolean().default(true),
+})
+export type DeliverableSetItem = z.infer<typeof deliverableSetItem>
+
+export const deliverableSet = z.object({
+  id: uuid,
+  name: z.string(),
+  items: z.array(deliverableSetItem),
+})
+export type DeliverableSet = z.infer<typeof deliverableSet>
+
+export const saveDeliverableSetRequest = z.object({
+  name: z.string().trim().min(1).max(80),
+  items: z.array(deliverableSetItem).min(1).max(60),
+})
+export type SaveDeliverableSetRequest = z.infer<typeof saveDeliverableSetRequest>
