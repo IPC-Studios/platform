@@ -65,6 +65,7 @@ async function freshDb() {
   await db.exec(mig('0029_lead_sources.sql'))
   await db.exec(mig('0030_attendance_ops.sql'))
   await db.exec(mig('0031_task_bundles.sql'))
+  await db.exec(mig('0032_shoot_details.sql'))
   return db
 }
 
@@ -1837,5 +1838,66 @@ describe('task bundles (0031)', () => {
       'task_bundles_select',
       'task_bundles_write',
     ])
+  })
+})
+
+describe('shoot details (0032)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('gives a shoot somewhere to keep its map link', async () => {
+    const cols = await db.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_name = 'shoots' and column_name = 'map_link';`,
+    )
+    expect(cols.rows).toHaveLength(1)
+  })
+
+  it('policies presets the way every other company-scoped table is', async () => {
+    const policies = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies where tablename = 'shoot_presets';`,
+    )
+    expect(policies.rows.map((p) => p.policyname).sort()).toEqual([
+      'shoot_presets_select',
+      'shoot_presets_write',
+    ])
+  })
+
+  // "Save preset" under a name that exists is an overwrite, not a second row.
+  it('keeps one preset per name and kind', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into shoot_presets (company_id, kind, name, payload)
+       values ('${id}', 'shoot', 'Wedding day', '{"requirements": []}'::jsonb);`,
+    )
+    await expect(
+      db.query(
+        `insert into shoot_presets (company_id, kind, name, payload)
+         values ('${id}', 'shoot', 'Wedding day', '{}'::jsonb);`,
+      ),
+    ).rejects.toThrow()
+    // Same name, different kind, is a different preset.
+    await db.query(
+      `insert into shoot_presets (company_id, kind, name, payload)
+       values ('${id}', 'internal_work', 'Wedding day', '{}'::jsonb);`,
+    )
+    const rows = await db.query(`select 1 from shoot_presets;`)
+    expect(rows.rows).toHaveLength(2)
+  })
+
+  it('rejects a kind nobody handles', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    await expect(
+      db.query(
+        `insert into shoot_presets (company_id, kind, name)
+         values ('${company.rows[0]!.id}', 'moodboard', 'x');`,
+      ),
+    ).rejects.toThrow()
   })
 })
