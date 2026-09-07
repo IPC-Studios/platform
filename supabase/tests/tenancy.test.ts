@@ -74,6 +74,7 @@ async function freshDb() {
   await db.exec(mig('0039_deliverable_sets.sql'))
   await db.exec(mig('0040_role_library.sql'))
   await db.exec(mig('0041_team_terms.sql'))
+  await db.exec(mig('0042_client_documents.sql'))
   return db
 }
 
@@ -2791,5 +2792,175 @@ describe('team terms (0041)', () => {
       `select 1 from information_schema.tables where table_name = 'deliverable_presets';`,
     )
     expect(left.rows).toHaveLength(0)
+  })
+})
+
+describe('client documents (0042)', () => {
+  let db: PGlite
+  let company: string
+  let project: string
+  let payment: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+    const client = (
+      await db.query<{ id: string }>(
+        `insert into clients (company_id, name) values ('${company}', 'Sharma Family') returning id;`,
+      )
+    ).rows[0]!.id
+    project = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost)
+         values ('${company}', '${client}', 'Sharma Wedding', 150000) returning id;`,
+      )
+    ).rows[0]!.id
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation)
+       values ('${company}', '${project}', 'Wedding Album', 'client', true);`,
+    )
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation,
+                                 is_additional_charge, additional_charge_amount)
+       values ('${company}', '${project}', 'Drone Shots', 'client', true, true, 15000);`,
+    )
+    // Neither of these belongs on a quotation.
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope)
+       values ('${company}', '${project}', 'Data Sorting', 'internal');`,
+    )
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation)
+       values ('${company}', '${project}', 'Hidden Extra', 'client', false);`,
+    )
+    payment = (
+      await db.query<{ id: string }>(
+        `insert into received_payments (company_id, project_id, amount, mode)
+         values ('${company}', '${project}', 50000, 'upi') returning id;`,
+      )
+    ).rows[0]!.id
+  })
+
+  const issueQuote = async () =>
+    (
+      await db.query<{ quotation_id: string; token: string }>(
+        `select quotation_id, token from issue_project_quotation('${project}'::uuid, 'Valid 30 days');`,
+      )
+    ).rows[0]!
+
+  it('quotes only what the client is meant to see', async () => {
+    const { token } = await issueQuote()
+    const read = await db.query<{ snapshot: { items: { title: string }[] } }>(
+      `select snapshot from get_quotation_for_token('${token}');`,
+    )
+    const titles = read.rows[0]!.snapshot.items.map((i) => i.title)
+    expect(titles).toEqual(['Wedding Album', 'Drone Shots'])
+    expect(titles).not.toContain('Data Sorting')
+    expect(titles).not.toContain('Hidden Extra')
+  })
+
+  // The snapshot is the point: what they accepted cannot move afterwards.
+  it('freezes the prices as they were when it went out', async () => {
+    const { token } = await issueQuote()
+    await db.query(`update projects set package_cost = 999999 where id = '${project}';`)
+    const read = await db.query<{ snapshot: { package_cost: number } }>(
+      `select snapshot from get_quotation_for_token('${token}');`,
+    )
+    expect(Number(read.rows[0]!.snapshot.package_cost)).toBe(150000)
+    await db.query(`update projects set package_cost = 150000 where id = '${project}';`)
+  })
+
+  it('records an acceptance with evidence', async () => {
+    const { quotation_id, token } = await issueQuote()
+    const ok = await db.query<{ respond_to_quotation: boolean }>(
+      `select respond_to_quotation('${token}', true, 'Rahul Sharma', '1.2.3.4', 'agent');`,
+    )
+    expect(ok.rows[0]!.respond_to_quotation).toBe(true)
+    const row = await db.query<{ accepted_by_name: string; accepted_ip: string }>(
+      `select accepted_by_name, accepted_ip from project_quotations where id = '${quotation_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ accepted_by_name: 'Rahul Sharma', accepted_ip: '1.2.3.4' })
+  })
+
+  // Saying no on Monday must not burn the link before a yes on Tuesday.
+  it('lets a decline be changed to an acceptance', async () => {
+    const { quotation_id, token } = await issueQuote()
+    await db.query(`select respond_to_quotation('${token}', false);`)
+    expect(
+      (
+        await db.query<{ declined_at: string | null }>(
+          `select declined_at from project_quotations where id = '${quotation_id}';`,
+        )
+      ).rows[0]!.declined_at,
+    ).not.toBeNull()
+    await db.query(`select respond_to_quotation('${token}', true, 'Rahul');`)
+    const row = await db.query<{ accepted_at: string | null; declined_at: string | null }>(
+      `select accepted_at, declined_at from project_quotations where id = '${quotation_id}';`,
+    )
+    expect(row.rows[0]!.accepted_at).not.toBeNull()
+    expect(row.rows[0]!.declined_at).toBeNull()
+  })
+
+  it('will not re-accept what is already accepted', async () => {
+    const { token } = await issueQuote()
+    await db.query(`select respond_to_quotation('${token}', true, 'First');`)
+    const again = await db.query<{ respond_to_quotation: boolean }>(
+      `select respond_to_quotation('${token}', true, 'Second');`,
+    )
+    expect(again.rows[0]!.respond_to_quotation).toBe(false)
+  })
+
+  it('shows a receipt with what has been paid so far', async () => {
+    const token = (
+      await db.query<{ issue_payment_receipt: string }>(
+        `select issue_payment_receipt('${payment}'::uuid);`,
+      )
+    ).rows[0]!.issue_payment_receipt
+    const read = await db.query<{
+      amount: string
+      project_name: string
+      received_total: string
+      company_name: string
+    }>(
+      `select amount, project_name, received_total, company_name from get_receipt_for_token('${token}');`,
+    )
+    expect(read.rows[0]).toMatchObject({ project_name: 'Sharma Wedding', company_name: 'Studio' })
+    expect(Number(read.rows[0]!.amount)).toBe(50000)
+    expect(Number(read.rows[0]!.received_total)).toBe(50000)
+  })
+
+  it('gives nothing for a junk token, on any of the three', async () => {
+    expect((await db.query(`select * from get_quotation_for_token('nope');`)).rows).toHaveLength(0)
+    expect((await db.query(`select * from get_receipt_for_token('nope');`)).rows).toHaveLength(0)
+    expect((await db.query(`select * from get_delivery_for_token('nope');`)).rows).toHaveLength(0)
+  })
+
+  // Delivery only opens once the work has been reviewed and approved.
+  it('opens a delivery link only for approved work', async () => {
+    const submission = (
+      await db.query<{ id: string }>(
+        `insert into team_work_submissions (company_id, project_id, submission_link, status)
+         values ('${company}', '${project}', 'https://drive.example/album', 'submitted')
+         returning id;`,
+      )
+    ).rows[0]!.id
+    const token = (
+      await db.query<{ issue_access_token: string }>(
+        `select issue_access_token('work_delivery', '${submission}'::uuid, 168);`,
+      )
+    ).rows[0]!.issue_access_token
+    expect((await db.query(`select * from get_delivery_for_token('${token}');`)).rows).toHaveLength(0)
+
+    await db.query(`update team_work_submissions set status = 'approved' where id = '${submission}';`)
+    const open = await db.query<{ submission_link: string; project_name: string }>(
+      `select submission_link, project_name from get_delivery_for_token('${token}');`,
+    )
+    expect(open.rows[0]).toMatchObject({
+      submission_link: 'https://drive.example/album',
+      project_name: 'Sharma Wedding',
+    })
   })
 })
