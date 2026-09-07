@@ -35,8 +35,13 @@ export const enquiriesRouter = new Hono<AppEnv>()
   .get('/', requireModule('crm'), async (c) => {
     const status = enquiryStatus.safeParse(c.req.query('status'))
     const search = (c.req.query('search') ?? '').trim()
+    const cursor = c.req.query('cursor')
+    if (cursor && Number.isNaN(Date.parse(cursor))) fail(422, 'That page marker is invalid.')
+    const limitRaw = Number(c.req.query('limit') ?? 100)
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 100
     const rows = await attempt(c, 'enquiries.list', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
+        // One past the page so the client knows whether to offer "Show more".
         const items = await sql`
           select e.id, e.name, e.phone, e.email, e.message, e.source,
                  e.enquiry_status, e.assigned_to, u.name as assigned_to_name,
@@ -51,8 +56,9 @@ export const enquiriesRouter = new Hono<AppEnv>()
                         or e.email ilike ${'%' + search + '%'})`
                  : sql`true`
              }
+             and ${cursor ? sql`e.created_at < ${cursor}` : sql`true`}
            order by e.created_at desc
-           limit 200`
+           limit ${limit + 1}`
         const summary = await sql`
           select count(*)::int as total_count,
                  count(*) filter (where enquiry_status in ('new','reviewed','contacted'))::int as open_count,
@@ -62,7 +68,13 @@ export const enquiriesRouter = new Hono<AppEnv>()
                  count(*) filter (where enquiry_status = 'converted')::int as converted_count,
                  count(*) filter (where enquiry_status = 'closed')::int as closed_count
             from enquiries`
-        return { items, summary: summary[0] }
+        const page = items.slice(0, limit)
+        const last = page[page.length - 1] as { created_at?: string } | undefined
+        return {
+          items: page,
+          summary: summary[0],
+          next_cursor: items.length > limit && last?.created_at ? last.created_at : null,
+        }
       }),
     )
     if (!rows) fail(400, 'We could not load enquiries.')

@@ -54,6 +54,8 @@ export type EnquirySummary = z.infer<typeof enquirySummary>
 export const enquiryList = z.object({
   items: z.array(enquiry),
   summary: enquirySummary,
+  /** created_at of the last row when more rows exist, else null. */
+  next_cursor: isoDateTime.nullable().default(null),
 })
 export type EnquiryList = z.infer<typeof enquiryList>
 

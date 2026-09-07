@@ -70,12 +70,14 @@ async function freshDb() {
   await db.exec(mig('0034_plan_gate_and_audit.sql'))
   await db.exec(mig('0035_crm_v3.sql'))
   await db.exec(mig('0036_crm_v4.sql'))
+  await db.exec(mig('0037_truly_amazing.sql'))
   await db.exec(mig('0038_shoot_details.sql'))
   await db.exec(mig('0039_deliverable_sets.sql'))
   await db.exec(mig('0040_role_library.sql'))
   await db.exec(mig('0041_team_terms.sql'))
   await db.exec(mig('0042_client_documents.sql'))
   await db.exec(mig('0043_enquiries.sql'))
+  await db.exec(mig('0044_crm_bulk_lost.sql'))
   return db
 }
 
@@ -2528,7 +2530,7 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     // A lead that closes mid-cadence is taken off it.
     const lead2 = await add('Closes early', '9876800011')
     await db.query(`select start_lead_cadence('${lead2}', '${cad}');`)
-    await db.exec(`update crm_leads set status = 'lost' where id = '${lead2}';`)
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'Went elsewhere' where id = '${lead2}';`)
     const stopped = await db.query<{ stopped_at: string | null }>(
       `select stopped_at from crm_lead_cadences where lead_id = '${lead2}';`,
     )
@@ -2552,6 +2554,62 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     const lead = await add('Auto cadence lead', '9876800020')
     const lc = await db.query<{ cadence_id: string }>(`select cadence_id from crm_lead_cadences where lead_id = '${lead}';`)
     expect(lc.rows[0]!.cadence_id).toBe(cad)
+  })
+
+  it('losing a lead needs its reason, and leaving lost clears it', async () => {
+    await asUser(db, owner)
+    const lead = await add('Slips away', '9876800040')
+    await expect(db.exec(`update crm_leads set status = 'lost' where id = '${lead}';`)).rejects.toThrow(
+      /lost_reason required/,
+    )
+    await expect(db.exec(`update crm_leads set status = 'lost', lost_reason = 'No' where id = '${lead}';`)).rejects.toThrow(
+      /lost_reason required/,
+    )
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'No response' where id = '${lead}';`)
+    const reason = await db.query<{ lost_reason: string }>(`select lost_reason from crm_leads where id = '${lead}';`)
+    expect(reason.rows[0]!.lost_reason).toBe('No response')
+    await db.exec(`update crm_leads set status = 'contacted' where id = '${lead}';`)
+    const cleared = await db.query<{ lost_reason: string | null }>(
+      `select lost_reason from crm_leads where id = '${lead}';`,
+    )
+    expect(cleared.rows[0]!.lost_reason).toBeNull()
+  })
+
+  it('a bulk move to lost carries its reason, and undo puts the stage back', async () => {
+    await asUser(db, owner)
+    const a = await add('Bulk lost A', '9876800041')
+    const b = await add('Bulk lost B', '9876800042')
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost"}');`),
+    ).rejects.toThrow(/lost_reason required/)
+    const before = await db.query<{ id: string; lost_reason: string | null }>(
+      `select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost","lost_reason":"Budget"}');`,
+    )
+    expect(before.rows).toHaveLength(2)
+    expect(before.rows[0]!.lost_reason).toBeNull()
+    const after = await db.query<{ status: string; lost_reason: string }>(
+      `select status, lost_reason from crm_leads where id in ('${a}','${b}') order by id;`,
+    )
+    expect(after.rows.map((r) => [r.status, r.lost_reason])).toEqual([
+      ['lost', 'Budget'],
+      ['lost', 'Budget'],
+    ])
+    await db.query(`select crm_restore_leads('${JSON.stringify(before.rows)}');`)
+    const restored = await db.query<{ status: string; lost_reason: string | null }>(
+      `select status, lost_reason from crm_leads where id in ('${a}','${b}');`,
+    )
+    expect(restored.rows.every((r) => r.status === 'new')).toBe(true)
+    expect(restored.rows.every((r) => r.lost_reason === null)).toBe(true)
+  })
+
+  it('a new lead arrives with a probability and an SLA deadline', async () => {
+    await asUser(db, owner)
+    const lead = await add('Fresh arrival', '9876800043')
+    const row = await db.query<{ probability: number; sla_due_at: string | null }>(
+      `select probability, sla_due_at from crm_leads where id = '${lead}';`,
+    )
+    expect(row.rows[0]!.probability).toBe(10)
+    expect(row.rows[0]!.sla_due_at).not.toBeNull()
   })
 
   it('the team view counts first contact within the SLA', async () => {
@@ -3092,5 +3150,30 @@ describe('enquiries (0043)', () => {
     )
     expect(row.rows).toHaveLength(1)
     expect(row.rows[0]!.converted_lead_id).toBeNull()
+  })
+})
+
+describe('migrations re-apply cleanly (idempotency)', () => {
+  it('policies and triggers survive a second run of their files', async () => {
+    const db = await freshDb()
+    // These files used to create policies/triggers unconditionally, so a
+    // manual re-run died halfway with "already exists".
+    for (const f of [
+      '0038_shoot_details.sql',
+      '0039_deliverable_sets.sql',
+      '0041_team_terms.sql',
+      '0043_enquiries.sql',
+    ]) {
+      await db.exec(mig(f))
+    }
+    const policies = await db.query<{ tablename: string; n: number }>(
+      `select tablename, count(*)::int as n from pg_policies
+        where tablename in ('shoot_presets', 'deliverable_sets')
+        group by tablename order by tablename;`,
+    )
+    expect(policies.rows).toEqual([
+      { tablename: 'deliverable_sets', n: 2 },
+      { tablename: 'shoot_presets', n: 2 },
+    ])
   })
 })

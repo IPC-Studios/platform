@@ -35,6 +35,7 @@ import {
   useUpdateLead,
 } from './api'
 import { STAGES, STAGE_LABEL, dueBucket } from './leads'
+import { LostReasonDialog } from './LostReasonDialog'
 
 /** A datetime-local value from an ISO string, in the viewer's own timezone. */
 function toLocalInput(iso: string | null): string {
@@ -69,6 +70,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const [notes, setNotes] = useState(lead.notes ?? '')
   const [followUp, setFollowUp] = useState(toLocalInput(lead.follow_up_at))
   const [copied, setCopied] = useState(false)
+  const [losing, setLosing] = useState(false)
 
   // A refetch can land while this is open; take the server's version unless the
   // person is mid-edit on that field.
@@ -191,11 +193,10 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
               <Label htmlFor="lead-stage">Stage</Label>
               <Select id="lead-stage" value={lead.status} onChange={(e) => {
                 const v = e.target.value as LeadStatus
-                if (v === 'lost') {
-                  const reason = window.prompt('Why lost? (3+ chars, will be saved)')
-                  if (!reason || reason.trim().length < 3) { e.target.value = lead.status; return }
-                  patch({ status: v, lost_reason: reason.trim() })
-                } else patch({ status: v })
+                // Controlled by value={lead.status}, so cancelling the dialog
+                // snaps the visible selection straight back.
+                if (v === 'lost') setLosing(true)
+                else patch({ status: v })
               }} disabled={update.isPending || !canEdit}>
                 {STAGES.map((s) => (
                   <option key={s.key} value={s.key}>
@@ -334,6 +335,16 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           )}
         </div>
       </DialogContent>
+      <LostReasonDialog
+        open={losing}
+        count={1}
+        pending={update.isPending}
+        onCancel={() => setLosing(false)}
+        onConfirm={(reason) => {
+          setLosing(false)
+          patch({ status: 'lost', lost_reason: reason })
+        }}
+      />
     </Dialog>
   )
 }

@@ -21,6 +21,8 @@ create index if not exists deliverable_sets_company_idx on deliverable_sets (com
 
 alter table deliverable_sets enable row level security;
 
+drop policy if exists deliverable_sets_select on deliverable_sets;
+drop policy if exists deliverable_sets_write on deliverable_sets;
 create policy deliverable_sets_select on deliverable_sets for select to authenticated
   using (company_id = get_current_company_id());
 create policy deliverable_sets_write on deliverable_sets for all to authenticated

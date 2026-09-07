@@ -9,11 +9,12 @@ import {
   updateShootRequest,
   type ShootRequirementInput,
 } from '@ipc/contracts'
+import { mergeServiceNeeds } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam } from '../../lib/params'
+import { uuidParam, uuidQuery } from '../../lib/params'
 import type { TransactionSql } from 'postgres'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
@@ -37,9 +38,7 @@ async function saveRequirements(
   shootId: string,
   requirements: ShootRequirementInput[],
 ) {
-  for (const r of requirements) {
-    const name = r.name.trim()
-    if (!name) continue
+  for (const { name, quantity } of mergeServiceNeeds(requirements)) {
     // do update, not do nothing: `returning` is empty on a skipped insert, and
     // the id is the whole point of the round trip.
     const svc = await sql<{ id: string }[]>`
@@ -51,7 +50,7 @@ async function saveRequirements(
         company_id: companyId,
         shoot_id: shootId,
         service_id: svc[0]!.id,
-        quantity: r.quantity,
+        quantity,
       })}`
   }
 }
@@ -101,7 +100,7 @@ export const shootsRouter = new Hono<AppEnv>()
   })
 
   .get('/', requireAction('projects', 'view'), async (c) => {
-    const project = c.req.query('project_id')
+    const project = uuidQuery(c, 'project_id')
     const rows = await attempt(c, 'shoots.list', () =>
       withUser(
         c.env,
@@ -171,13 +170,12 @@ export const shootsRouter = new Hono<AppEnv>()
 
   .delete('/presets/:id', requireAction('projects', 'edit'), async (c) => {
     const id = uuidParam(c)
-    const ok = await attempt(c, 'shoots.presets.delete', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        await sql`delete from shoot_presets where id = ${id}`
-        return true
-      }),
+    const rows = await attempt(c, 'shoots.presets.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from shoot_presets where id = ${id} returning id`),
     )
-    if (!ok) fail(400, 'We could not delete the preset.')
+    if (!rows) fail(400, 'We could not delete the preset.')
+    if (!rows.length) fail(404, 'That preset was not found.')
     return c.body(null, 204)
   })
 
@@ -208,12 +206,25 @@ export const shootsRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the shoot details.')
     if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
     const id = uuidParam(c)
+    // Requirements live in their own table: when supplied they replace the
+    // set outright (same dedupe as create), never merge silently.
+    const { requirements, ...fields } = parsed.data
     const rows = await attempt(c, 'shoots.update', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql<{ id: string }[]>`update shoots set ${sql(parsed.data)} where id = ${id} returning id`,
-      ),
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        // requirements-only patch: no scalar columns to SET, but the row must
+        // still exist (and belong to this studio) before its crew is replaced.
+        const updated =
+          Object.keys(fields).length > 0
+            ? await sql<{ id: string }[]>`
+                update shoots set ${sql(fields)} where id = ${id} returning id`
+            : await sql<{ id: string }[]>`select id from shoots where id = ${id}`
+        if (!updated.length) return updated
+        if (requirements !== undefined) {
+          await sql`delete from shoot_services where shoot_id = ${id}`
+          await saveRequirements(sql, c.get('auth').companyId, id, requirements)
+        }
+        return updated
+      }),
     )
     if (!rows) fail(400, 'We could not update the shoot.')
     if (!rows.length) fail(404, 'That shoot was not found.')

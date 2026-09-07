@@ -39,6 +39,10 @@ them. `deploy/.env.example` lists every variable.
   swallowed `.catch(() => null)` calls left in the API.
 - The web client shows the id under any failed panel as "Reference: …" — ask
   the user for it.
+- The web app beacons its own crashes (`window.onerror`, unhandled rejections)
+  to `POST /health/client-errors` (public, 20/min, tiny schema, throttled
+  client-side to one per message per minute). They land as `client error` log
+  lines — grep those when a user reports something the API never saw.
 
 ## Audit trail
 

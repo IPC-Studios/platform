@@ -81,6 +81,13 @@ fi
 log "verifying $FILE"
 pg_restore --list "$FILE" >/dev/null
 
+# The API reconnects on its own between terminate and restore, then serves a
+# half-restored schema as if it were fine. Refuse while it answers.
+if wget -q -O /dev/null -T 5 "http://api:8787/health" 2>/dev/null; then
+  log "the API is still up — stop it first: docker compose stop api cron" >&2
+  exit 1
+fi
+
 log "dropping and recreating $DB"
 psql -v ON_ERROR_STOP=1 -h "$HOST" -U "$USER" -d postgres \
   -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$DB' and pid <> pg_backend_pid()" \

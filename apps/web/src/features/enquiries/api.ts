@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   convertEnquiryResponse,
@@ -17,13 +17,20 @@ const anySchema = z.any()
 export function useEnquiries(filters: { status?: EnquiryStatus | null; search?: string }) {
   const { session } = useAuth()
   const access = useAccess()
-  const query = new URLSearchParams()
-  if (filters.status) query.set('status', filters.status)
-  if (filters.search?.trim()) query.set('search', filters.search.trim())
-  const qs = query.toString()
-  return useQuery({
+  const base = new URLSearchParams()
+  if (filters.status) base.set('status', filters.status)
+  if (filters.search?.trim()) base.set('search', filters.search.trim())
+  const qs = base.toString()
+  return useInfiniteQuery({
     queryKey: ['enquiries', filters.status ?? 'all', filters.search ?? ''],
-    queryFn: () => callApi(`/enquiries${qs ? `?${qs}` : ''}`, { responseSchema: enquiryList }),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams(qs)
+      if (pageParam) params.set('cursor', pageParam)
+      const suffix = params.toString()
+      return callApi(`/enquiries${suffix ? `?${suffix}` : ''}`, { responseSchema: enquiryList })
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     enabled: !!session && access.hasModule('crm'),
     staleTime: 15_000,
   })

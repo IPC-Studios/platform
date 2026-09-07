@@ -44,8 +44,14 @@ export type ServiceOption = z.infer<typeof serviceOption>
 /**
  * A map link is a link. Storing an address here instead would put the driver's
  * pin and the printed address in the same field, and lose one of them.
+ *
+ * An empty string clears it: forms submit "" for "no link", and rejecting
+ * that with a 422 would make the field impossible to clear.
  */
-const mapLink = z.string().trim().url().max(500)
+const mapLink = z.preprocess(
+  (v) => (v === '' ? null : v),
+  z.string().trim().url().max(500).nullish(),
+)
 
 export const createShootRequest = z.object({
   project_id: uuid,
@@ -64,11 +70,13 @@ export type CreateShootRequest = z.infer<typeof createShootRequest>
 
 export const updateShootRequest = z.object({
   name: z.string().trim().min(1).max(160).optional(),
-  shoot_date: isoDate.optional(),
-  start_at: isoDateTime.optional(),
-  location: z.string().trim().max(200).optional(),
+  shoot_date: isoDate.nullable().optional(),
+  start_at: isoDateTime.nullable().optional(),
+  end_at: isoDateTime.nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
   map_link: mapLink.optional(),
   status: shootStatus.optional(),
+  requirements: z.array(shootRequirementInput).max(40).optional(),
 })
 export type UpdateShootRequest = z.infer<typeof updateShootRequest>
 

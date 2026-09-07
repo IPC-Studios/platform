@@ -183,13 +183,12 @@ export const projectsRouter = new Hono<AppEnv>()
 
   .delete('/deliverable-sets/:id', requireAction('projects', 'edit'), async (c) => {
     const id = uuidParam(c)
-    const ok = await attempt(c, 'projects.sets.delete', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        await sql`delete from deliverable_sets where id = ${id}`
-        return true
-      }),
+    const rows = await attempt(c, 'projects.sets.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from deliverable_sets where id = ${id} returning id`),
     )
-    if (!ok) fail(400, 'We could not delete the set.')
+    if (!rows) fail(400, 'We could not delete the set.')
+    if (!rows.length) fail(404, 'That set was not found.')
     return c.body(null, 204)
   })
 
@@ -239,29 +238,38 @@ export const projectsRouter = new Hono<AppEnv>()
     return c.body(null, 204)
   })
 
-  /**
-   * Delete a project outright — shoots, deliverables and tasks go with it.
-   *
-   * Refused once money has been recorded against it. A payment is a financial
-   * record, and a studio that wants a paid project off the board wants it
-   * cancelled, not erased; the UI says so and offers that instead.
-   */
+    /**
+     * Delete a project outright — shoots, deliverables and tasks go with it.
+     *
+     * Refused once money has been recorded against it, and once a quotation
+     * has gone to the client. Both are records of what the studio agreed to,
+     * and a studio that wants either off the board wants the project
+     * cancelled, not erased; the UI says so and offers that instead.
+     */
   .delete('/:id', requireAction('projects', 'edit'), async (c) => {
     const id = uuidParam(c)
     const outcome = await attempt(c, 'projects.delete', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const paid = await sql<{ n: number }[]>`
-          select count(*)::int as n from received_payments where project_id = ${id}`
-        if ((paid[0]?.n ?? 0) > 0) return 'has_payments' as const
-        const rows = await sql<{ id: string }[]>`
-          delete from projects where id = ${id} returning id`
-        return rows.length ? ('deleted' as const) : ('missing' as const)
-      }),
-    )
-    if (!outcome) fail(400, 'We could not delete this project.')
-    if (outcome === 'has_payments') {
-      fail(409, 'This project has payments recorded against it. Cancel it instead of deleting.')
-    }
+          const paid = await sql<{ n: number }[]>`
+            select count(*)::int as n from received_payments where project_id = ${id}`
+          if ((paid[0]?.n ?? 0) > 0) return 'has_payments' as const
+          // Quotations are snapshots the client may already hold; deleting
+          // the project would cascade-erase agreed evidence.
+          const quoted = await sql<{ n: number }[]>`
+            select count(*)::int as n from project_quotations where project_id = ${id}`
+          if ((quoted[0]?.n ?? 0) > 0) return 'has_quotations' as const
+          const rows = await sql<{ id: string }[]>`
+            delete from projects where id = ${id} returning id`
+          return rows.length ? ('deleted' as const) : ('missing' as const)
+        }),
+      )
+      if (!outcome) fail(400, 'We could not delete this project.')
+      if (outcome === 'has_payments') {
+        fail(409, 'This project has payments recorded against it. Cancel it instead of deleting.')
+      }
+      if (outcome === 'has_quotations') {
+        fail(409, 'This project has quotations the client has seen. Cancel it instead of deleting.')
+      }
     if (outcome === 'missing') fail(404, 'That project was not found.')
     await audit(c, { action: 'project.delete', entityType: 'project', entityId: id })
     return c.body(null, 204)

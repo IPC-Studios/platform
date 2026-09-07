@@ -47,6 +47,7 @@ import {
   updateDistributionRequest,
   updateLeadRequest,
   updateLeadSourceRequest,
+  updateSavedViewRequest,
   type CsvImportRow,
 } from '@ipc/contracts'
 import { leadsFromCsv, parseCsv, renderTemplate } from '@ipc/domain'
@@ -198,7 +199,17 @@ export const crmRouter = new Hono<AppEnv>()
     )
     if (result === 'missing') fail(404, 'That lead was not found.')
     if (!result) fail(400, 'We could not update the lead.')
-    if (patch.status || patch.assigned_to !== undefined || patch.is_archived !== undefined) {
+    // Money, reason and notes are material to the story; follow-up shuffles
+    // already live in the events trail, so they stay out of the audit log.
+    if (
+      patch.status ||
+      patch.assigned_to !== undefined ||
+      patch.is_archived !== undefined ||
+      patch.lost_reason !== undefined ||
+      patch.deal_value !== undefined ||
+      patch.probability !== undefined ||
+      patch.notes !== undefined
+    ) {
       await audit(c, { action: 'lead.update', entityType: 'crm_lead', entityId: id, before: { status: result.from }, after: patch })
     }
     return c.body(null, 204)
@@ -639,7 +650,7 @@ export const crmRouter = new Hono<AppEnv>()
   .get('/views', async (c) => {
     const rows = await attempt(c, 'crm.views', () =>
       withUser(c.env, c.get('auth').userId, (sql) => sql`
-        select id, name, query, visibility, created_at from crm_saved_views order by created_at`),
+        select id, user_id, name, query, visibility, created_at from crm_saved_views order by created_at`),
     )
     if (!rows) fail(400, 'We could not load your views.')
     return c.json(savedView.array().parse(rows))
@@ -655,12 +666,32 @@ export const crmRouter = new Hono<AppEnv>()
           insert into crm_saved_views (company_id, user_id, name, query, visibility)
           values (get_current_company_id(), ${auth.userId}, ${parsed.data.name}, ${sql.json(parsed.data.query)}, ${parsed.data.visibility})
           on conflict (user_id, name) do update set query = excluded.query, visibility = excluded.visibility
-          returning id, name, query, visibility, created_at`
+          returning id, user_id, name, query, visibility, created_at`
         return rows[0] ?? null
       }),
     )
     if (!row) fail(400, 'We could not save this view.')
     return c.json(savedView.parse(row), 201)
+  })
+
+  .patch('/views/:id', async (c) => {
+    const parsed = updateSavedViewRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Invalid update.')
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'crm.view_update', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => {
+        // jsonb columns need the driver's json wrapper; everything else maps directly.
+        const patch = parsed.data.query
+          ? { ...parsed.data, query: sql.json(parsed.data.query) }
+          : parsed.data
+        return sql<{ id: string }[]>`
+          update crm_saved_views set ${sql(patch)} where id = ${id} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not update this view.')
+    if (!rows.length) fail(404, 'That view was not found.')
+    await audit(c, { action: 'view.update', entityType: 'crm_saved_view', entityId: id, after: parsed.data })
+    return c.body(null, 204)
   })
 
   .delete('/views/:id', async (c) => {

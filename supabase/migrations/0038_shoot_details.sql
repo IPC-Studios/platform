@@ -34,6 +34,8 @@ create index if not exists shoot_presets_company_kind_idx
 
 alter table shoot_presets enable row level security;
 
+drop policy if exists shoot_presets_select on shoot_presets;
+drop policy if exists shoot_presets_write on shoot_presets;
 create policy shoot_presets_select on shoot_presets for select to authenticated
   using (company_id = get_current_company_id());
 create policy shoot_presets_write on shoot_presets for all to authenticated

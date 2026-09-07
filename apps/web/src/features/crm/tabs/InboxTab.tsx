@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Download, Search, X } from 'lucide-react'
+import { Bookmark, BookmarkPlus, Download, Pencil, Search, X } from 'lucide-react'
 import type { CrmLead, LeadStatus } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
-import { useBulkPatch, useDeleteView, useSaveView, useSavedViews } from '../api'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useBulkPatch, useDeleteView, useSaveView, useSavedViews, useUpdateView } from '../api'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
 import { LeadTable, exportLeadsCsv } from './shared'
+import { LostReasonDialog } from '../LostReasonDialog'
 
 export function InboxTab({
   leads,
@@ -30,11 +32,17 @@ export function InboxTab({
 }) {
   const { data: views } = useSavedViews()
   const saveView = useSaveView()
+  const updateView = useUpdateView()
   const deleteView = useDeleteView()
+  const { session } = useAuth()
   const [naming, setNaming] = useState(false)
   const [viewName, setViewName] = useState('')
+  const [viewVisibility, setViewVisibility] = useState<'private' | 'team' | 'everyone'>('private')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const [dismissed, setDismissed] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [losing, setLosing] = useState(false)
   const bulk = useBulkPatch()
 
   // Views saved before they lived on the API were in this browser only. Push
@@ -109,17 +117,28 @@ export function InboxTab({
         </Select>
 
         {naming ? (
-          <span className="flex items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2">
             <Input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" className="w-48" autoFocus aria-label="View name" />
+            <Select
+              value={viewVisibility}
+              onChange={(e) => setViewVisibility(e.target.value as 'private' | 'team' | 'everyone')}
+              className="w-36"
+              aria-label="Who can see this view"
+            >
+              <option value="private">Only me</option>
+              <option value="team">My team</option>
+              <option value="everyone">Everyone</option>
+            </Select>
             <Button
               size="sm"
               disabled={!viewName.trim() || saveView.isPending}
               onClick={() =>
                 saveView.mutate(
-                  { name: viewName.trim(), query: toSavedQuery(query), visibility: 'private' },
+                  { name: viewName.trim(), query: toSavedQuery(query), visibility: viewVisibility },
                   {
                     onSuccess: () => {
                       setViewName('')
+                      setViewVisibility('private')
                       setNaming(false)
                     },
                   },
@@ -146,18 +165,73 @@ export function InboxTab({
 
         {(views ?? []).length > 0 && (
           <span className="flex flex-wrap items-center gap-1">
-            {(views ?? []).map((v) => (
-              <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs">
-                <Bookmark className="size-3" />
-                <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
-                  {v.name}
-                </button>
-                <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
-                  <X className="size-3" />
-                  <span className="sr-only">Delete {v.name}</span>
-                </button>
-              </span>
-            ))}
+            {(views ?? []).map((v) => {
+              // Only the creator (or studio owner) can change a view — the API
+              // enforces the same rule, this just avoids offering a dead button.
+              const mine = v.user_id === session?.user_id || !!session?.is_owner
+              return (
+                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs">
+                  <Bookmark className="size-3" />
+                  {renamingId === v.id ? (
+                    <span className="flex items-center gap-1">
+                      <Input
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        className="h-6 w-32 px-1.5 py-0 text-xs"
+                        autoFocus
+                        aria-label="View name"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setRenamingId(null)
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-1.5 text-xs"
+                        disabled={!renameValue.trim() || updateView.isPending}
+                        onClick={() =>
+                          updateView.mutate(
+                            { id: v.id, patch: { name: renameValue.trim() } },
+                            { onSuccess: () => setRenamingId(null) },
+                          )
+                        }
+                      >
+                        Save
+                      </Button>
+                      <button type="button" onClick={() => setRenamingId(null)} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground">
+                        <X className="size-3" />
+                        <span className="sr-only">Cancel rename</span>
+                      </button>
+                    </span>
+                  ) : (
+                    <>
+                      <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
+                        {v.name}
+                      </button>
+                      {mine && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenameValue(v.name)
+                            setRenamingId(v.id)
+                          }}
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="size-3" />
+                          <span className="sr-only">Rename {v.name}</span>
+                        </button>
+                      )}
+                      {mine && (
+                        <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
+                          <X className="size-3" />
+                          <span className="sr-only">Delete {v.name}</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </span>
+              )
+            })}
           </span>
         )}
 
@@ -234,7 +308,10 @@ export function InboxTab({
             aria-label="Move to stage"
             onChange={(e) => {
               const v = e.target.value as LeadStatus | ''
-              if (v) runBulk({ status: v })
+              // Lost needs its reason up front — the API refuses it without
+              // one, so ask here instead of failing the whole batch after.
+              if (v === 'lost') setLosing(true)
+              else if (v) runBulk({ status: v })
             }}
             className="w-36"
           >
@@ -279,6 +356,17 @@ export function InboxTab({
       )}
 
       <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+
+      <LostReasonDialog
+        open={losing}
+        count={selected.size}
+        pending={bulk.isPending}
+        onCancel={() => setLosing(false)}
+        onConfirm={(reason) => {
+          setLosing(false)
+          runBulk({ status: 'lost', lost_reason: reason })
+        }}
+      />
     </div>
   )
 }

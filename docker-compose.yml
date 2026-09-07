@@ -86,6 +86,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # A startup dump taken mid-migration would bless a half-migrated schema
+      # as "the backup". Wait for the ledger like api does.
+      migrate:
+        condition: service_completed_successfully
     env_file: [.env]
     environment:
       PGHOST: db
