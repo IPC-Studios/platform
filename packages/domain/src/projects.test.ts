@@ -3,7 +3,12 @@ import {
   addDays,
   anchorShootDate,
   computeProjectTotals,
+  DEFAULT_DELIVERABLE_RULE,
+  deliverableDueDate,
   deliverableEstimatedDate,
+  deliverableRuleForTitle,
+  findWeddingShoot,
+  internalLeadDaysForTitle,
   qualifiesForCharge,
   type DeliverableForTotal,
 } from './projects'
@@ -123,5 +128,77 @@ describe('deliverableEstimatedDate', () => {
     expect(deliverableEstimatedDate('whole_project', shoots, undefined)).toBeNull()
     expect(deliverableEstimatedDate('whole_project', [], 45)).toBeNull()
     expect(deliverableEstimatedDate('no_data', shoots, 45)).toBeNull()
+  })
+})
+
+describe('due basis — what the client was promised', () => {
+  const shoots = [
+    { name: 'Haldi', shoot_date: '2026-11-20' },
+    { name: 'Wedding Day', shoot_date: '2026-11-22' },
+    { name: 'Reception', shoot_date: '2026-11-23' },
+  ]
+
+  it('anchors on the wedding day, not the last shoot', () => {
+    expect(deliverableDueDate('after_wedding_day', shoots, 45, null, '2026-09-07')).toBe(
+      '2027-01-06',
+    )
+    expect(deliverableDueDate('after_last_shoot', shoots, 45, null, '2026-09-07')).toBe(
+      '2027-01-07',
+    )
+  })
+
+  it('falls back to any wedding-ish shoot when none is named "Wedding Day"', () => {
+    const loose = [{ name: 'Wedding Reception', shoot_date: '2026-11-23' }]
+    expect(findWeddingShoot(loose)?.shoot_date).toBe('2026-11-23')
+    expect(findWeddingShoot([{ name: 'Haldi', shoot_date: '2026-11-20' }])).toBeNull()
+  })
+
+  it('counts from today when the basis is the project itself', () => {
+    expect(deliverableDueDate('after_project_created', [], 10, null, '2026-09-07')).toBe(
+      '2026-09-17',
+    )
+  })
+
+  it('takes a custom date verbatim and ignores the day count', () => {
+    expect(deliverableDueDate('custom', shoots, 45, '2027-02-01', '2026-09-07')).toBe('2027-02-01')
+    expect(deliverableDueDate('custom', shoots, 45, '', '2026-09-07')).toBeNull()
+  })
+
+  it('has no answer when the anchor day is unknown', () => {
+    const undated = [{ name: 'Wedding Day', shoot_date: null }]
+    expect(deliverableDueDate('after_wedding_day', undated, 45, null, '2026-09-07')).toBeNull()
+    expect(deliverableDueDate('after_wedding_day', shoots, undefined, null, '2026-09-07')).toBeNull()
+  })
+})
+
+describe('deliverableRuleForTitle', () => {
+  it('matches the longer name first', () => {
+    expect(deliverableRuleForTitle('Full Wedding Film').due_days).toBe(60)
+    expect(deliverableRuleForTitle('Highlight Film').due_days).toBe(30)
+    expect(deliverableRuleForTitle('Reel').due_days).toBe(7)
+  })
+
+  it('reads a title that merely contains a known kind', () => {
+    const rule = deliverableRuleForTitle('Haldi Teaser')
+    expect(rule).toEqual({ due_days: 7, due_basis: 'after_wedding_day' })
+  })
+
+  it('photo work counts from the last shoot, film work from the wedding', () => {
+    expect(deliverableRuleForTitle('Edited Photos').due_basis).toBe('after_last_shoot')
+    expect(deliverableRuleForTitle('Cinematic Film').due_basis).toBe('after_wedding_day')
+  })
+
+  it('falls back to thirty days for anything unrecognised', () => {
+    expect(deliverableRuleForTitle('Mandap Drone Timelapse')).toEqual(DEFAULT_DELIVERABLE_RULE)
+    expect(deliverableRuleForTitle('  ')).toEqual(DEFAULT_DELIVERABLE_RULE)
+  })
+})
+
+describe('internalLeadDaysForTitle', () => {
+  it('turns raw work around fast and films slowly', () => {
+    expect(internalLeadDaysForTitle('Data Sorting')).toBe(1)
+    expect(internalLeadDaysForTitle('Raw Photos')).toBe(2)
+    expect(internalLeadDaysForTitle('Wedding Film')).toBe(30)
+    expect(internalLeadDaysForTitle('Edited Photos')).toBe(7)
   })
 })
