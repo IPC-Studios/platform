@@ -28,6 +28,15 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* Quick-link tones. Named by hue, not by meaning: they exist to make three
+     header shortcuts tellable apart at a glance, and every one of them is a
+     neutral destination — none is a status. */
+  --color-tone-blue: var(--tone-blue);
+  --color-tone-blue-soft: var(--tone-blue-soft);
+  --color-tone-green: var(--tone-green);
+  --color-tone-green-soft: var(--tone-green-soft);
+  --color-tone-violet: var(--tone-violet);
+  --color-tone-violet-soft: var(--tone-violet-soft);
   /* The whole corner scale, derived from one number so a theme can change
      every corner in the app at once.
 
@@ -71,6 +80,12 @@
   --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.21 0.006 285);
   --sidebar-accent: oklch(0.97 0.001 286);
+  --tone-blue: oklch(0.47 0.17 268);
+  --tone-blue-soft: oklch(0.96 0.03 268);
+  --tone-green: oklch(0.48 0.12 160);
+  --tone-green-soft: oklch(0.96 0.04 160);
+  --tone-violet: oklch(0.5 0.19 300);
+  --tone-violet-soft: oklch(0.96 0.035 300);
 }
 
 .dark {
@@ -96,6 +111,14 @@
   --sidebar: oklch(0.21 0.006 285);
   --sidebar-foreground: oklch(0.98 0 0);
   --sidebar-accent: oklch(0.27 0.006 286);
+  /* Dark flips the pair: the text lightens, the fill darkens, so the pills
+     keep their hue without glowing off a near-black bar. */
+  --tone-blue: oklch(0.82 0.11 268);
+  --tone-blue-soft: oklch(0.3 0.07 268);
+  --tone-green: oklch(0.82 0.11 160);
+  --tone-green-soft: oklch(0.29 0.06 160);
+  --tone-violet: oklch(0.83 0.11 300);
+  --tone-violet-soft: oklch(0.31 0.07 300);
 }
 
 * {

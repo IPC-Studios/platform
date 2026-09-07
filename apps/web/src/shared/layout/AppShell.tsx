@@ -8,6 +8,8 @@ import { Button } from '../ui/button'
 import { cn } from '../ui/cn'
 import { NAV, type NavEntry, type NavGroup, type NavLeaf, filterNav } from './nav'
 import { CommandPalette, openCommandPalette, paletteShortcutHint } from './CommandPalette'
+import { QuickLinks } from './QuickLinks'
+import { NotificationBell } from './NotificationBell'
 import { AccountMenu } from './AccountMenu'
 
 
@@ -133,25 +135,30 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Brand />
           </span>
 
-          {/* A shortcut nobody can see is a shortcut nobody uses, so the
-              trigger sits in the bar and names its own key. */}
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            className="ml-auto flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64"
-          >
-            <Search className="size-4 shrink-0" aria-hidden />
-            <span className="hidden flex-1 text-left sm:inline">Search…</span>
-            <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline">
-              {paletteShortcutHint()}
-            </kbd>
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <QuickLinks className="hidden xl:flex" />
 
-          <div className="ml-2 flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
-              {scheme === 'dark' ? <Sun /> : <Moon />}
-            </Button>
-            <AccountMenu onSignOut={() => void signOut()} />
+            {/* A shortcut nobody can see is a shortcut nobody uses, so the
+                trigger sits in the bar and names its own key. */}
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64"
+            >
+              <Search className="size-4 shrink-0" aria-hidden />
+              <span className="hidden flex-1 text-left sm:inline">Search…</span>
+              <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline">
+                {paletteShortcutHint()}
+              </kbd>
+            </button>
+
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
+                {scheme === 'dark' ? <Sun /> : <Moon />}
+              </Button>
+              <AccountMenu onSignOut={() => void signOut()} />
+            </div>
           </div>
         </header>
 
