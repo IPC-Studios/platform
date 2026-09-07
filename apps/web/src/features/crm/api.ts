@@ -9,6 +9,7 @@ import {
   convertLeadResponse,
   createCadenceRequest,
   createLeadRequest,
+  createLeadResponse,
   createQuoteRequest,
   crmActivity,
   crmCompany,
@@ -169,9 +170,9 @@ export function useAddLead() {
       callApi('/crm/leads', {
         method: 'POST',
         body: createLeadRequest.parse(input),
-        responseSchema: crmLead,
+        responseSchema: createLeadResponse,
       }),
-    'Lead added',
+    (r) => (r.created ? 'Lead added' : 'We already had this number — opening that lead'),
   )
 }
 

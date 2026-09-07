@@ -13,6 +13,7 @@ import {
   createSavedViewRequest,
   createDistributionRequest,
   createLeadRequest,
+  createLeadResponse,
   createLeadSourceRequest,
   createTemplateRequest,
   crmLead,
@@ -159,8 +160,15 @@ export const crmRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the lead details.')
     const v = parsed.data
 
+    // add_lead() dedupes on the normalised number and returns the row that
+    // already exists, so ask first — otherwise the client cannot tell a new
+    // lead from one it just re-opened.
+    const norm = normalizePhone(v.phone)
     const row = await attempt(c, 'crm.lead_create', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [known] = norm
+          ? await sql<{ id: string }[]>`select id from crm_leads where phone_norm = ${norm} limit 1`
+          : []
         const [created] = await sql<{ id: string }[]>`
           select add_lead(
             ${v.name ?? null}, ${v.phone}, ${v.email ?? null},
@@ -177,17 +185,19 @@ export const crmRouter = new Hono<AppEnv>()
         if (v.crm_company_id !== undefined) extra.crm_company_id = v.crm_company_id
         // A known number hands back the existing row; only a fresh one is
         // placed in the pipeline the caller asked for.
-        if (created?.id && v.pipeline_id !== undefined) extra.pipeline_id = v.pipeline_id
-        if (v.stage_id !== undefined) extra.stage_id = v.stage_id
+        if (!known && v.pipeline_id !== undefined) extra.pipeline_id = v.pipeline_id
+        if (!known && v.stage_id !== undefined) extra.stage_id = v.stage_id
         if (Object.keys(extra).length) await sql`update crm_leads set ${sql(extra)} where id = ${id}`
         const [lead] = await sql`${selectLead(sql)} where l.id = ${id}`
-        return lead ?? null
+        return lead ? { lead, created: !known } : null
       }),
     )
     if (!row) fail(400, 'We could not add this lead.')
-    const lead = crmLead.parse(row)
-    await audit(c, { action: 'lead.create', entityType: 'crm_lead', entityId: lead.id, after: { phone: v.phone, source: v.source } })
-    return c.json(lead, 201)
+    const body = createLeadResponse.parse(row)
+    if (body.created) {
+      await audit(c, { action: 'lead.create', entityType: 'crm_lead', entityId: body.lead.id, after: { phone: v.phone, source: v.source } })
+    }
+    return c.json(body, body.created ? 201 : 200)
   })
 
   // Stage moves carry timestamps with them: leaving 'new' is the moment someone

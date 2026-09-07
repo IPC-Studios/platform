@@ -420,11 +420,14 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/sources/')) return {}
   if (method === 'POST' && path === '/crm/leads')
     return {
-      ...dealLeads()[3],
-      id: uid(0xbf),
-      ...(body as Record<string, unknown>),
-      status: 'new',
-      assignee_name: null,
+      lead: {
+        ...dealLeads()[3],
+        id: uid(0xbf),
+        ...(body as Record<string, unknown>),
+        status: 'new',
+        assignee_name: null,
+      },
+      created: true,
     }
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx

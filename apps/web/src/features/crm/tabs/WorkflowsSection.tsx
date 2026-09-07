@@ -111,6 +111,7 @@ export function WorkflowsSection() {
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const [editing, setEditing] = useState<Workflow | 'new' | null>(null)
   const [showRuns, setShowRuns] = useState<string | null>(null)
   const names = useNames()
@@ -178,11 +179,13 @@ export function WorkflowsSection() {
                     <Button size="sm" variant="ghost" onClick={() => setEditing(w)}>
                       Edit
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void onDelete(w)}>
-                      <Trash2 />
-                      <span className="sr-only">Delete {w.name}</span>
-                    </Button>
                   </>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" onClick={() => void onDelete(w)}>
+                    <Trash2 />
+                    <span className="sr-only">Delete {w.name}</span>
+                  </Button>
                 )}
               </div>
               {showRuns === w.id && <Enrollments workflowId={w.id} />}

@@ -115,6 +115,17 @@ export const captureLeadRequest = z.object({
 export type CaptureLeadRequest = z.infer<typeof captureLeadRequest>
 
 /** Adding a lead by hand. The phone is the identity — everything else can wait. */
+/**
+ * add_lead() hands back the EXISTING row when the number is already known, so
+ * "added" would be a lie half the time. The response says which happened.
+ */
+export const createLeadResponse = z.object({
+  lead: crmLead,
+  /** False when an existing lead with this number was opened instead. */
+  created: z.boolean(),
+})
+export type CreateLeadResponse = z.infer<typeof createLeadResponse>
+
 export const createLeadRequest = z.object({
   name: z.string().trim().max(160).optional(),
   phone: z.string().trim().min(6).max(30),

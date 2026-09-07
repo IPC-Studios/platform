@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { useAddLead } from './api'
+import { useCrmAccess } from './access'
 
 type Field = 'name' | 'phone' | 'email'
 
@@ -20,6 +21,7 @@ const LABELS: Record<Field, string> = { name: 'Name', phone: 'Phone', email: 'Em
  */
 export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
   const add = useAddLead()
+  const { canCreate } = useCrmAccess()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -57,13 +59,17 @@ export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
     if (Object.keys(found).length > 0) return
 
     add.mutate(createLeadRequest.parse(body), {
-      onSuccess: (lead) => {
+      onSuccess: (r) => {
         setOpen(false)
         reset()
-        onAdded?.(lead.id)
+        onAdded?.(r.lead.id)
       },
     })
   }
+
+  // The endpoint needs crm:create; a view-only account was being shown the
+  // page's main call to action and refused on submit.
+  if (!canCreate) return null
 
   return (
     <Dialog

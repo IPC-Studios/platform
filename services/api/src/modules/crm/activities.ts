@@ -398,7 +398,7 @@ export const crmActivitiesRouter = new Hono<AppEnv>()
     return c.json(crmIntegration.array().parse(out))
   })
 
-  .put('/integrations/:provider', async (c) => {
+  .put('/integrations/:provider', edit, async (c) => {
     const provider = integrationProvider.safeParse(c.req.param('provider'))
     if (!provider.success) fail(404, 'Unknown integration.')
     const parsed = updateIntegrationRequest.safeParse(await c.req.json().catch(() => ({})))

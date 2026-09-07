@@ -93,11 +93,13 @@ export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[];
           <p className="text-sm text-muted-foreground">
             Web forms and Meta lead ads post straight into this inbox. Each source has its own URL you can pause or delete.
           </p>
-          <div>
-            <Button variant="outline" asChild>
-              <Link to="/lead-sources">Manage lead sources</Link>
-            </Button>
-          </div>
+          {access.hasModule('lead_sources') && (
+            <div>
+              <Button variant="outline" asChild>
+                <Link to="/lead-sources">Manage lead sources</Link>
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -171,6 +173,7 @@ function PipelinesCard() {
   const isOwner = !!session?.is_owner
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const { data, isLoading } = usePipelines()
   const createPipeline = useCreatePipeline()
   const updatePipeline = useUpdatePipeline()
@@ -290,11 +293,13 @@ function PipelinesCard() {
                           <Button size="sm" variant="ghost" onClick={() => setEditing(editing === s.id ? null : s.id)}>
                             {editing === s.id ? 'Done' : 'Edit'}
                           </Button>
-                          <Button size="sm" variant="ghost" disabled={s.deal_count > 0} title={s.deal_count > 0 ? 'Move its deals out first' : undefined} onClick={() => void removeStage(s)}>
-                            <Trash2 />
-                            <span className="sr-only">Remove {s.name}</span>
-                          </Button>
                         </>
+                      )}
+                      {canDelete && (
+                        <Button size="sm" variant="ghost" disabled={s.deal_count > 0} title={s.deal_count > 0 ? 'Move its deals out first' : undefined} onClick={() => void removeStage(s)}>
+                          <Trash2 />
+                          <span className="sr-only">Remove {s.name}</span>
+                        </Button>
                       )}
                     </div>
                     {editing === s.id && <StageEditor stage={s} onSave={(patch) => updateStage.mutate({ id: s.id, patch })} pending={updateStage.isPending} />}
@@ -378,6 +383,7 @@ function StageEditor({ stage, onSave, pending }: { stage: PipelineStage; onSave:
 function LostReasonsCard() {
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const { data, isLoading } = useLostReasons()
   const create = useCreateLostReason()
   const update = useUpdateLostReason()
@@ -402,10 +408,12 @@ function LostReasonsCard() {
                     <button type="button" className="rounded-full px-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => update.mutate({ id: r.id, patch: { is_active: !r.is_active } })}>
                       {r.is_active ? 'hide' : 'show'}
                     </button>
-                    <button type="button" className="rounded-full p-0.5 text-muted-foreground hover:text-destructive" onClick={() => remove.mutate(r.id)} aria-label={`Remove ${r.label}`}>
-                      <Trash2 className="size-3" />
-                    </button>
                   </>
+                )}
+                {canDelete && (
+                  <button type="button" className="rounded-full p-0.5 text-muted-foreground hover:text-destructive" onClick={() => remove.mutate(r.id)} aria-label={`Remove ${r.label}`}>
+                    <Trash2 className="size-3" />
+                  </button>
                 )}
               </li>
             ))}
@@ -491,6 +499,7 @@ function ScoringCard() {
   const isOwner = !!session?.is_owner
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
   const { data, isLoading } = useScoringRules()
   const settings = useCrmSettings()
   const saveSettings = useUpdateCrmSettings()
@@ -554,10 +563,12 @@ function ScoringCard() {
                     <Button size="sm" variant="ghost" onClick={() => update.mutate({ id: r.id, patch: { is_active: !r.is_active } })}>
                       {r.is_active ? 'Off' : 'On'}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)} aria-label={`Remove ${r.label}`}>
-                      <Trash2 />
-                    </Button>
                   </>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)} aria-label={`Remove ${r.label}`}>
+                    <Trash2 />
+                  </Button>
                 )}
               </li>
             ))}

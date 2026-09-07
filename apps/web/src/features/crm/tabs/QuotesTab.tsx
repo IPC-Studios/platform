@@ -84,6 +84,7 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
 
   function deliver(channel: 'none' | 'whatsapp' | 'email') {
     send.mutate(
@@ -143,7 +144,7 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
             <Mail />
             <span className="sr-only">Email</span>
           </Button>
-          {q.status === 'draft' && (
+          {q.status === 'draft' && canDelete && (
             <Button size="sm" variant="ghost" onClick={() => void remove()} title="Delete draft">
               <Trash2 />
               <span className="sr-only">Delete</span>

@@ -27,6 +27,7 @@ export function CadencesSection() {
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
+  const canDelete = access.hasAction('crm', 'delete')
 
   async function onDelete(id: string, name: string, active: number) {
     const yes = await confirm({
@@ -80,11 +81,13 @@ export function CadencesSection() {
                     <Button size="sm" variant="ghost" onClick={() => update.mutate({ id: c.id, patch: { is_active: !c.is_active } })}>
                       {c.is_active ? 'Turn off' : 'Turn on'}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void onDelete(c.id, c.name, c.active_leads)}>
-                      <Trash2 />
-                      <span className="sr-only">Delete {c.name}</span>
-                    </Button>
                   </>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" onClick={() => void onDelete(c.id, c.name, c.active_leads)}>
+                    <Trash2 />
+                    <span className="sr-only">Delete {c.name}</span>
+                  </Button>
                 )}
               </div>
             </li>
