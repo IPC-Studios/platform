@@ -39,13 +39,14 @@ const edit = requireAction('crm', 'edit')
 const remove = requireAction('crm', 'delete')
 
 const selectActivity = (sql: TransactionSql) => sql`
-  select a.id, a.lead_id, l.name as lead_name, a.contact_id, a.type, a.direction, a.subject, a.body, a.outcome,
+  select a.id, a.lead_id, l.name as lead_name, a.contact_id, ct.name as contact_name, a.type, a.direction, a.subject, a.body, a.outcome,
          a.started_at, a.ended_at, a.duration_s, a.due_at, a.done_at, a.assigned_to, au.name as assignee_name,
-         a.actor_id, ac.name as actor_name, a.provider, a.external_id, a.created_at
+         a.actor_id, ac.name as actor_name, a.provider, a.external_id, a.meta ->> 'location' as location, a.created_at
   from crm_activities a
   left join crm_leads l on l.id = a.lead_id
   left join users au on au.user_id = a.assigned_to
-  left join users ac on ac.user_id = a.actor_id`
+  left join users ac on ac.user_id = a.actor_id
+  left join crm_contacts ct on ct.id = a.contact_id`
 
 export const crmActivitiesRouter = new Hono<AppEnv>()
   // ── Feed and CRUD ───────────────────────────────────────────
@@ -108,12 +109,22 @@ export const crmActivitiesRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Invalid update.')
     if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
     const id = uuidParam(c)
-    const { done, ...rest } = parsed.data
+    const { done, location, ...rest } = parsed.data
     const patch: Record<string, unknown> = { ...rest }
     if (done !== undefined) patch.done_at = done ? new Date().toISOString() : null
     const rows = await attempt(c, 'crm.activity_update', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
-        update crm_activities set ${sql(patch)} where id = ${id} returning id`),
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        if (location !== undefined) {
+          await sql`
+            update crm_activities
+               set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{location}', ${sql.json(location)})
+             where id = ${id}`
+        }
+        if (Object.keys(patch).length === 0) {
+          return sql<{ id: string }[]>`select id from crm_activities where id = ${id}`
+        }
+        return sql<{ id: string }[]>`update crm_activities set ${sql(patch)} where id = ${id} returning id`
+      }),
     )
     if (!rows) fail(400, 'We could not update this activity.')
     if (!rows.length) fail(404, 'That activity was not found.')

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { CalendarPlus, Check, ClipboardList, Mail, MessageCircle, Phone, StickyNote } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { CalendarPlus, Check, ClipboardList, Mail, MessageCircle, Phone, StickyNote, Trash2 } from 'lucide-react'
 import type { ActivityType, CrmActivity, CrmLead } from '@ipc/contracts'
 import { ACTIVITY_LABEL, describeActivity } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
@@ -9,8 +10,9 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { StatCard } from '@/shared/ui/stat-card'
 import { cn } from '@/shared/ui/cn'
-import { useAccess } from '@/shared/auth/useAccess'
-import { useActivities, useUpdateActivity } from '../api'
+import { useConfirm } from '@/shared/ui/confirm'
+import { useCrmAccess } from '../access'
+import { useActivities, useDeleteActivity, useUpdateActivity } from '../api'
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
@@ -35,8 +37,19 @@ export function ActivitiesTab({ leads, onOpen }: { leads: readonly CrmLead[]; on
   const feed = useActivities({ ...(type ? { type } : {}), ...(owner ? { assignedTo: owner } : {}) })
   const tasks = useActivities({ openTasks: true })
   const update = useUpdateActivity()
-  const access = useAccess()
-  const canEdit = access.hasAction('crm', 'edit')
+  const del = useDeleteActivity()
+  const confirm = useConfirm()
+  const { canEdit, canDelete } = useCrmAccess()
+
+  async function remove(id: string) {
+    const yes = await confirm({
+      title: 'Remove this from the timeline?',
+      description: 'It disappears from the history for everyone.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    })
+    if (yes) del.mutate(id)
+  }
 
   const owners = useMemo(() => {
     const seen = new Map<string, string>()
@@ -68,7 +81,15 @@ export function ActivitiesTab({ leads, onOpen }: { leads: readonly CrmLead[]; on
             <p className="mt-0.5 text-xs text-muted-foreground">Oldest due first. Tick one off when it is done.</p>
             <ul className="mt-3 divide-y divide-border">
               {openTasks.slice(0, 20).map((t) => (
-                <ActivityRow key={t.id} a={t} onOpen={onOpen} canEdit={canEdit} onDone={() => update.mutate({ id: t.id, patch: { done: true } })} />
+                <ActivityRow
+                  key={t.id}
+                  a={t}
+                  onOpen={onOpen}
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  onDone={() => update.mutate({ id: t.id, patch: { done: true } })}
+                  onDelete={() => void remove(t.id)}
+                />
               ))}
             </ul>
           </CardContent>
@@ -109,7 +130,15 @@ export function ActivitiesTab({ leads, onOpen }: { leads: readonly CrmLead[]; on
           <CardContent className="p-4">
             <ul className="divide-y divide-border">
               {rows.map((a) => (
-                <ActivityRow key={a.id} a={a} onOpen={onOpen} canEdit={canEdit} onDone={() => update.mutate({ id: a.id, patch: { done: !a.done_at } })} />
+                <ActivityRow
+                  key={a.id}
+                  a={a}
+                  onOpen={onOpen}
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  onDone={() => update.mutate({ id: a.id, patch: { done: !a.done_at } })}
+                  onDelete={() => void remove(a.id)}
+                />
               ))}
             </ul>
           </CardContent>
@@ -119,7 +148,21 @@ export function ActivitiesTab({ leads, onOpen }: { leads: readonly CrmLead[]; on
   )
 }
 
-function ActivityRow({ a, onOpen, canEdit, onDone }: { a: CrmActivity; onOpen: (id: string) => void; canEdit: boolean; onDone: () => void }) {
+function ActivityRow({
+  a,
+  onOpen,
+  canEdit,
+  canDelete,
+  onDone,
+  onDelete,
+}: {
+  a: CrmActivity
+  onOpen: (id: string) => void
+  canEdit: boolean
+  canDelete: boolean
+  onDone: () => void
+  onDelete: () => void
+}) {
   const Icon = ICON[a.type]
   const overdue = a.type === 'task' && !a.done_at && !!a.due_at && new Date(a.due_at).getTime() < Date.now()
   return (
@@ -132,8 +175,14 @@ function ActivityRow({ a, onOpen, canEdit, onDone }: { a: CrmActivity; onOpen: (
             <button type="button" onClick={() => onOpen(a.lead_id!)} className="hover:underline">
               {a.lead_name ?? 'Open deal'}
             </button>
+          ) : a.contact_id ? (
+            // Activities can hang off a person rather than a deal; this used
+            // to be the dead word "Contact".
+            <Link to="/crm/contacts" search={{ contact: a.contact_id } as never} className="hover:underline">
+              {a.contact_name ?? 'Open contact'}
+            </Link>
           ) : (
-            'Contact'
+            '—'
           )}
           {' · '}
           <span className="tabular-nums">{when.format(new Date(a.started_at ?? a.created_at))}</span>
@@ -144,6 +193,12 @@ function ActivityRow({ a, onOpen, canEdit, onDone }: { a: CrmActivity; onOpen: (
       {a.type === 'task' && canEdit && (
         <Button size="sm" variant={a.done_at ? 'ghost' : 'outline'} onClick={onDone}>
           <Check /> {a.done_at ? 'Reopen' : 'Done'}
+        </Button>
+      )}
+      {canDelete && (
+        <Button size="sm" variant="ghost" onClick={onDelete} title="Remove">
+          <Trash2 className="size-3.5" />
+          <span className="sr-only">Remove</span>
         </Button>
       )}
     </li>

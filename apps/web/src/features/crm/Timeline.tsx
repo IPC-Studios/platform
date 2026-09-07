@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
-import { CalendarPlus, Check, ClipboardList, Download, Mail, MessageCircle, Phone, StickyNote } from 'lucide-react'
+import { CalendarPlus, Check, ClipboardList, Download, Mail, MapPin, MessageCircle, Pencil, Phone, StickyNote, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { ActivityType, CrmActivity, CrmLead, TimelineItem } from '@ipc/contracts'
+import type { ActivityType, CrmActivity, CrmLead, TimelineItem, UpdateActivityRequest } from '@ipc/contracts'
 import { ACTIVITY_LABEL, CALL_OUTCOMES, describeActivity } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { cn } from '@/shared/ui/cn'
-import { config } from '@/shared/config'
-import { useAccess } from '@/shared/auth/useAccess'
-import { useLogActivity, usePlaceCall, useScheduleMeeting, useTimeline, useUpdateActivity } from './api'
+import { toast as notify } from 'sonner'
+import { downloadFile, ApiError } from '@/shared/api/client'
+import { useConfirm } from '@/shared/ui/confirm'
+import { useMembers } from '@/features/allocation/api'
+import { useCrmAccess } from './access'
+import { useDeleteActivity, useLogActivity, usePlaceCall, useScheduleMeeting, useTimeline, useUpdateActivity } from './api'
 import { STAGE_LABEL } from './leads'
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -37,6 +40,14 @@ const ICON: Record<ActivityType, typeof Phone> = {
   sms: MessageCircle,
 }
 
+/** A datetime-local value from an ISO timestamp, in the viewer's timezone. */
+function toLocalInput(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
 /** A datetime-local value for "now", rounded to the minute. */
 function nowLocal(offsetMinutes = 0): string {
   const at = new Date(Date.now() + offsetMinutes * 60_000)
@@ -52,8 +63,10 @@ function nowLocal(offsetMinutes = 0): string {
 export function Timeline({ lead }: { lead: CrmLead }) {
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useTimeline(lead.id)
   const update = useUpdateActivity()
-  const access = useAccess()
-  const canEdit = access.hasAction('crm', 'edit')
+  const del = useDeleteActivity()
+  const confirm = useConfirm()
+  const { canEdit, canDelete } = useCrmAccess()
+  const [editing, setEditing] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [form, setForm] = useState<ActivityType | null>(null)
 
@@ -109,7 +122,26 @@ export function Timeline({ lead }: { lead: CrmLead }) {
       ) : (
         <ul className="mt-2 flex flex-col gap-1.5">
           {items.map((item) => (
-            <TimelineRow key={item.kind === 'event' ? `e-${item.event.id}` : `a-${item.activity.id}`} item={item} canEdit={canEdit} onDone={(a) => update.mutate({ id: a.id, patch: { done: !a.done_at } })} />
+            <TimelineRow
+              key={item.kind === 'event' ? `e-${item.event.id}` : `a-${item.activity.id}`}
+              item={item}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              editing={editing}
+              onEdit={setEditing}
+              onSave={(id, patch) => update.mutate({ id, patch }, { onSuccess: () => setEditing(null) })}
+              pending={update.isPending}
+              onDone={(a) => update.mutate({ id: a.id, patch: { done: !a.done_at } })}
+              onDelete={async (a) => {
+                const yes = await confirm({
+                  title: 'Remove this from the timeline?',
+                  description: 'It disappears from the deal’s history for everyone.',
+                  confirmLabel: 'Remove',
+                  destructive: true,
+                })
+                if (yes) del.mutate(a.id)
+              }}
+            />
           ))}
         </ul>
       )}
@@ -122,7 +154,19 @@ export function Timeline({ lead }: { lead: CrmLead }) {
   )
 }
 
-function TimelineRow({ item, canEdit, onDone }: { item: TimelineItem; canEdit: boolean; onDone: (a: CrmActivity) => void }) {
+interface RowProps {
+  item: TimelineItem
+  canEdit: boolean
+  canDelete: boolean
+  editing: string | null
+  onEdit: (id: string | null) => void
+  onSave: (id: string, patch: UpdateActivityRequest) => void
+  pending: boolean
+  onDone: (a: CrmActivity) => void
+  onDelete: (a: CrmActivity) => void
+}
+
+function TimelineRow({ item, canEdit, canDelete, editing, onEdit, onSave, pending, onDone, onDelete }: RowProps) {
   if (item.kind === 'event') {
     const e = item.event
     return (
@@ -138,12 +182,21 @@ function TimelineRow({ item, canEdit, onDone }: { item: TimelineItem; canEdit: b
   const a = item.activity
   const Icon = ICON[a.type]
   const overdue = a.type === 'task' && !a.done_at && !!a.due_at && new Date(a.due_at).getTime() < Date.now()
+
+  if (editing === a.id) return <RowEditor activity={a} pending={pending} onCancel={() => onEdit(null)} onSave={(patch) => onSave(a.id, patch)} />
+
   return (
     <li className="flex items-start gap-2 rounded-md bg-muted/30 px-2 py-1.5 text-xs">
       <Icon className={cn('mt-0.5 size-3.5 shrink-0', overdue ? 'text-destructive' : 'text-muted-foreground')} />
       <span className="min-w-0 flex-1">
         <span className={cn('font-medium', a.done_at && 'text-muted-foreground line-through')}>{describeActivity(a)}</span>
         {a.body && <span className="block truncate text-muted-foreground" title={a.body}>{a.body}</span>}
+        {a.location && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <MapPin className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{a.location}</span>
+          </span>
+        )}
         <span className="block text-muted-foreground">
           <span className="tabular-nums">{when.format(new Date(a.started_at ?? a.created_at))}</span>
           {a.actor_name ? ` · ${a.actor_name}` : ''}
@@ -152,11 +205,20 @@ function TimelineRow({ item, canEdit, onDone }: { item: TimelineItem; canEdit: b
         </span>
       </span>
       {a.type === 'meeting' && a.started_at && (
-        <Button size="sm" variant="ghost" asChild title="Download the calendar invite">
-          <a href={`${config.apiBaseUrl}/crm/activities/${a.id}/ics`} download>
-            <Download />
-            <span className="sr-only">Download .ics</span>
-          </a>
+        <Button
+          size="sm"
+          variant="ghost"
+          title="Download the calendar invite"
+          onClick={() => {
+            // The endpoint needs the auth header, which a plain link cannot
+            // carry — every one of these used to come back 401.
+            void downloadFile(`/crm/activities/${a.id}/ics`, `meeting-${a.id.slice(0, 8)}.ics`).catch((err: unknown) =>
+              notify.error(err instanceof ApiError ? err.message : 'We could not download the invite.'),
+            )
+          }}
+        >
+          <Download />
+          <span className="sr-only">Download the calendar invite</span>
         </Button>
       )}
       {a.type === 'task' && canEdit && (
@@ -164,6 +226,109 @@ function TimelineRow({ item, canEdit, onDone }: { item: TimelineItem; canEdit: b
           <Check /> {a.done_at ? 'Reopen' : 'Done'}
         </Button>
       )}
+      {canEdit && a.provider === 'manual' && (
+        <Button size="sm" variant="ghost" onClick={() => onEdit(a.id)} title="Edit">
+          <Pencil className="size-3.5" />
+          <span className="sr-only">Edit</span>
+        </Button>
+      )}
+      {canDelete && (
+        <Button size="sm" variant="ghost" onClick={() => onDelete(a)} title="Remove">
+          <Trash2 className="size-3.5" />
+          <span className="sr-only">Remove</span>
+        </Button>
+      )}
+    </li>
+  )
+}
+
+/**
+ * Correcting what was logged. A call noted against the wrong deal, a task
+ * that needs another week, a name typed wrong — all of it used to be
+ * permanent, because the only patch the product ever sent was "done".
+ */
+function RowEditor({
+  activity: a,
+  pending,
+  onCancel,
+  onSave,
+}: {
+  activity: CrmActivity
+  pending: boolean
+  onCancel: () => void
+  onSave: (patch: UpdateActivityRequest) => void
+}) {
+  const { data: members } = useMembers()
+  const [subject, setSubject] = useState(a.subject ?? '')
+  const [body, setBody] = useState(a.body ?? '')
+  const [location, setLocation] = useState(a.location ?? '')
+  const [due, setDue] = useState(a.due_at ? toLocalInput(a.due_at) : '')
+  const [assignee, setAssignee] = useState(a.assigned_to ?? '')
+
+  function save() {
+    const patch: UpdateActivityRequest = {
+      subject: subject.trim() || null,
+      body: body.trim() || null,
+    }
+    if (a.type === 'meeting') patch.location = location.trim() || null
+    if (a.type === 'task') {
+      patch.due_at = due ? new Date(due).toISOString() : null
+      patch.assigned_to = assignee || null
+    }
+    onSave(patch)
+  }
+
+  return (
+    <li className="flex flex-col gap-2 rounded-md bg-muted/40 p-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <Label htmlFor={`ed-subject-${a.id}`}>{a.type === 'task' ? 'Task' : 'Subject'}</Label>
+          <Input id={`ed-subject-${a.id}`} value={subject} onChange={(e) => setSubject(e.target.value)} autoFocus />
+        </div>
+        {a.type === 'task' && (
+          <>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`ed-due-${a.id}`}>Due</Label>
+              <Input id={`ed-due-${a.id}`} type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`ed-who-${a.id}`}>For</Label>
+              <Select id={`ed-who-${a.id}`} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+                <option value="">Nobody in particular</option>
+                {(members ?? []).map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </>
+        )}
+        {a.type === 'meeting' && (
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <Label htmlFor={`ed-where-${a.id}`}>Where</Label>
+            <Input id={`ed-where-${a.id}`} value={location} onChange={(e) => setLocation(e.target.value)} />
+          </div>
+        )}
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <Label htmlFor={`ed-body-${a.id}`}>Details</Label>
+          <textarea
+            id={`ed-body-${a.id}`}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={2}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          <X /> Cancel
+        </Button>
+        <Button size="sm" disabled={pending} onClick={save}>
+          Save
+        </Button>
+      </div>
     </li>
   )
 }

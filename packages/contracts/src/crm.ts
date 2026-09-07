@@ -1009,6 +1009,7 @@ export const crmActivity = z.object({
   lead_id: uuid.nullable(),
   lead_name: z.string().nullable().default(null),
   contact_id: uuid.nullable(),
+  contact_name: z.string().nullable().default(null),
   type: activityType,
   direction: activityDirection,
   subject: z.string().nullable(),
@@ -1025,6 +1026,8 @@ export const crmActivity = z.object({
   actor_name: z.string().nullable().default(null),
   provider: activityProvider,
   external_id: z.string().nullable().default(null),
+  /** Where a meeting is; collected by the form and kept on the row. */
+  location: z.string().nullable().default(null),
   created_at: isoDateTime,
 })
 export type CrmActivity = z.infer<typeof crmActivity>
@@ -1064,6 +1067,7 @@ export type CreateActivityRequest = z.infer<typeof createActivityRequest>
 
 export const updateActivityRequest = z.object({
   subject: z.string().trim().max(200).nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
   body: z.string().max(8000).nullable().optional(),
   outcome: z.string().trim().max(60).nullable().optional(),
   started_at: isoDateTime.nullable().optional(),

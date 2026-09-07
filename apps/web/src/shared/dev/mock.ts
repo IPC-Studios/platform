@@ -1741,6 +1741,7 @@ const activityFx = (id: string, over: Partial<Record<string, unknown>>) => ({
   lead_id: uid(0xb1),
   lead_name: 'Priya & Arjun',
   contact_id: uid(0xdf),
+  contact_name: 'Aanya Sharma',
   type: 'note',
   direction: 'none',
   subject: null,
@@ -1757,13 +1758,14 @@ const activityFx = (id: string, over: Partial<Record<string, unknown>>) => ({
   actor_name: 'Demo Owner',
   provider: 'manual',
   external_id: null,
+  location: null,
   created_at: '2026-09-04T09:00:00Z',
   ...over,
 })
 const crmActivitiesFx = [
   activityFx(uid(0xe2), { type: 'call', direction: 'out', outcome: 'answered', duration_s: 660, body: 'Wants two photographers and a drone.' }),
   activityFx(uid(0xe3), { type: 'task', subject: 'Send the album mock-up', due_at: '2026-09-05T04:30:00Z', created_at: '2026-09-03T09:00:00Z' }),
-  activityFx(uid(0xe4), { type: 'meeting', direction: 'out', subject: 'Venue recce', started_at: '2026-09-10T04:30:00Z', ended_at: '2026-09-10T05:30:00Z', created_at: '2026-09-02T09:00:00Z' }),
+  activityFx(uid(0xe4), { type: 'meeting', direction: 'out', subject: 'Venue recce', location: 'Taj Lands End, Bandra', started_at: '2026-09-10T04:30:00Z', ended_at: '2026-09-10T05:30:00Z', created_at: '2026-09-02T09:00:00Z' }),
   activityFx(uid(0xe5), { type: 'whatsapp', direction: 'in', subject: 'Yes, Sunday works', provider: 'whatsapp', created_at: '2026-09-01T12:00:00Z', lead_id: uid(0xb2), lead_name: 'Meera' }),
 ]
 const crmTimelineFx = {
