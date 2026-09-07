@@ -210,9 +210,12 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'GET' && path === '/team/role-library') return roleLibraryFx
   if (method === 'GET' && path === '/team/roles') return atStage(employeeRoles, 'partial')
+  // Echoes the request so a role added from the library comes back under the
+  // name that was tapped, not a placeholder.
   if (method === 'POST' && path === '/team/roles')
-    return { id: uid(0xfa), type_name: 'New Role', role_code: 'new_role', member_count: 0 }
+    return { id: uid(0xfa), stage: null, member_count: 0, ...(body as object) }
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/team/roles/')) return { ok: true }
   if (method === 'PATCH' && /^\/team\/members\/[^/]+\/roles$/.test(path)) return { ok: true }
   if (method === 'POST' && path === '/team/members')
@@ -957,9 +960,36 @@ const companyFx = {
 const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
 
 const employeeRoles = [
-  { id: ROLE.photographer, type_name: 'Photographer', role_code: 'photographer', member_count: 2 },
-  { id: ROLE.editor, type_name: 'Editor', role_code: 'editor', member_count: 1 },
-  { id: ROLE.drone, type_name: 'Drone Operator', role_code: 'drone_operator', member_count: 1 },
+  {
+    id: ROLE.photographer,
+    type_name: 'Photographer',
+    role_code: 'photographer',
+    stage: 'production' as const,
+    member_count: 2,
+  },
+  // Unstaged on purpose: this is the shape of a role saved before the stage
+  // column existed, and the page has to file it by name.
+  { id: ROLE.editor, type_name: 'Editor', role_code: 'editor', stage: null, member_count: 1 },
+  {
+    id: ROLE.drone,
+    type_name: 'Drone Operator',
+    role_code: 'drone_operator',
+    stage: 'production' as const,
+    member_count: 1,
+  },
+]
+
+const roleLibraryFx = [
+  { id: uid(0xa1), type_name: 'Client Coordinator', role_code: 'client_coordinator', stage: 'pre' as const },
+  { id: uid(0xa2), type_name: 'Creative Director', role_code: 'creative_director', stage: 'pre' as const },
+  { id: uid(0xa3), type_name: 'Candid Photographer', role_code: 'candid_photographer', stage: 'production' as const },
+  { id: uid(0xa4), type_name: 'Cinematographer', role_code: 'cinematographer', stage: 'production' as const },
+  { id: uid(0xa5), type_name: 'Drone Operator', role_code: 'drone_operator', stage: 'production' as const },
+  { id: uid(0xa6), type_name: 'Lighting Technician', role_code: 'lighting_technician', stage: 'production' as const },
+  { id: uid(0xa7), type_name: 'Same Day Video Editor', role_code: 'same_day_video_editor', stage: 'post' as const },
+  { id: uid(0xa8), type_name: 'Album Designer', role_code: 'album_designer', stage: 'post' as const },
+  { id: uid(0xa9), type_name: 'Data Manager', role_code: 'data_manager', stage: 'post' as const },
+  { id: uid(0xaa), type_name: 'Operations Manager', role_code: 'operations_manager', stage: 'other' as const },
 ]
 
 /** One of each shape the directory has to render: owner, staff, freelancer, no-login. */

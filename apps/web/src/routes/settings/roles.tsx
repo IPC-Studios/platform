@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
-import type { DirectoryMember, EmployeeRole } from '@ipc/contracts'
+import type { DirectoryMember, EmployeeRole, LibraryRole, ProductionStage } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
@@ -11,7 +11,7 @@ import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { HowToUse } from '@/shared/ui/how-to-use'
-import { Input, Label } from '@/shared/ui/input'
+import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { cn } from '@/shared/ui/cn'
@@ -22,8 +22,10 @@ import {
   useDeleteRole,
   useDirectory,
   useEmployeeRoles,
+  useRoleLibrary,
   useUpdateRole,
 } from '@/features/team/api'
+import { STAGE_LABEL, STAGE_ORDER, byStage, stageOf } from '@/features/team/role-stages'
 
 /** "Drone Operator" → "drone_operator", the code the API stores alongside it. */
 const toCode = (name: string): string =>
@@ -84,24 +86,45 @@ function RolesAccess() {
               action={isOwner ? <RoleDialog /> : undefined}
             />
           ) : (
-            <ul className="divide-y divide-border">
-              {roles.data.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <ShieldCheck className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{r.type_name}</p>
-                    <p className="truncate font-mono text-xs text-muted-foreground">{r.role_code}</p>
+            /* Grouped by stage, so the list reads the way the work runs
+               rather than alphabetically — where an album designer sits next
+               to an assistant photographer they will never share a day with. */
+            <div className="flex flex-col gap-5">
+              {byStage(roles.data)
+                .filter((group) => group.roles.length > 0)
+                .map((group) => (
+                  <div key={group.stage}>
+                    <p className="mb-1 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {group.label}
+                    </p>
+                    <ul className="divide-y divide-border">
+                      {group.roles.map((r) => (
+                        <li
+                          key={r.id}
+                          className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
+                        >
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <ShieldCheck className="size-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{r.type_name}</p>
+                            <p className="truncate font-mono text-xs text-muted-foreground">
+                              {r.role_code}
+                            </p>
+                          </div>
+                          <StatusBadge>
+                            {r.member_count} {r.member_count === 1 ? 'member' : 'members'}
+                          </StatusBadge>
+                          {isOwner && <RoleRowActions role={r} />}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <StatusBadge>
-                    {r.member_count} {r.member_count === 1 ? 'member' : 'members'}
-                  </StatusBadge>
-                  {isOwner && <RoleRowActions role={r} />}
-                </li>
-              ))}
-            </ul>
+                ))}
+            </div>
           )}
+
+          {isOwner && <RoleLibrary owned={roles.data ?? []} />}
         </CardContent>
       </Card>
 
@@ -146,6 +169,58 @@ function RolesAccess() {
   )
 }
 
+/**
+ * The standard roles a photography studio books, one tap each.
+ *
+ * The catalogue is platform-owned, but picking one *copies* it into the
+ * studio's own roles rather than pointing at it — so renaming "Drone Operator"
+ * to whatever this studio calls it stays this studio's business. Roles already
+ * on the list drop out of the chips.
+ */
+function RoleLibrary({ owned }: { owned: readonly EmployeeRole[] }) {
+  const library = useRoleLibrary()
+  const create = useCreateRole()
+  const taken = new Set(owned.map((r) => r.role_code))
+  const groups = (library.data ?? [])
+    .filter((r) => !taken.has(r.role_code))
+    .reduce<Map<ProductionStage, LibraryRole[]>>((acc, r) => {
+      acc.set(r.stage, [...(acc.get(r.stage) ?? []), r])
+      return acc
+    }, new Map())
+
+  if (groups.size === 0) return null
+
+  return (
+    <div className="mt-6 rounded-lg border border-border bg-muted/30 p-3">
+      <p className="text-sm font-medium">Add from the library</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        The roles most studios book. Tap one to add it — you can rename it afterwards.
+      </p>
+      <div className="flex flex-col gap-2">
+        {STAGE_ORDER.filter((stage) => groups.has(stage)).map((stage) => (
+          <div key={stage} className="flex flex-wrap items-center gap-2">
+            <span className="w-32 shrink-0 text-xs text-muted-foreground">{STAGE_LABEL[stage]}</span>
+            {groups.get(stage)?.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                disabled={create.isPending}
+                onClick={() =>
+                  create.mutate({ type_name: r.type_name, role_code: r.role_code, stage: r.stage })
+                }
+                className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-60"
+              >
+                <Plus className="size-3.5" aria-hidden />
+                {r.type_name}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function RoleRowActions({ role }: { role: EmployeeRole }) {
   const del = useDeleteRole()
   const confirm = useConfirm()
@@ -183,11 +258,20 @@ function RoleDialog({ role }: { role?: EmployeeRole }) {
   const [name, setName] = useState(role?.type_name ?? '')
   const [code, setCode] = useState(role?.role_code ?? '')
   const [codeTouched, setCodeTouched] = useState(editing)
+  // An existing role with no saved stage shows the one its name implies, so
+  // saving the dialog settles it rather than leaving the guess in place.
+  const [stage, setStage] = useState<ProductionStage>(
+    role ? stageOf(role) : 'production',
+  )
   const busy = create.isPending || update.isPending
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
-    const body = { type_name: name.trim(), role_code: (codeTouched ? code : toCode(name)).trim() }
+    const body = {
+      type_name: name.trim(),
+      role_code: (codeTouched ? code : toCode(name)).trim(),
+      stage,
+    }
     const done = { onSuccess: () => setOpen(false) }
     if (editing) update.mutate({ id: role.id, patch: body }, done)
     else create.mutate(body, done)
@@ -244,6 +328,19 @@ function RoleDialog({ role }: { role?: EmployeeRole }) {
             />
             <p className="text-xs text-muted-foreground">
               Lowercase letters, numbers and underscores.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Part of the job</Label>
+            <Select value={stage} onChange={(e) => setStage(e.target.value as ProductionStage)}>
+              {STAGE_ORDER.map((s) => (
+                <option key={s} value={s}>
+                  {STAGE_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Only used to group this list.
             </p>
           </div>
           <div className="flex justify-end gap-2">
