@@ -267,7 +267,7 @@ function ProjectsList() {
                 key={p.id}
                 to="/projects/$id"
                 params={{ id: p.id }}
-                className="rounded-lg border border-border p-4"
+                className="lift rounded-lg border border-border p-4"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">{p.name}</span>
