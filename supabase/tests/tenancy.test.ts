@@ -66,6 +66,7 @@ async function freshDb() {
   await db.exec(mig('0030_attendance_ops.sql'))
   await db.exec(mig('0031_task_bundles.sql'))
   await db.exec(mig('0032_shoot_details.sql'))
+  await db.exec(mig('0033_deliverable_sets.sql'))
   return db
 }
 
@@ -1899,5 +1900,48 @@ describe('shoot details (0032)', () => {
          values ('${company.rows[0]!.id}', 'moodboard', 'x');`,
       ),
     ).rejects.toThrow()
+  })
+})
+
+describe('deliverable sets (0033)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('policies sets the way every other company-scoped table is', async () => {
+    const policies = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies where tablename = 'deliverable_sets';`,
+    )
+    expect(policies.rows.map((p) => p.policyname).sort()).toEqual([
+      'deliverable_sets_select',
+      'deliverable_sets_write',
+    ])
+  })
+
+  it('keeps one set per name, so saving over a package replaces it', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into deliverable_sets (company_id, name, items)
+       values ('${id}', 'Premium', '[{"title": "Photo Album"}]'::jsonb);`,
+    )
+    await expect(
+      db.query(
+        `insert into deliverable_sets (company_id, name, items)
+         values ('${id}', 'Premium', '[]'::jsonb);`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('goes with the company', async () => {
+    const before = await db.query(`select 1 from deliverable_sets;`)
+    expect(before.rows.length).toBeGreaterThan(0)
+    await db.exec(`delete from companies;`)
+    const after = await db.query(`select 1 from deliverable_sets;`)
+    expect(after.rows).toHaveLength(0)
   })
 })
