@@ -373,6 +373,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/workflows') return { ...crmWorkflowsFx[0], id: uid(0xf5), ...(body as Record<string, unknown>), steps: crmWorkflowsFx[0]!.steps }
   if (method === 'POST' && /^\/crm\/workflows\/[^/]+\/enroll$/.test(path)) return { enrolled: 1 }
   if (method === 'GET' && /^\/crm\/workflows\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx
+  if (method === 'GET' && path === '/crm/outbox') return crmOutboxFx
   if (method === 'GET' && /^\/crm\/leads\/[^/]+\/enrollments$/.test(path)) return crmEnrollmentsFx.filter((e) => e.status === 'active')
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/workflows/')) return {}
   if (method === 'POST' && path.startsWith('/crm/enrollments/')) return {}
@@ -1829,9 +1830,34 @@ const crmWorkflowsFx = [
   },
 ]
 const crmEnrollmentsFx = [
-  { id: uid(0xf8), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb1), lead_name: 'Priya & Arjun', current_step: 3, next_at: '2026-09-06T09:00:00Z', status: 'active', exit_reason: null, steps_run: 2, enrolled_at: '2026-09-04T09:00:00Z' },
-  { id: uid(0xf9), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb2), lead_name: 'Meera', current_step: 5, next_at: null, status: 'completed', exit_reason: null, steps_run: 4, enrolled_at: '2026-08-20T09:00:00Z' },
+  { id: uid(0xf8), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb1), lead_name: 'Priya & Arjun', current_step: 3, next_at: '2026-09-06T09:00:00Z', status: 'active', exit_reason: null, steps_run: 2, log: [{ step: 1, kind: 'action', result: 'mark_hot', at: '2026-09-04T09:00:00Z' }, { step: 2, kind: 'delay', at: '2026-09-04T09:00:01Z' }], enrolled_at: '2026-09-04T09:00:00Z' },
+  { id: uid(0xf9), workflow_id: WF, workflow_name: 'Facebook nurture', lead_id: uid(0xb2), lead_name: 'Meera', current_step: 5, next_at: null, status: 'completed', exit_reason: null, steps_run: 4, log: [{ step: 1, kind: 'action', result: 'mark_hot', at: '2026-08-20T09:00:00Z' }], enrolled_at: '2026-08-20T09:00:00Z' },
 ]
+const crmOutboxFx = [
+  {
+    id: uid(0xb7),
+    lead_id: uid(0xb1),
+    lead_name: 'Priya & Arjun',
+    template_name: 'First follow-up',
+    channel: 'whatsapp',
+    status: 'manual',
+    error: null,
+    created_at: '2026-09-04T09:05:00Z',
+    sent_at: '2026-09-04T10:00:00Z',
+  },
+  {
+    id: uid(0xb8),
+    lead_id: uid(0xb2),
+    lead_name: 'Meera',
+    template_name: 'First follow-up',
+    channel: 'whatsapp',
+    status: 'failed',
+    error: 'whatsapp send failed 401: check the access token',
+    created_at: '2026-09-03T09:05:00Z',
+    sent_at: null,
+  },
+]
+
 const crmScoringFx = [
   { id: uid(0xfa), label: 'Has an email address', field: 'has_email', op: 'eq', value: true, points: 10, is_active: true, position: 0 },
   { id: uid(0xfb), label: 'Came by referral', field: 'source', op: 'eq', value: 'referral', points: 15, is_active: true, position: 1 },

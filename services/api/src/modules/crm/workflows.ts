@@ -10,6 +10,7 @@ import {
   updateScoringRuleRequest,
   updateWorkflowRequest,
   workflow,
+  outboxRow,
   workflowEnrollment,
   type WorkflowStepInput,
 } from '@ipc/contracts'
@@ -43,7 +44,7 @@ const selectWorkflows = (sql: TransactionSql) => sql`
 
 const selectEnrollments = (sql: TransactionSql) => sql`
   select e.id, e.workflow_id, w.name as workflow_name, e.lead_id, l.name as lead_name, e.current_step, e.next_at,
-         e.status, e.exit_reason, e.steps_run, e.enrolled_at
+         e.status, e.exit_reason, e.steps_run, e.log, e.enrolled_at
   from crm_workflow_enrollments e
   join crm_workflows w on w.id = e.workflow_id
   left join crm_leads l on l.id = e.lead_id`
@@ -174,6 +175,26 @@ export const crmWorkflowsRouter = new Hono<AppEnv>()
     if (!rows.length) fail(404, 'That enrollment is not active.')
     await audit(c, { action: 'workflow.exit', entityType: 'crm_workflow_enrollment', entityId: id })
     return c.body(null, 204)
+  })
+
+  /**
+   * What the workflows queued and whether it went. A send_template step
+   * lands in the outbox and the hourly tick drains it; a failure there used
+   * to exist only in a server log, so a studio saw nothing at all.
+   */
+  .get('/outbox', async (c) => {
+    const rows = await attempt(c, 'crm.outbox', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select o.id, o.lead_id, l.name as lead_name, t.name as template_name, o.channel, o.status, o.error,
+               o.created_at, o.sent_at
+        from crm_outbox o
+        left join crm_leads l on l.id = o.lead_id
+        left join crm_templates t on t.id = o.template_id
+        order by o.created_at desc
+        limit 100`),
+    )
+    if (!rows) fail(400, 'We could not load the message queue.')
+    return c.json(outboxRow.array().parse(rows))
   })
 
   // ── Scoring ─────────────────────────────────────────────────

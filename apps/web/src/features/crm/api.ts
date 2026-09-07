@@ -30,6 +30,7 @@ import {
   enrollWorkflowResponse,
   recomputeScoresResponse,
   scoringRule,
+  outboxRow,
   workflow,
   workflowEnrollment,
   crmStats,
@@ -737,6 +738,11 @@ export function useExitEnrollment() {
     (id: string) => callApi(`/crm/enrollments/${id}/exit`, { method: 'POST', body: {}, responseSchema: noContent }),
     'Stopped',
   )
+}
+
+/** What workflows queued to send, and what became of it. */
+export function useCrmOutbox() {
+  return useCrmQuery(['outbox'], () => callApi('/crm/outbox', { responseSchema: outboxRow.array() }), 30_000)
 }
 
 // ── scoring ───────────────────────────────────────────────────

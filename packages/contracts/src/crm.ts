@@ -561,6 +561,15 @@ export type CreateWorkflowRequest = z.infer<typeof createWorkflowRequest>
 export const updateWorkflowRequest = createWorkflowRequest.partial()
 export type UpdateWorkflowRequest = z.infer<typeof updateWorkflowRequest>
 
+/** One line of what an enrollment actually did, kept per step. */
+export const enrollmentStep = z.object({
+  step: z.number().int(),
+  kind: z.enum(['action', 'delay', 'branch', 'exit']),
+  result: z.string().nullable().optional(),
+  at: isoDateTime,
+})
+export type EnrollmentStep = z.infer<typeof enrollmentStep>
+
 export const workflowEnrollment = z.object({
   id: uuid,
   workflow_id: uuid,
@@ -572,6 +581,8 @@ export const workflowEnrollment = z.object({
   status: z.enum(['active', 'completed', 'exited', 'errored']),
   exit_reason: z.string().nullable(),
   steps_run: z.number().int(),
+  /** The trail the executor writes; empty until a step has run. */
+  log: z.array(enrollmentStep).default([]),
   enrolled_at: isoDateTime,
 })
 export type WorkflowEnrollment = z.infer<typeof workflowEnrollment>
@@ -581,6 +592,23 @@ export type EnrollWorkflowRequest = z.infer<typeof enrollWorkflowRequest>
 
 export const enrollWorkflowResponse = z.object({ enrolled: z.number().int() })
 export type EnrollWorkflowResponse = z.infer<typeof enrollWorkflowResponse>
+
+/**
+ * A template a workflow asked to send. The API drains this on the hourly
+ * tick; when it cannot, the failure lived only in a server log.
+ */
+export const outboxRow = z.object({
+  id: uuid,
+  lead_id: uuid,
+  lead_name: z.string().nullable().default(null),
+  template_name: z.string().nullable().default(null),
+  channel: z.enum(['whatsapp', 'email']),
+  status: z.enum(['pending', 'sent', 'manual', 'failed']),
+  error: z.string().nullable(),
+  created_at: isoDateTime,
+  sent_at: isoDateTime.nullable(),
+})
+export type OutboxRow = z.infer<typeof outboxRow>
 
 // ── scoring ───────────────────────────────────────────────────
 export const scoringRule = z.object({

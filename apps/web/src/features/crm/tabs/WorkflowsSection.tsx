@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, GitBranch, Plus, Timer, Trash2, Workflow as WorkflowIcon, X, Zap } from 'lucide-react'
+import { ArrowDown, ArrowUp, GitBranch, Plus, Send, Square, Timer, Trash2, Workflow as WorkflowIcon, X, Zap } from 'lucide-react'
 import {
   createWorkflowRequest,
   type ConditionOp,
@@ -25,7 +25,9 @@ import { useMembers } from '@/features/allocation/api'
 import {
   useCadences,
   useCreateWorkflow,
+  useCrmOutbox,
   useDeleteWorkflow,
+  useExitEnrollment,
   usePipelines,
   useTemplates,
   useUpdateWorkflow,
@@ -188,11 +190,13 @@ export function WorkflowsSection() {
                   </Button>
                 )}
               </div>
-              {showRuns === w.id && <Enrollments workflowId={w.id} />}
+              {showRuns === w.id && <Enrollments workflowId={w.id} canEdit={canEdit} />}
             </li>
           ))}
         </ul>
       )}
+
+      <Outbox />
     </div>
   )
 }
@@ -218,24 +222,101 @@ function useNames(): Names {
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-function Enrollments({ workflowId }: { workflowId: string }) {
+function Enrollments({ workflowId, canEdit }: { workflowId: string; canEdit: boolean }) {
   const { data, isLoading } = useWorkflowEnrollments(workflowId)
+  const exit = useExitEnrollment()
+  const [showLog, setShowLog] = useState<string | null>(null)
+  const active = (data ?? []).filter((e) => e.status === 'active')
+
   if (isLoading) return <p className="mt-2 text-xs text-muted-foreground">Loading…</p>
   if (!data || data.length === 0) return <p className="mt-2 text-xs text-muted-foreground">Nobody has been through this workflow yet.</p>
   return (
-    <ul className="mt-3 divide-y divide-border border-t border-border text-xs">
-      {data.slice(0, 30).map((e) => (
-        <li key={e.id} className="flex flex-wrap items-center gap-2 py-1.5">
-          <span className="min-w-0 flex-1 truncate">{e.lead_name ?? e.lead_id}</span>
-          <StatusBadge tone={e.status === 'active' ? 'info' : e.status === 'completed' ? 'success' : e.status === 'errored' ? 'danger' : 'neutral'}>{e.status}</StatusBadge>
-          <span className="text-muted-foreground">
-            step {e.current_step} · {e.steps_run} run
-            {e.next_at && e.status === 'active' ? ` · next ${when.format(new Date(e.next_at))}` : ''}
-            {e.exit_reason ? ` · ${e.exit_reason}` : ''}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <div className="mt-3 border-t border-border">
+      {canEdit && active.length > 1 && (
+        <div className="flex justify-end py-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={exit.isPending}
+            onClick={() => active.forEach((e) => exit.mutate(e.id))}
+          >
+            Stop all {active.length}
+          </Button>
+        </div>
+      )}
+      <ul className="divide-y divide-border text-xs">
+        {data.slice(0, 30).map((e) => (
+          <li key={e.id} className="py-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate">{e.lead_name ?? e.lead_id}</span>
+              <StatusBadge tone={e.status === 'active' ? 'info' : e.status === 'completed' ? 'success' : e.status === 'errored' ? 'danger' : 'neutral'}>{e.status}</StatusBadge>
+              <span className="text-muted-foreground">
+                step {e.current_step} · {e.steps_run} run
+                {e.next_at && e.status === 'active' ? ` · next ${when.format(new Date(e.next_at))}` : ''}
+                {e.exit_reason ? ` · ${e.exit_reason}` : ''}
+              </span>
+              {e.log.length > 0 && (
+                <button type="button" className="text-muted-foreground hover:underline" onClick={() => setShowLog(showLog === e.id ? null : e.id)}>
+                  {showLog === e.id ? 'hide steps' : 'steps'}
+                </button>
+              )}
+              {canEdit && e.status === 'active' && (
+                <Button size="sm" variant="ghost" disabled={exit.isPending} onClick={() => exit.mutate(e.id)}>
+                  <Square className="size-3" /> Stop
+                </Button>
+              )}
+            </div>
+            {/* The executor writes a line per step; when one errors this is
+                the only place that says which. */}
+            {showLog === e.id && (
+              <ol className="mt-1 flex flex-col gap-0.5 pl-4 text-muted-foreground">
+                {e.log.map((l, i) => (
+                  <li key={i}>
+                    <span className="tabular-nums">{when.format(new Date(l.at))}</span> · step {l.step} · {l.kind}
+                    {l.result ? ` → ${l.result}` : ''}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** What the workflows queued to send, and what became of it. */
+function Outbox() {
+  const { data, isLoading } = useCrmOutbox()
+  const rows = data ?? []
+  const failed = rows.filter((r) => r.status === 'failed')
+  if (isLoading || rows.length === 0) return null
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="flex items-center gap-2 font-medium">
+          <Send className="size-4 text-muted-foreground" /> Messages workflows queued
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          A send step queues here and the hourly job delivers it — or leaves it as a task for the deal's owner when WhatsApp is not connected.
+          {failed.length > 0 ? ` ${failed.length} could not be sent.` : ''}
+        </p>
+        <ul className="mt-3 divide-y divide-border text-xs">
+          {rows.slice(0, 12).map((r) => (
+            <li key={r.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="min-w-0 flex-1 truncate">
+                {r.template_name ?? 'Template'} → {r.lead_name ?? 'a deal'} · {r.channel}
+              </span>
+              <StatusBadge tone={r.status === 'sent' ? 'success' : r.status === 'failed' ? 'danger' : r.status === 'manual' ? 'warning' : 'neutral'}>
+                {r.status === 'manual' ? 'left as a task' : r.status}
+              </StatusBadge>
+              <span className="tabular-nums text-muted-foreground">{when.format(new Date(r.sent_at ?? r.created_at))}</span>
+              {r.error && <span className="w-full truncate text-destructive" title={r.error}>{r.error}</span>}
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   )
 }
 
