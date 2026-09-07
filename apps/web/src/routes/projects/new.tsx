@@ -849,6 +849,15 @@ function AddShootMenu({
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const services = useServices()
   const shootPresets = useShootPresets('shoot')
+  const listRef = useRef<HTMLDivElement>(null)
+  // The chips sit above a list that can already be several cards long, so a
+  // shoot added from up there would otherwise land off the bottom of the
+  // screen. Only a growing list scrolls — arriving on the step should not.
+  const count = useRef(draft.shoots.length)
+  useEffect(() => {
+    if (draft.shoots.length > count.current) scrollIntoView(listRef.current?.lastElementChild ?? null)
+    count.current = draft.shoots.length
+  }, [draft.shoots.length])
 
   const set = (i: number, p: Partial<ShootDraft>) =>
     patch({ shoots: draft.shoots.map((s, idx) => (idx === i ? { ...s, ...p } : s)) })
@@ -930,7 +939,7 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
               disabled={already}
               title={already ? `${name} is already on the schedule` : undefined}
               className={cn(
-                'flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
+                'press flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
                 already
                   ? 'cursor-not-allowed text-muted-foreground opacity-60'
                   : 'hover:border-primary hover:bg-primary/10 hover:text-primary',
@@ -953,7 +962,7 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div ref={listRef} className="flex flex-col gap-3">
           {draft.shoots.map((s, i) => (
             <ShootCard
               key={i}
@@ -1193,7 +1202,7 @@ function ShootCard({
   return (
     <div
       className={cn(
-        'rounded-lg border p-4',
+        'card-enter rounded-lg border p-4',
         issues.length ? 'border-destructive/25 bg-destructive/5' : 'border-border',
       )}
     >
@@ -1397,7 +1406,7 @@ function InternalWorkBlock({
           {work.map(({ at, item }) => (
             <li
               key={at}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
+              className="card-enter flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
             >
               <CheckCircle2 className="size-3.5 shrink-0 text-primary" aria-hidden />
               <span className="font-medium">{item.title.trim() || 'Untitled'}</span>
@@ -1469,7 +1478,7 @@ function InternalWorkBlock({
               key={title}
               type="button"
               onClick={() => addTitles([title])}
-              className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+              className="press flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
             >
               <Plus className="size-3.5" aria-hidden />
               {title}
@@ -1979,7 +1988,7 @@ function DeliverableRow({
   const due = estimatedDateFor(draft, item)
 
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="card-enter rounded-lg border border-border p-4">
       <div className="mb-3 flex items-center gap-2">
         <Package className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">{item.title.trim() || 'Untitled deliverable'}</span>
