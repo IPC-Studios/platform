@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import type { DirectoryMember, EmployeeRole, LibraryRole, ProductionStage } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -25,7 +25,7 @@ import {
   useRoleLibrary,
   useUpdateRole,
 } from '@/features/team/api'
-import { STAGE_LABEL, STAGE_ORDER, byStage, stageOf } from '@/features/team/role-stages'
+import { STAGE_LABEL, STAGE_ORDER, stageOf } from '@/features/team/role-stages'
 
 /** "Drone Operator" → "drone_operator", the code the API stores alongside it. */
 const toCode = (name: string): string =>
@@ -60,78 +60,38 @@ function RolesAccess() {
       <SettingsTabs />
 
       <HowToUse
-        title="Two kinds of role"
-        description="Access level decides what someone can see. Job roles decide what they get booked for."
+        title="Create work roles"
+        description="Job roles say what a person does. Access level, set on the member, says what they can open."
         steps={[
-          'Create the job roles your studio actually books.',
-          'Assign them to each team member.',
-          'Book by role when you plan a shoot.',
+          'Pick roles like Photographer, Editor or Cinematographer.',
+          'Keep them grouped by the stage of work they belong to.',
+          'Assign them while adding a team member, or below.',
         ]}
       />
 
       <Card className="mt-6">
-        <CardHeader className="pb-4">
-          <CardTitle>Job roles</CardTitle>
-          <CardDescription>Photographer, Editor, Drone Operator — whatever you book.</CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 pb-4">
+          <div>
+            <CardTitle>Role library</CardTitle>
+            <CardDescription>Grouped by the stage of production they belong to.</CardDescription>
+          </div>
+          {isOwner && <RoleDialog />}
         </CardHeader>
         <CardContent>
           {roles.isLoading ? (
             <SkeletonCards count={3} />
           ) : roles.isError ? (
             <ErrorState onRetry={() => void roles.refetch()} />
-          ) : !roles.data || roles.data.length === 0 ? (
-            <EmptyState
-              title="No job roles yet"
-              description="Create your first role to start assigning people to shoots by what they do."
-              action={isOwner ? <RoleDialog /> : undefined}
-            />
           ) : (
-            /* Grouped by stage, so the list reads the way the work runs
-               rather than alphabetically — where an album designer sits next
-               to an assistant photographer they will never share a day with. */
-            <div className="flex flex-col gap-5">
-              {byStage(roles.data)
-                .filter((group) => group.roles.length > 0)
-                .map((group) => (
-                  <div key={group.stage}>
-                    <p className="mb-1 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {group.label}
-                    </p>
-                    <ul className="divide-y divide-border">
-                      {group.roles.map((r) => (
-                        <li
-                          key={r.id}
-                          className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
-                        >
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <ShieldCheck className="size-4" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium">{r.type_name}</p>
-                            <p className="truncate font-mono text-xs text-muted-foreground">
-                              {r.role_code}
-                            </p>
-                          </div>
-                          <StatusBadge>
-                            {r.member_count} {r.member_count === 1 ? 'member' : 'members'}
-                          </StatusBadge>
-                          {isOwner && <RoleRowActions role={r} />}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-            </div>
+            <RoleGrid owned={roles.data ?? []} isOwner={isOwner} />
           )}
-
-          {isOwner && <RoleLibrary owned={roles.data ?? []} />}
         </CardContent>
       </Card>
 
       <Card className="mt-6">
         <CardHeader className="pb-4">
-          <CardTitle>Who holds what</CardTitle>
-          <CardDescription>Assign job roles to each member of your team.</CardDescription>
+          <CardTitle>Role assignments</CardTitle>
+          <CardDescription>Assign roles to existing team members.</CardDescription>
         </CardHeader>
         <CardContent>
           {directory.isLoading ? (
@@ -170,53 +130,106 @@ function RolesAccess() {
 }
 
 /**
- * The standard roles a photography studio books, one tap each.
+ * Every role a studio could book, in one grid: the ones they have made, and
+ * the platform defaults they have not.
  *
- * The catalogue is platform-owned, but picking one *copies* it into the
- * studio's own roles rather than pointing at it — so renaming "Drone Operator"
- * to whatever this studio calls it stays this studio's business. Roles already
- * on the list drop out of the chips.
+ * Two lists would ask the reader to care which side of that line a role sits
+ * on before they can find it. They are the same choice — "Candid
+ * Photographer" is Candid Photographer either way — so it is one grid, and the
+ * Default badge is the only thing separating them. Tapping a default copies it
+ * into the studio's own roles; it does not point at the catalogue, so renaming
+ * it afterwards is nobody else's business.
  */
-function RoleLibrary({ owned }: { owned: readonly EmployeeRole[] }) {
+function RoleGrid({ owned, isOwner }: { owned: readonly EmployeeRole[]; isOwner: boolean }) {
   const library = useRoleLibrary()
   const create = useCreateRole()
   const taken = new Set(owned.map((r) => r.role_code))
-  const groups = (library.data ?? [])
-    .filter((r) => !taken.has(r.role_code))
-    .reduce<Map<ProductionStage, LibraryRole[]>>((acc, r) => {
-      acc.set(r.stage, [...(acc.get(r.stage) ?? []), r])
-      return acc
-    }, new Map())
 
-  if (groups.size === 0) return null
+  type Cell =
+    | { kind: 'owned'; key: string; stage: ProductionStage; role: EmployeeRole }
+    | { kind: 'default'; key: string; stage: ProductionStage; role: LibraryRole }
+
+  const cells: Cell[] = [
+    ...owned.map(
+      (role): Cell => ({ kind: 'owned', key: role.id, stage: stageOf(role), role }),
+    ),
+    // Owners can adopt a default; everyone else would only be looking at a
+    // button they are not allowed to press.
+    ...(isOwner
+      ? (library.data ?? [])
+          .filter((r) => !taken.has(r.role_code))
+          .map((role): Cell => ({ kind: 'default', key: role.role_code, stage: role.stage, role }))
+      : []),
+  ]
+
+  if (cells.length === 0) {
+    return (
+      <EmptyState
+        title="No job roles yet"
+        description="Create your first role to start assigning people to shoots by what they do."
+        action={isOwner ? <RoleDialog /> : undefined}
+      />
+    )
+  }
 
   return (
-    <div className="mt-6 rounded-lg border border-border bg-muted/30 p-3">
-      <p className="text-sm font-medium">Add from the library</p>
-      <p className="mb-3 text-xs text-muted-foreground">
-        The roles most studios book. Tap one to add it — you can rename it afterwards.
-      </p>
-      <div className="flex flex-col gap-2">
-        {STAGE_ORDER.filter((stage) => groups.has(stage)).map((stage) => (
-          <div key={stage} className="flex flex-wrap items-center gap-2">
-            <span className="w-32 shrink-0 text-xs text-muted-foreground">{STAGE_LABEL[stage]}</span>
-            {groups.get(stage)?.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                disabled={create.isPending}
-                onClick={() =>
-                  create.mutate({ type_name: r.type_name, role_code: r.role_code, stage: r.stage })
-                }
-                className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-60"
-              >
-                <Plus className="size-3.5" aria-hidden />
-                {r.type_name}
-              </button>
-            ))}
+    <div className="flex flex-col gap-5">
+      {STAGE_ORDER.map((stage) => {
+        const inStage = cells
+          .filter((c) => c.stage === stage)
+          .sort((a, b) => a.role.type_name.localeCompare(b.role.type_name))
+        if (inStage.length === 0) return null
+        return (
+          <div key={stage}>
+            <p className="mb-2 text-sm font-medium">{STAGE_LABEL[stage]}</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {inStage.map((cell) =>
+                cell.kind === 'owned' ? (
+                  <div key={cell.key} className="rounded-lg border border-border p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 truncate font-medium">{cell.role.type_name}</p>
+                      <StatusBadge>
+                        {cell.role.member_count}{' '}
+                        {cell.role.member_count === 1 ? 'member' : 'members'}
+                      </StatusBadge>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        {STAGE_LABEL[cell.stage]}
+                      </p>
+                      {isOwner && <RoleRowActions role={cell.role} />}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    key={cell.key}
+                    type="button"
+                    disabled={create.isPending}
+                    title={`Add ${cell.role.type_name} to your roles`}
+                    onClick={() =>
+                      create.mutate({
+                        type_name: cell.role.type_name,
+                        role_code: cell.role.role_code,
+                        stage: cell.role.stage,
+                      })
+                    }
+                    className="rounded-lg border border-dashed border-border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:opacity-60"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 truncate font-medium">{cell.role.type_name}</p>
+                      <StatusBadge tone="info">Default</StatusBadge>
+                    </div>
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                      <Plus className="size-3" aria-hidden />
+                      Add to your roles
+                    </p>
+                  </button>
+                ),
+              )}
+            </div>
           </div>
-        ))}
-      </div>
+        )
+      })}
     </div>
   )
 }
