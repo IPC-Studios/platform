@@ -5,9 +5,11 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { cn } from '@/shared/ui/cn'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR, humanize } from '@/shared/ui/format'
+import type { ProductionStage } from '@ipc/contracts'
 import type { FieldErrors } from '@/shared/forms/field-errors'
 import { scrollIntoView } from '@/shared/ui/motion'
-import { useAddMember, useEmployeeRoles } from './api'
+import { useAddMember, useCreateRole, useEmployeeRoles, useRoleLibrary } from './api'
+import { STAGE_LABEL, STAGE_ORDER, stageOf } from './role-stages'
 import {
   EMPTY_DRAFT,
   STEP_LABELS,
@@ -365,10 +367,83 @@ function ContactStep({
   )
 }
 
+/** A role as this step lists it: the studio's own, or one of the defaults. */
+type PickableRole = {
+  key: string
+  type_name: string
+  stage: ProductionStage
+  /** Set once the studio owns it; absent means it still has to be created. */
+  id?: string
+  role_code: string
+}
+
 function RoleStep({ draft, set }: { draft: MemberDraft; set: Setter }) {
   const { data: roles } = useEmployeeRoles()
+  const { data: library } = useRoleLibrary()
+  const create = useCreateRole()
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newStage, setNewStage] = useState<ProductionStage>('production')
+
   const toggle = (id: string) =>
     set('role_ids', draft.role_ids.includes(id) ? draft.role_ids.filter((r) => r !== id) : [...draft.role_ids, id])
+
+  const owned = roles ?? []
+  const taken = new Set(owned.map((r) => r.role_code))
+
+  /**
+   * The studio's roles and the defaults it hasn't taken yet, in one list.
+   *
+   * Two lists would make the person adding a photographer decide first whether
+   * "Candid Photographer" is one of theirs — a question they have no reason to
+   * hold an answer to. They are the same choice, so they are one list, and the
+   * DEFAULT tag is the only thing that distinguishes them.
+   */
+  const pickable: PickableRole[] = [
+    ...owned.map((r) => ({
+      key: r.id,
+      id: r.id,
+      type_name: r.type_name,
+      role_code: r.role_code,
+      stage: stageOf(r),
+    })),
+    ...(library ?? [])
+      .filter((r) => !taken.has(r.role_code))
+      .map((r) => ({ key: r.role_code, type_name: r.type_name, role_code: r.role_code, stage: r.stage })),
+  ]
+
+  /**
+   * Picking a default creates it first, then selects what came back.
+   *
+   * Whoever reaches this screen is the owner — the only person allowed to
+   * create roles — so the alternative is cancelling halfway through adding
+   * someone to go and make a "Drone Operator" first.
+   */
+  const choose = (role: PickableRole) => {
+    if (role.id) {
+      toggle(role.id)
+      return
+    }
+    create.mutate(
+      { type_name: role.type_name, role_code: role.role_code, stage: role.stage },
+      { onSuccess: (made) => set('role_ids', [...draft.role_ids, made.id]) },
+    )
+  }
+
+  function addCustom() {
+    const name = newName.trim()
+    if (name.length < 2) return
+    create.mutate(
+      { type_name: name, role_code: toRoleCode(name), stage: newStage },
+      {
+        onSuccess: (made) => {
+          set('role_ids', [...draft.role_ids, made.id])
+          setNewName('')
+          setAdding(false)
+        },
+      },
+    )
+  }
 
   return (
     <>
@@ -385,33 +460,100 @@ function RoleStep({ draft, set }: { draft: MemberDraft; set: Setter }) {
           </Select>
         </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <Label>Job roles</Label>
-          {roles && roles.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {roles.map((r) => {
-                const on = draft.role_ids.includes(r.id)
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => toggle(r.id)}
-                    aria-pressed={on}
-                    className={cn(
-                      'rounded-full border px-3 py-1.5 text-sm transition-colors',
-                      on
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
-                    )}
-                  >
-                    {r.type_name}
-                  </button>
-                )
-              })}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label>Role / designation</Label>
+            <Button size="sm" variant={adding ? 'outline' : 'default'} onClick={() => setAdding((v) => !v)}>
+              {adding ? 'Cancel' : '+ Add new role'}
+            </Button>
+          </div>
+
+          {adding && (
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+                <Label>Role name</Label>
+                <Input
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addCustom()}
+                  placeholder="Generator Assistant"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Part of the job</Label>
+                <Select
+                  value={newStage}
+                  onChange={(e) => setNewStage(e.target.value as ProductionStage)}
+                >
+                  {STAGE_ORDER.map((s) => (
+                    <option key={s} value={s}>
+                      {STAGE_LABEL[s]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button onClick={addCustom} disabled={newName.trim().length < 2 || create.isPending}>
+                {create.isPending ? 'Adding…' : 'Add'}
+              </Button>
             </div>
-          ) : (
+          )}
+
+          {STAGE_ORDER.map((stage) => {
+            const inStage = pickable
+              .filter((r) => r.stage === stage)
+              .sort((a, b) => a.type_name.localeCompare(b.type_name))
+            if (inStage.length === 0) return null
+            return (
+              <div key={stage}>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">{STAGE_LABEL[stage]}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {inStage.map((r) => {
+                    const on = !!r.id && draft.role_ids.includes(r.id)
+                    return (
+                      <button
+                        key={r.key}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        disabled={create.isPending}
+                        onClick={() => choose(r)}
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-60',
+                          on
+                            ? 'border-primary bg-primary/5 text-foreground'
+                            : 'border-border hover:border-primary/40 hover:bg-accent',
+                        )}
+                      >
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'flex size-4 shrink-0 items-center justify-center rounded-full border',
+                            on ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+                          )}
+                        >
+                          {on && <Check className="size-3" />}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{r.type_name}</span>
+                        {/* The tag is the whole difference between the two
+                            halves of this list: a default is created the
+                            moment it is picked. */}
+                        {!r.id && (
+                          <span className="shrink-0 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Default
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+
+          {pickable.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              No job roles yet. Create them under Roles &amp; Access — you can assign them afterwards.
+              No job roles yet. Add one above, or leave it — roles can be assigned later.
             </p>
           )}
         </div>
@@ -419,6 +561,15 @@ function RoleStep({ draft, set }: { draft: MemberDraft; set: Setter }) {
     </>
   )
 }
+
+/** "Drone Operator" → "drone_operator", the code the API stores alongside it. */
+const toRoleCode = (name: string): string =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
 
 const ACCESS_HINT: Record<MemberDraft['role'], string> = {
   employee: 'Sees only their own work, shoots and tasks.',
