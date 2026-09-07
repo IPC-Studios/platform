@@ -3152,3 +3152,28 @@ describe('enquiries (0043)', () => {
     expect(row.rows[0]!.converted_lead_id).toBeNull()
   })
 })
+
+describe('migrations re-apply cleanly (idempotency)', () => {
+  it('policies and triggers survive a second run of their files', async () => {
+    const db = await freshDb()
+    // These files used to create policies/triggers unconditionally, so a
+    // manual re-run died halfway with "already exists".
+    for (const f of [
+      '0038_shoot_details.sql',
+      '0039_deliverable_sets.sql',
+      '0041_team_terms.sql',
+      '0043_enquiries.sql',
+    ]) {
+      await db.exec(mig(f))
+    }
+    const policies = await db.query<{ tablename: string; n: number }>(
+      `select tablename, count(*)::int as n from pg_policies
+        where tablename in ('shoot_presets', 'deliverable_sets')
+        group by tablename order by tablename;`,
+    )
+    expect(policies.rows).toEqual([
+      { tablename: 'deliverable_sets', n: 2 },
+      { tablename: 'shoot_presets', n: 2 },
+    ])
+  })
+})

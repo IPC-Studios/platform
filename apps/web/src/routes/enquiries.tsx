@@ -65,8 +65,10 @@ function Enquiries() {
   const [search, setSearch] = useState('')
   const list = useEnquiries({ status: tab === 'all' ? null : tab, search })
 
-  const summary = list.data?.summary
-  const items = list.data?.items ?? []
+  const pages = list.data?.pages ?? []
+  const summary = pages[0]?.summary
+  const items = pages.flatMap((p) => p.items)
+  const hasMore = list.hasNextPage
 
   return (
     <>
@@ -126,6 +128,18 @@ function Enquiries() {
             {items.map((e) => (
               <EnquiryRow key={e.id} enquiry={e} canEdit={canEdit} />
             ))}
+            {hasMore && (
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void list.fetchNextPage()}
+                  disabled={list.isFetchingNextPage}
+                >
+                  {list.isFetchingNextPage ? 'Loading…' : 'Show more'}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

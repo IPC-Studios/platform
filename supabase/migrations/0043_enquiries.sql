@@ -30,6 +30,7 @@ create index if not exists enquiries_company_status_idx
 -- The list is searched by name, phone and email far more than anything else.
 create index if not exists enquiries_search_idx on enquiries (company_id, phone, email);
 
+drop trigger if exists enquiries_set_updated_at on enquiries;
 create trigger enquiries_set_updated_at before update on enquiries
   for each row execute function set_updated_at();
 

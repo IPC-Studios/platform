@@ -14,7 +14,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { textParam, uuidParam } from '../../lib/params'
+import { textParam, uuidParam, uuidQuery } from '../../lib/params'
 import { withService, withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
@@ -69,6 +69,11 @@ export const teamTermsRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the title and the body of the terms.')
     const auth = c.get('auth')
     const d = parsed.data
+    const rolesOk = await attempt(c, 'team_terms.roles_check', () =>
+      withUser(c.env, auth.userId, (sql) => assertRolesBelong(sql, auth.companyId, d.role_ids)),
+    )
+    if (rolesOk === false) fail(422, 'One of those roles does not belong to this studio.')
+    if (!rolesOk) fail(400, 'We could not save these terms.')
     const row = await attempt(c, 'team_terms.template_create', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql<{ id: string }[]>`
@@ -106,6 +111,11 @@ export const teamTermsRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the title and the body of the terms.')
     const auth = c.get('auth')
     const d = parsed.data
+    const rolesOk = await attempt(c, 'team_terms.roles_check', () =>
+      withUser(c.env, auth.userId, (sql) => assertRolesBelong(sql, auth.companyId, d.role_ids)),
+    )
+    if (rolesOk === false) fail(422, 'One of those roles does not belong to this studio.')
+    if (!rolesOk) fail(400, 'We could not save these terms.')
     const rows = await attempt(c, 'team_terms.template_update', () =>
       withUser(c.env, auth.userId, async (sql) => {
         // The version is what a send is stamped with, so an edit bumps it:
@@ -168,8 +178,8 @@ export const teamTermsRouter = new Hono<AppEnv>()
 
   // ── sends ───────────────────────────────────────────────────
   .get('/sends', requireAction('projects', 'view'), async (c) => {
-    const shoot = c.req.query('shoot_id')
-    const project = c.req.query('project_id')
+    const shoot = uuidQuery(c, 'shoot_id')
+    const project = uuidQuery(c, 'project_id')
     const rows = await attempt(c, 'team_terms.sends', () =>
       withUser(
         c.env,
@@ -337,6 +347,24 @@ export const teamTermsRouter = new Hono<AppEnv>()
     await audit(c, { action: 'team_terms.revoke', entityType: 'team_terms_send', entityId: id })
     return c.json(okResponse.parse({ ok: true }))
   })
+
+/**
+ * Every mapped role must belong to this studio. The mapping row itself carries
+ * the caller's company_id (so RLS passes either way) — without this check a
+ * list of foreign role ids would link in names from another tenant wherever
+ * the mapping is joined without re-scoping.
+ */
+async function assertRolesBelong(
+  sql: Parameters<Parameters<typeof withUser>[2]>[0],
+  companyId: string,
+  roleIds: string[],
+): Promise<boolean> {
+  if (roleIds.length === 0) return true
+  const found = await sql<{ n: number }[]>`
+    select count(*)::int as n from employee_roles
+    where company_id = ${companyId} and id = any(${sql.array([...new Set(roleIds)])})`
+  return (found[0]?.n ?? 0) === new Set(roleIds).size
+}
 
 /** Replace a template's role mapping wholesale — the editor sends the full set. */
 async function setRoles(

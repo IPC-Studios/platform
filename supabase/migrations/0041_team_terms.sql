@@ -34,6 +34,7 @@ create table if not exists team_terms_templates (
   updated_at    timestamptz not null default now()
 );
 create index if not exists ttt_company_idx on team_terms_templates (company_id, category, title);
+drop trigger if exists team_terms_templates_set_updated_at on team_terms_templates;
 create trigger team_terms_templates_set_updated_at before update on team_terms_templates
   for each row execute function set_updated_at();
 
@@ -87,6 +88,7 @@ create table if not exists team_terms_sends (
 );
 create index if not exists tts_shoot_idx on team_terms_sends (company_id, shoot_id);
 create index if not exists tts_user_idx on team_terms_sends (company_id, user_id);
+drop trigger if exists team_terms_sends_set_updated_at on team_terms_sends;
 create trigger team_terms_sends_set_updated_at before update on team_terms_sends
   for each row execute function set_updated_at();
 

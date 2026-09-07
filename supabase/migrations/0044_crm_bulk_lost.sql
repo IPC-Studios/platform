@@ -1,4 +1,4 @@
--- 0038: bulk moves to lost carry a reason.
+-- 0044: bulk moves to lost carry a reason.
 --
 -- 0037 made lost_reason mandatory when status = 'lost', but crm_bulk_patch
 -- neither accepted nor snapshotted it — so every bulk "Move to lost" died in
