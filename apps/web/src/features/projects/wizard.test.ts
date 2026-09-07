@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_DRAFT,
   SHOOT_PRESET,
+  SHOOT_TYPES,
   canSubmit,
   draftTotals,
   estimatedDateFor,
   isDirty,
+  matchShootTypes,
   newDeliverable,
   newPayment,
   newShoot,
@@ -244,5 +246,23 @@ describe('quick-add shoots', () => {
   it('leaves the blank rows the Add shoot button makes alone', () => {
     const blank = [newShoot()]
     expect(withShoots(blank, ['Haldi']).map((s) => s.name)).toEqual(['', 'Haldi'])
+  })
+})
+
+describe('shoot type search', () => {
+  it('offers the whole list until something is typed', () => {
+    expect(matchShootTypes('')).toHaveLength(SHOOT_TYPES.length)
+    expect(matchShootTypes('   ')).toEqual([...SHOOT_TYPES])
+  })
+
+  it('matches anywhere in the name, ignoring case', () => {
+    expect(matchShootTypes('haldi')).toEqual(['Haldi', 'Haldi Bride', 'Haldi Groom'])
+    expect(matchShootTypes('SHOOT')).toEqual(['Couple Shoot', 'Pre-Wedding Shoot'])
+    expect(matchShootTypes('cere')).toEqual(['Ring Ceremony'])
+  })
+
+  // The menu shows its "add it yourself" footer off the back of this.
+  it('comes back empty for a type nobody listed', () => {
+    expect(matchShootTypes('drone')).toEqual([])
   })
 })

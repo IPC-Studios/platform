@@ -36,8 +36,8 @@ import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
 import { useCreateProject } from '@/features/projects/api'
 import {
-  COMMON_SHOOTS,
   EMPTY_DRAFT,
+  QUICK_SHOOTS,
   SHOOT_PRESET,
   STEP_HINTS,
   STEP_LABELS,
@@ -48,6 +48,7 @@ import {
   estimatedDateFor,
   isDirty,
   loadDraft,
+  matchShootTypes,
   newDeliverable,
   newPayment,
   newShoot,
@@ -503,15 +504,173 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
 }
 
 /**
+ * The full list of shoot types, searchable, behind the Add shoot button.
+ *
+ * Seventeen types is too many for chips and too few for the command palette,
+ * so it is a menu that opens with the search box focused: type three letters
+ * and press Enter, or scroll and click. Anything not on the list is typed in
+ * the box and added by name, which is how a studio's odd one-off gets in
+ * without anyone maintaining a list of every ceremony in the country.
+ */
+function AddShootMenu({
+  shoots,
+  onAdd,
+}: {
+  shoots: ShootDraft[]
+  onAdd: (name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const root = useRef<HTMLDivElement>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open) search.current?.focus()
+    else setQuery('')
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const taken = new Set(shoots.map((s) => s.name.trim().toLowerCase()))
+  const matches = matchShootTypes(query)
+  const custom = query.trim()
+  const free = matches.filter((m) => !taken.has(m.toLowerCase()))
+
+  const choose = (name: string) => {
+    onAdd(name)
+    setOpen(false)
+  }
+
+  /** Arrow keys walk from the box into the list and back, as a menu should. */
+  function step(from: HTMLElement | null, dir: 1 | -1) {
+    const items = [...(list.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [])]
+    if (items.length === 0) return
+    const at = from ? items.indexOf(from) : -1
+    const next = at === -1 ? (dir === 1 ? 0 : items.length - 1) : at + dir
+    if (next < 0) search.current?.focus()
+    else items[Math.min(next, items.length - 1)]?.focus()
+  }
+
+  return (
+    <div ref={root} className="relative">
+      <Button size="sm" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="menu">
+        <Plus /> Add shoot
+      </Button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Shoot types"
+          className="ipc-menu absolute left-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-3rem)] overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            e.preventDefault()
+            step(document.activeElement as HTMLElement, e.key === 'ArrowDown' ? 1 : -1)
+          }}
+        >
+          <div className="border-b border-border p-2">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                ref={search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter takes the obvious one: the first type still free, or
+                  // the words just typed if the list has nothing to offer.
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  const pick = free[0] ?? (custom || null)
+                  if (pick) choose(pick)
+                }}
+                placeholder="Search shoot type…"
+                aria-label="Search shoot type"
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          <div ref={list} className="max-h-64 overflow-y-auto p-1.5">
+            <p className="px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+              Common
+            </p>
+            {matches.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">
+                No type matches “{custom}”. Add it below.
+              </p>
+            ) : (
+              matches.map((name) => {
+                const already = taken.has(name.toLowerCase())
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    role="menuitem"
+                    disabled={already}
+                    onClick={() => choose(name)}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                      already
+                        ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                        : 'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
+                    )}
+                  >
+                    <span className="flex-1">{name}</span>
+                    {already && <Check className="size-4 shrink-0" aria-hidden />}
+                  </button>
+                )
+              })
+            )}
+          </div>
+
+          <div className="border-t border-border p-2">
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={() => choose(custom)}
+              disabled={!!custom && taken.has(custom.toLowerCase())}
+            >
+              <Plus /> {custom ? `Add “${custom}”` : 'Add new shoot type'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * The busiest step in the wizard, so it opens with the shortcuts rather than a
- * blank row: a chip per common shoot day, and a preset that lays down the four
- * a standard wedding books. "Add shoot" is still there for everything else.
+ * blank row: a chip per common shoot day, a preset that lays down the four a
+ * standard wedding books, and the whole searchable list behind Add shoot.
  */
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const set = (i: number, p: Partial<ShootDraft>) =>
     patch({ shoots: draft.shoots.map((s, idx) => (idx === i ? { ...s, ...p } : s)) })
 
   const add = (names: readonly string[]) => patch({ shoots: withShoots(draft.shoots, names) })
+  // An empty name is the "add new shoot type" case with nothing typed yet: a
+  // blank row to fill in, which withShoots would otherwise drop.
+  const addNamed = (name: string) =>
+    patch({ shoots: name ? withShoots(draft.shoots, [name]) : [...draft.shoots, newShoot()] })
   const preset = withShoots(draft.shoots, SHOOT_PRESET)
   const presetAdds = preset.length - draft.shoots.length
 
@@ -525,9 +684,7 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => patch({ shoots: [...draft.shoots, newShoot()] })}>
-            <Plus /> Add shoot
-          </Button>
+          <AddShootMenu shoots={draft.shoots} onAdd={addNamed} />
           {/* Disabled once it has nothing left to add, so a second press is
               visibly a no-op instead of a silently ignored click. */}
           <Button
@@ -546,7 +703,7 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Quick add
         </span>
-        {COMMON_SHOOTS.map((name) => {
+        {QUICK_SHOOTS.map((name) => {
           const already = draft.shoots.some(
             (s) => s.name.trim().toLowerCase() === name.toLowerCase(),
           )

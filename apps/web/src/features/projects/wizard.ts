@@ -95,13 +95,36 @@ export const newShoot = (): ShootDraft => ({
 })
 
 /**
- * The shoot days an Indian wedding studio types over and over. Chips beat a
- * blank Name field here: the wizard gets filled at a desk between calls, and
- * the point is four rows in four taps, dates fixed after.
- *
- * Ordered the way the week runs, so the row reads as a schedule.
+ * Every shoot day a studio books, alphabetical so a 17-row list can be
+ * skimmed rather than read. This is the searchable list behind "Add shoot";
+ * anything not on it is still typed by hand, and nothing here is enforced —
+ * a shoot's name is free text all the way to the API.
  */
-export const COMMON_SHOOTS = [
+export const SHOOT_TYPES = [
+  'Birthday',
+  'Cocktail',
+  'Couple Shoot',
+  'Engagement',
+  'Haldi',
+  'Haldi Bride',
+  'Haldi Groom',
+  'Kirtan',
+  'Mahuratam',
+  'Mehendi',
+  'Pre-Wedding Shoot',
+  'Reception',
+  'Ring Ceremony',
+  'Roka',
+  'Sangeet',
+  'Tilak',
+  'Wedding Day',
+] as const
+
+/**
+ * The six that earn a chip beside the button. The full list lives one click
+ * away — a row of seventeen chips is a wall, not a shortcut.
+ */
+export const QUICK_SHOOTS = [
   'Engagement',
   'Haldi',
   'Mehendi',
@@ -112,6 +135,17 @@ export const COMMON_SHOOTS = [
 
 /** What "Apply preset" lays down — the spine of a standard wedding booking. */
 export const SHOOT_PRESET = ['Haldi', 'Mehendi', 'Wedding Day', 'Reception'] as const
+
+/**
+ * Filter the type list for the search box: case-insensitive, matches anywhere
+ * in the name so "haldi" finds all three Haldis and "shoot" finds the couple
+ * and pre-wedding ones.
+ */
+export function matchShootTypes(query: string): string[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...SHOOT_TYPES]
+  return SHOOT_TYPES.filter((t) => t.toLowerCase().includes(q))
+}
 
 /**
  * Append named shoots, skipping any name already on the list.
