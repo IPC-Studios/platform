@@ -43,7 +43,7 @@ import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
-import { Dialog, DialogContent } from '@/shared/ui/dialog'
+import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { cn } from '@/shared/ui/cn'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
@@ -60,6 +60,7 @@ import {
   useIssueQuotation,
   useSaveDeliverableSet,
 } from '@/features/projects/api'
+import { useRoleLibrary } from '@/features/team/api'
 import {
   useDeleteShootPreset,
   useSaveShootPreset,
@@ -90,7 +91,6 @@ import {
   newClientDeliverable,
   newInternalWork,
   newPayment,
-  newRequirement,
   newShoot,
   nextStep,
   prevStep,
@@ -965,6 +965,196 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   )
 }
 
+/**
+ * Picking the crew a shoot needs.
+ *
+ * Three sources, in the order a studio actually thinks: what is already on
+ * this shoot, what they have booked before, and the standard roles for anyone
+ * who has booked nothing yet. Everything is a tap; the typing is there for the
+ * one-off nobody has a name for.
+ *
+ * The draft is local until Save, so half-tapped chips do not leak into the
+ * project when somebody backs out.
+ */
+function RequirementsDialog({
+  shootName,
+  requirements,
+  onSave,
+}: {
+  shootName: string
+  requirements: ShootRequirementDraft[]
+  onSave: (next: ShootRequirementDraft[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<ShootRequirementDraft[]>(requirements)
+  const [custom, setCustom] = useState('')
+  const services = useServices()
+  const library = useRoleLibrary()
+
+  const has = (name: string) =>
+    draft.some((r) => r.name.trim().toLowerCase() === name.trim().toLowerCase())
+
+  const add = (name: string) => {
+    const clean = name.trim()
+    if (!clean || has(clean)) return
+    setDraft((d) => [...d, { name: clean, quantity: '1' }])
+  }
+
+  const setQuantity = (at: number, quantity: string) =>
+    setDraft((d) => d.map((r, i) => (i === at ? { ...r, quantity } : r)))
+
+  // What this studio has booked before, minus what is already on this shoot.
+  const saved = (services.data ?? []).filter((s) => !has(s.name))
+  const suggested = (library.data ?? []).filter(
+    (r) => !has(r.type_name) && !saved.some((s) => s.name.toLowerCase() === r.type_name.toLowerCase()),
+  )
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (o) {
+          setDraft(requirements)
+          setCustom('')
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <SlidersHorizontal /> Add requirements
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title="Shoot requirements"
+        description={`Pick what's needed for “${shootName || 'this shoot'}” and set quantities.`}
+      >
+        <div className="flex max-h-[65vh] flex-col gap-4 overflow-y-auto">
+          <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+            <p className="mb-2 text-sm font-medium text-primary">
+              Selected for this shoot ({draft.length})
+            </p>
+            {draft.length === 0 ? (
+              <p className="rounded-md border border-dashed border-warning/40 bg-warning/10 px-3 py-3 text-center text-sm text-warning">
+                No requirements added yet. Tap a suggestion or add a new one below.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {draft.map((r, at) => (
+                  <div key={at} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{r.name}</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={r.quantity}
+                      onChange={(e) => setQuantity(at, e.target.value)}
+                      aria-label={`How many ${r.name}`}
+                      className="w-20"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setDraft((d) => d.filter((_, i) => i !== at))}
+                    >
+                      <Trash2 />
+                      <span className="sr-only">Remove {r.name}</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border p-3">
+            <Label>Add custom requirement</Label>
+            <div className="mt-1.5 flex items-center gap-2">
+              <Input
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  add(custom)
+                  setCustom('')
+                }}
+                placeholder="e.g. Highlight Editor"
+              />
+              <Button
+                onClick={() => {
+                  add(custom)
+                  setCustom('')
+                }}
+                disabled={!custom.trim()}
+              >
+                <Plus /> Add
+              </Button>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-sm font-medium">Your saved requirements (tap to add)</p>
+            {saved.length === 0 ? (
+              <p className="rounded-md border border-dashed border-border px-3 py-3 text-center text-sm text-muted-foreground">
+                None yet. Add one above or pick from suggestions below.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {saved.map((s) => (
+                  <Chip key={s.id} label={s.name} onAdd={() => add(s.name)} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {suggested.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                <Sparkles className="size-3.5 text-muted-foreground" aria-hidden />
+                Suggested (tap to add)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {suggested.map((r) => (
+                  <Chip key={r.id} label={r.type_name} onAdd={() => add(r.type_name)} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button
+            onClick={() => {
+              onSave(draft.filter((r) => r.name.trim()))
+              setOpen(false)
+            }}
+          >
+            Save requirements
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function Chip({ label, onAdd }: { label: string; onAdd: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onAdd}
+      className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+    >
+      <Plus className="size-3.5" aria-hidden />
+      {label}
+    </button>
+  )
+}
+
 /** Shared by every requirement input on the step. */
 const SERVICE_LIST_ID = 'ipc-shoot-services'
 
@@ -994,10 +1184,6 @@ function ShootCard({
 }) {
   const issues = shootIssues(shoot)
   const work = internalWorkFor(draft, index)
-
-  const setRequirement = (at: number, p: Partial<ShootRequirementDraft>) =>
-    onChange({ requirements: shoot.requirements.map((r, i) => (i === at ? { ...r, ...p } : r)) })
-
   return (
     <div
       className={cn(
@@ -1099,48 +1285,29 @@ function ShootCard({
         title="Shoot requirements"
         hint="Pick people or services and set how many of each this day needs."
         actions={
-          <Button
-            size="sm"
-            onClick={() => onChange({ requirements: [...shoot.requirements, newRequirement()] })}
-          >
-            <SlidersHorizontal /> Add requirements
-          </Button>
+          <RequirementsDialog
+            shootName={shoot.name}
+            requirements={shoot.requirements}
+            onSave={(requirements) => onChange({ requirements })}
+          />
         }
       >
         {shoot.requirements.length === 0 ? (
           <Band tone="warning">No requirements yet — tap “Add requirements” to plan the team.</Band>
         ) : (
-          <div className="flex flex-col gap-2">
+          // A summary, not an editor: changes happen in the dialog, so the card
+          // stays readable when a wedding day needs eight people.
+          <div className="flex flex-wrap gap-2">
             {shoot.requirements.map((r, at) => (
-              <div key={at} className="flex items-center gap-2">
-                <Input
-                  list={SERVICE_LIST_ID}
-                  value={r.name}
-                  onChange={(e) => setRequirement(at, { name: e.target.value })}
-                  placeholder="Photographer"
-                  aria-label={`Requirement ${at + 1}`}
-                  className="flex-1"
-                />
-                <Input
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={r.quantity}
-                  onChange={(e) => setRequirement(at, { quantity: e.target.value })}
-                  aria-label={`How many for requirement ${at + 1}`}
-                  className="w-20"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    onChange({ requirements: shoot.requirements.filter((_, i) => i !== at) })
-                  }
-                >
-                  <Trash2 />
-                  <span className="sr-only">Remove requirement {at + 1}</span>
-                </Button>
-              </div>
+              <span
+                key={at}
+                className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-sm"
+              >
+                {r.name.trim() || 'Unnamed'}
+                <span className="font-semibold text-primary">
+                  ×{Math.max(1, Number(r.quantity) || 1)}
+                </span>
+              </span>
             ))}
           </div>
         )}
