@@ -16,6 +16,13 @@ export interface TeamTermsVariables {
   shoot_date?: string | null
   project_name?: string | null
   agreement_date?: string | null
+  /**
+   * Deal terms, which the studio settles per person rather than per template.
+   * Nothing fills these automatically today, so they render as a blank for
+   * both sides to read as "to be agreed" — which is what they are.
+   */
+  reporting_time?: string | null
+  payment_amount?: string | null
 }
 
 /** The placeholders a template may use, for the editor's own reference. */
@@ -28,6 +35,8 @@ export const TEAM_TERMS_VARIABLES: readonly (keyof TeamTermsVariables)[] = [
   'shoot_date',
   'project_name',
   'agreement_date',
+  'reporting_time',
+  'payment_amount',
 ]
 
 /**

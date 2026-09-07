@@ -63,3 +63,22 @@ describe('teamTermsVariablesUsed', () => {
     expect(teamTermsVariablesUsed('Nothing to fill in here.')).toEqual([])
   })
 })
+
+// The starter library leans on these two and nothing fills them yet; they must
+// come out as blanks rather than as literal braces in a signed document.
+describe('deal-term placeholders', () => {
+  it('blanks reporting time and payment when nobody has set them', () => {
+    expect(
+      renderTeamTerms('Report by {{reporting_time}} for {{payment_amount}}.', {}),
+    ).toBe('Report by ______ for ______.')
+  })
+
+  it('uses them when they are supplied', () => {
+    expect(
+      renderTeamTerms('Report by {{reporting_time}} for {{payment_amount}}.', {
+        reporting_time: '6:00 am',
+        payment_amount: '₹8,000',
+      }),
+    ).toBe('Report by 6:00 am for ₹8,000.')
+  })
+})
