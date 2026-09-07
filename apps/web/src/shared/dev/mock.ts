@@ -1405,8 +1405,12 @@ function fakeProject(
     status,
     client_id: CLIENT.sharma,
     client_name,
+    client_phone: '9876543210',
     package_cost: pkg,
     total_cost: total,
+    // Part paid, so the list's received and pending columns have something to
+    // show rather than a wall of zeroes.
+    received: Math.round(total * 0.4),
     created_at: '2026-06-01T10:00:00Z',
   }
 }

@@ -27,9 +27,16 @@ export const projectsRouter = new Hono<AppEnv>()
       withUser(
         c.env,
         c.get('auth').userId,
+        // The money is rolled up here rather than fetched per row: the list
+        // shows received and pending on every project, and doing that from the
+        // client would be one request per project.
         (sql) => sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost, p.total_cost, p.created_at,
-                 cl.name as client_name
+                 cl.name as client_name, cl.phone as client_phone,
+                 coalesce(
+                   (select sum(rp.amount) from received_payments rp where rp.project_id = p.id),
+                   0
+                 ) as received
           from projects p
           left join clients cl on cl.id = p.client_id
           order by p.created_at desc`,

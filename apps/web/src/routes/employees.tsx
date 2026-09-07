@@ -12,6 +12,7 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
+import { downloadCsv } from '@/shared/ui/csv'
 import { useDirectory, useEmployeeRoles } from '@/features/team/api'
 import { AddMemberWizard } from '@/features/team/AddMemberWizard'
 import { DirectoryFiltersBar, DirectoryTable } from '@/features/team/DirectoryTable'
@@ -86,15 +87,8 @@ function Directory({ onAdd }: { onAdd: () => void }) {
   const members = useMemo(() => data ?? [], [data])
   const rows = useMemo(() => filterDirectory(members, tab, filters), [members, tab, filters])
 
-  function exportCsv() {
-    const blob = new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `team-directory-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const exportCsv = () =>
+    downloadCsv(`team-directory-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows))
 
   return (
     <>

@@ -64,8 +64,12 @@ export const projectListItem = z.object({
   status: projectStatus,
   client_id: uuid,
   client_name: z.string().nullable(),
+  /** Shown beside the name: a studio finds a project by whose wedding it is. */
+  client_phone: z.string().nullable(),
   package_cost: money,
   total_cost: money,
+  /** Summed from received_payments, so the list needs no second request. */
+  received: money,
   created_at: isoDateTime,
 })
 export type ProjectListItem = z.infer<typeof projectListItem>
