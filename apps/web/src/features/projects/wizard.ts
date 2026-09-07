@@ -35,11 +35,22 @@ export const STEP_HINTS: Record<WizardStep, string> = {
   review: 'Check it over, then create.',
 }
 
+export interface ShootRequirementDraft {
+  name: string
+  /** Kept as text so a half-typed "1" never becomes NaN mid-keystroke. */
+  quantity: string
+}
+
 export interface ShootDraft {
   name: string
   shoot_date: string
+  /** "HH:MM" as the browser time input gives it; blank when the day is loose. */
+  start_time: string
+  /** City / Venue as it should print — the map link is a separate field. */
   location: string
+  map_link: string
   status: 'planned' | 'confirmed'
+  requirements: ShootRequirementDraft[]
 }
 
 export interface DeliverableDraft {
@@ -90,9 +101,14 @@ export const EMPTY_DRAFT: ProjectDraft = {
 export const newShoot = (): ShootDraft => ({
   name: '',
   shoot_date: '',
+  start_time: '',
   location: '',
+  map_link: '',
   status: 'planned',
+  requirements: [],
 })
+
+export const newRequirement = (): ShootRequirementDraft => ({ name: '', quantity: '1' })
 
 /**
  * Every shoot day a studio books, alphabetical so a 17-row list can be
@@ -326,13 +342,115 @@ export function toProjectRequest(draft: ProjectDraft, clientId: string): CreateP
 export function toShootRequests(draft: ProjectDraft, projectId: string): CreateShootRequest[] {
   return draft.shoots
     .filter((s) => s.name.trim())
-    .map((s) => ({
-      project_id: projectId,
-      name: s.name.trim(),
-      status: s.status,
-      ...(s.shoot_date ? { shoot_date: s.shoot_date } : {}),
-      ...(s.location.trim() ? { location: s.location.trim() } : {}),
-    }))
+    .map((s) => {
+      const startAt = shootStartAt(s)
+      return {
+        project_id: projectId,
+        name: s.name.trim(),
+        status: s.status,
+        ...(s.shoot_date ? { shoot_date: s.shoot_date } : {}),
+        ...(startAt ? { start_at: startAt } : {}),
+        ...(s.location.trim() ? { location: s.location.trim() } : {}),
+        ...(s.map_link.trim() ? { map_link: s.map_link.trim() } : {}),
+        requirements: s.requirements
+          .filter((r) => r.name.trim())
+          .map((r) => ({ name: r.name.trim(), quantity: Math.max(1, Number(r.quantity) || 1) })),
+      }
+    })
+}
+
+/**
+ * What is still missing from a shoot, as the card's chips read it.
+ *
+ * Deliberately not errors: a studio can save a project with a shoot that has
+ * no date and no crew yet — the chips are the reminder, `stepErrors` is the
+ * gate, and only a missing title actually blocks.
+ */
+export function shootIssues(shoot: ShootDraft): string[] {
+  const issues: string[] = []
+  if (!shoot.name.trim() || !shoot.shoot_date) issues.push('Title & date needed')
+  if (shoot.requirements.filter((r) => r.name.trim()).length === 0) issues.push('No requirements')
+  return issues
+}
+
+/**
+ * The edit-room items this kind of day usually needs, offered as chips.
+ *
+ * Derived from the shoot's own name rather than a lookup table, so a studio
+ * that types "Roka Night" gets "Roka Night Edited Photos" without anyone
+ * having listed that ceremony anywhere.
+ */
+export function internalWorkSuggestions(shootName: string): string[] {
+  const name = shootName.trim()
+  return name
+    ? [`${name} Edited Photos`, `${name} Reel`, 'Data Sorting']
+    : ['Edited Photos', 'Reel', 'Data Sorting']
+}
+
+/**
+ * An internal deliverable belonging to one shoot: the team's own list, pinned
+ * to that day so its dates follow the shoot, and off the quotation because a
+ * client is not buying "data sorting" — they are buying the album it feeds.
+ */
+export function newInternalWork(shootIndex: number, title = ''): DeliverableDraft {
+  return {
+    ...newDeliverable(),
+    title,
+    visibility_scope: 'internal',
+    show_on_quotation: false,
+    start_rule: 'this_shoot',
+    shoot_index: shootIndex,
+  }
+}
+
+/** The internal work pinned to one shoot, with its index in draft.deliverables. */
+export function internalWorkFor(
+  draft: ProjectDraft,
+  shootIndex: number,
+): { at: number; item: DeliverableDraft }[] {
+  const out: { at: number; item: DeliverableDraft }[] = []
+  draft.deliverables.forEach((item, at) => {
+    if (item.visibility_scope === 'internal' && item.shoot_index === shootIndex) out.push({ at, item })
+  })
+  return out
+}
+
+/**
+ * Drop a shoot without leaving its deliverables pointing at the wrong day.
+ *
+ * `shoot_index` is positional, so removing shoot 0 silently re-aims everything
+ * below it — a teaser dated off the Haldi would start counting from the
+ * Mehendi. Internal work belonged to the shoot and goes with it; anything
+ * client-visible is kept and unpinned, because that is someone's line item and
+ * their money, not ours to delete.
+ */
+export function removeShootAt(draft: ProjectDraft, index: number): Partial<ProjectDraft> {
+  const deliverables: DeliverableDraft[] = []
+  for (const d of draft.deliverables) {
+    if (d.shoot_index === index) {
+      if (d.visibility_scope === 'internal') continue
+      deliverables.push({ ...d, start_rule: 'whole_project', shoot_index: null })
+      continue
+    }
+    deliverables.push(
+      d.shoot_index !== null && d.shoot_index > index ? { ...d, shoot_index: d.shoot_index - 1 } : d,
+    )
+  }
+  return { shoots: draft.shoots.filter((_, i) => i !== index), deliverables }
+}
+
+/**
+ * Date + time as one instant, for `start_at`.
+ *
+ * The studio types a local wall-clock time; the column is a timestamptz, so
+ * the offset has to be resolved here rather than sent as a naive string the
+ * server would have to guess about. No date, or a time the browser cannot
+ * make sense of, means no instant to send.
+ */
+export function shootStartAt(shoot: ShootDraft): string | null {
+  if (!shoot.shoot_date || !shoot.start_time) return null
+  const at = new Date(`${shoot.shoot_date}T${shoot.start_time}`)
+  return Number.isNaN(at.getTime()) ? null : at.toISOString()
 }
 
 /** A draft worth restoring — anything typed beyond the defaults. */
@@ -379,7 +497,14 @@ export function loadDraft(): StoredDraft | null {
     if (!parsed?.draft || typeof parsed.savedAt !== 'string') return null
     // Merge over the defaults: a draft written before a field existed must not
     // come back missing that field.
-    return { draft: { ...EMPTY_DRAFT, ...parsed.draft }, savedAt: parsed.savedAt }
+    // Shoots are nested, so the same merge has to reach one level down: a
+    // draft written before requirements existed comes back without them, and
+    // the card would map over undefined.
+    const draft = { ...EMPTY_DRAFT, ...parsed.draft }
+    return {
+      draft: { ...draft, shoots: draft.shoots.map((s) => ({ ...newShoot(), ...s })) },
+      savedAt: parsed.savedAt,
+    }
   } catch {
     return null
   }

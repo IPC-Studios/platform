@@ -6,11 +6,17 @@ import {
   canSubmit,
   draftTotals,
   estimatedDateFor,
+  internalWorkFor,
+  internalWorkSuggestions,
   isDirty,
   matchShootTypes,
+  newInternalWork,
   newDeliverable,
   newPayment,
   newShoot,
+  removeShootAt,
+  shootIssues,
+  shootStartAt,
   nextStep,
   prevStep,
   stepErrors,
@@ -18,6 +24,7 @@ import {
   toShootRequests,
   withShoots,
   type ProjectDraft,
+  type ShootDraft,
 } from './wizard'
 
 const draft = (over: Partial<ProjectDraft> = {}): ProjectDraft => ({
@@ -182,7 +189,21 @@ describe('toProjectRequest', () => {
 
   it('builds one shoot request per named shoot, pinned to the project', () => {
     const d = named({
-      shoots: [{ name: 'Wedding', shoot_date: '2026-11-22', location: 'Taj', status: 'confirmed' }],
+      shoots: [
+        {
+          ...newShoot(),
+          name: 'Wedding',
+          shoot_date: '2026-11-22',
+          start_time: '09:30',
+          location: 'Taj',
+          map_link: 'https://maps.google.com/?q=taj',
+          status: 'confirmed',
+          requirements: [
+            { name: ' Photographer ', quantity: '2' },
+            { name: '', quantity: '1' },
+          ],
+        },
+      ],
     })
     expect(toShootRequests(d, 'proj-9')).toEqual([
       {
@@ -190,7 +211,10 @@ describe('toProjectRequest', () => {
         name: 'Wedding',
         status: 'confirmed',
         shoot_date: '2026-11-22',
+        start_at: new Date('2026-11-22T09:30').toISOString(),
         location: 'Taj',
+        map_link: 'https://maps.google.com/?q=taj',
+        requirements: [{ name: 'Photographer', quantity: 2 }],
       },
     ])
   })
@@ -264,5 +288,113 @@ describe('shoot type search', () => {
   // The menu shows its "add it yourself" footer off the back of this.
   it('comes back empty for a type nobody listed', () => {
     expect(matchShootTypes('drone')).toEqual([])
+  })
+})
+
+describe('the shoot card', () => {
+  const shoot = (over: Partial<ShootDraft> = {}): ShootDraft => ({ ...newShoot(), ...over })
+
+  it('names what a shoot is still missing', () => {
+    expect(shootIssues(shoot())).toEqual(['Title & date needed', 'No requirements'])
+    expect(shootIssues(shoot({ name: 'Haldi' }))).toEqual(['Title & date needed', 'No requirements'])
+    expect(
+      shootIssues(shoot({ name: 'Haldi', shoot_date: '2026-11-20' })),
+    ).toEqual(['No requirements'])
+    expect(
+      shootIssues(
+        shoot({
+          name: 'Haldi',
+          shoot_date: '2026-11-20',
+          requirements: [{ name: 'Photographer', quantity: '2' }],
+        }),
+      ),
+    ).toEqual([])
+  })
+
+  // A row the studio started typing and left blank is not a requirement.
+  it('does not count an empty requirement row', () => {
+    const s = shoot({ name: 'Haldi', shoot_date: '2026-11-20', requirements: [{ name: '  ', quantity: '1' }] })
+    expect(shootIssues(s)).toEqual(['No requirements'])
+  })
+
+  it('suggests edit-room work off the shoot name', () => {
+    expect(internalWorkSuggestions('Birthday')).toEqual([
+      'Birthday Edited Photos',
+      'Birthday Reel',
+      'Data Sorting',
+    ])
+    expect(internalWorkSuggestions('  ')).toEqual(['Edited Photos', 'Reel', 'Data Sorting'])
+  })
+
+  it('makes internal work that stays off the quotation and follows its shoot', () => {
+    const item = newInternalWork(2, 'Data Sorting')
+    expect(item).toMatchObject({
+      title: 'Data Sorting',
+      visibility_scope: 'internal',
+      show_on_quotation: false,
+      start_rule: 'this_shoot',
+      shoot_index: 2,
+    })
+  })
+
+  it('finds the internal work belonging to one shoot', () => {
+    const d = draft({
+      deliverables: [
+        newInternalWork(0, 'Haldi Reel'),
+        { ...newDeliverable(), title: 'Album', shoot_index: 0, start_rule: 'this_shoot' },
+        newInternalWork(1, 'Mehendi Reel'),
+      ],
+    })
+    expect(internalWorkFor(d, 0).map((w) => w.item.title)).toEqual(['Haldi Reel'])
+    expect(internalWorkFor(d, 0)[0]?.at).toBe(0)
+    expect(internalWorkFor(d, 1).map((w) => w.item.title)).toEqual(['Mehendi Reel'])
+  })
+})
+
+describe('removing a shoot', () => {
+  const three = () =>
+    draft({
+      shoots: [
+        { ...newShoot(), name: 'Haldi' },
+        { ...newShoot(), name: 'Mehendi' },
+        { ...newShoot(), name: 'Wedding' },
+      ],
+      deliverables: [
+        newInternalWork(0, 'Haldi Reel'),
+        newInternalWork(2, 'Wedding Reel'),
+        { ...newDeliverable(), title: 'Album', start_rule: 'this_shoot', shoot_index: 0 },
+        { ...newDeliverable(), title: 'Teaser', start_rule: 'this_shoot', shoot_index: 2 },
+      ],
+    })
+
+  it('takes the shoot and its internal work together', () => {
+    const after = removeShootAt(three(), 0)
+    expect(after.shoots?.map((s) => s.name)).toEqual(['Mehendi', 'Wedding'])
+    expect(after.deliverables?.map((d) => d.title)).toEqual(['Wedding Reel', 'Album', 'Teaser'])
+  })
+
+  // The client's line item is their money — it survives, unpinned.
+  it('keeps a client deliverable and lets go of the day it pointed at', () => {
+    const album = removeShootAt(three(), 0).deliverables?.find((d) => d.title === 'Album')
+    expect(album).toMatchObject({ start_rule: 'whole_project', shoot_index: null })
+  })
+
+  // Without this, everything below the removed shoot silently re-aims one day up.
+  it('re-indexes what pointed past the removed shoot', () => {
+    const after = removeShootAt(three(), 0)
+    expect(after.deliverables?.find((d) => d.title === 'Wedding Reel')?.shoot_index).toBe(1)
+    expect(after.deliverables?.find((d) => d.title === 'Teaser')?.shoot_index).toBe(1)
+  })
+})
+
+describe('shootStartAt', () => {
+  it('resolves the studio’s wall clock to an instant', () => {
+    const at = shootStartAt({ ...newShoot(), shoot_date: '2026-11-22', start_time: '09:30' })
+    expect(at).toBe(new Date('2026-11-22T09:30').toISOString())
+  })
+
+  it('sends nothing when either half is missing', () => {
+    expect(shootStartAt({ ...newShoot(), shoot_date: '2026-11-22' })).toBeNull()
+    expect(shootStartAt({ ...newShoot(), start_time: '09:30' })).toBeNull()
   })
 })
