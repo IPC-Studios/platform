@@ -8,6 +8,7 @@ import {
   employeeRole,
   invitation,
   invitationLink,
+  libraryRole,
   teamMember,
   updateMemberRequest,
   upsertEmployeeRoleRequest,
@@ -94,6 +95,23 @@ export const teamRouter = new Hono<AppEnv>()
     return c.json(canSeeSalary ? list : list.map((m) => ({ ...m, salary: null })))
   })
 
+  // The catalogue behind the "add from the library" chips. Declared above
+  // '/roles' shapes for clarity; it is platform data, so there is nothing
+  // tenant-specific to gate beyond being signed in and holding the module.
+  .get('/role-library', requireModule('team_roles'), async (c) => {
+    const rows = await attempt(c, 'team.role_library', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          select id, type_name, role_code, stage from role_library
+          order by stage, sort_order, type_name`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load the role library.')
+    return c.json(libraryRole.array().parse(rows))
+  })
+
   // ── Job roles (Photographer, Editor…) ───────────────────────
   .get('/roles', requireModule('team_roles'), async (c) => {
     const rows = await attempt(c, 'team.roles', () =>
@@ -101,7 +119,7 @@ export const teamRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select r.id, r.type_name, r.role_code, count(a.user_id)::int as member_count
+          select r.id, r.type_name, r.role_code, r.stage, count(a.user_id)::int as member_count
           from employee_roles r
           left join employee_role_assignments a on a.role_id = r.id
           group by r.id
@@ -115,7 +133,7 @@ export const teamRouter = new Hono<AppEnv>()
   .post('/roles', requireOwner(), async (c) => {
     const parsed = upsertEmployeeRoleRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the role name and code.')
-    const { type_name, role_code } = parsed.data
+    const { type_name, role_code, stage } = parsed.data
     const companyId = c.get('auth').companyId
 
     const rows = await attempt(
@@ -126,8 +144,8 @@ export const teamRouter = new Hono<AppEnv>()
           c.env,
           c.get('auth').userId,
           (sql) => sql<{ id: string }[]>`
-            insert into employee_roles (company_id, type_name, role_code)
-            values (${companyId}, ${type_name}, ${role_code})
+            insert into employee_roles (company_id, type_name, role_code, stage)
+            values (${companyId}, ${type_name}, ${role_code}, ${stage ?? null})
             returning id`,
         ),
       { onCode: duplicateCode },
@@ -135,14 +153,17 @@ export const teamRouter = new Hono<AppEnv>()
     if (rows === 'duplicate') fail(409, 'A role with that code already exists.')
     if (!rows || !rows[0]) fail(400, 'We could not create this role.')
     await audit(c, { action: 'role.create', entityType: 'employee_role', entityId: rows[0].id, after: parsed.data })
-    return c.json(employeeRole.parse({ ...parsed.data, id: rows[0].id, member_count: 0 }), 201)
+    return c.json(
+      employeeRole.parse({ ...parsed.data, stage: stage ?? null, id: rows[0].id, member_count: 0 }),
+      201,
+    )
   })
 
   .patch('/roles/:id', requireOwner(), async (c) => {
     const id = uuidParam(c)
     const parsed = upsertEmployeeRoleRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the role name and code.')
-    const { type_name, role_code } = parsed.data
+    const { type_name, role_code, stage } = parsed.data
 
     const rows = await attempt(
       c,
@@ -152,8 +173,9 @@ export const teamRouter = new Hono<AppEnv>()
           c.env,
           c.get('auth').userId,
           (sql) => sql<{ id: string }[]>`
-            update employee_roles set type_name = ${type_name}, role_code = ${role_code}
-            where id = ${id} returning id`,
+            update employee_roles
+               set type_name = ${type_name}, role_code = ${role_code}, stage = ${stage ?? null}
+             where id = ${id} returning id`,
         ),
       { onCode: duplicateCode },
     )
