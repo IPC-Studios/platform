@@ -82,6 +82,7 @@ async function freshDb() {
   await db.exec(mig('0046_crm_activities.sql'))
   await db.exec(mig('0047_crm_workflows.sql'))
   await db.exec(mig('0048_crm_quotes_prefs.sql'))
+  await db.exec(mig('0049_crm_gaps.sql'))
   return db
 }
 
@@ -3981,5 +3982,93 @@ describe('migrations re-apply cleanly (idempotency)', () => {
       { tablename: 'deliverable_sets', n: 2 },
       { tablename: 'shoot_presets', n: 2 },
     ])
+  })
+})
+
+describe('CRM quote answered off the link (0049)', () => {
+  let db: PGlite
+  const owner = '3f3f3f3f-3f3f-4f3f-8f3f-3f3f3f3f3f3f'
+  let lead = ''
+
+  const items = JSON.stringify([
+    { description: 'Coverage', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+  ])
+  const newQuote = async () =>
+    (
+      await db.query<{ id: string; quote_number: string }>(
+        `select * from create_quote('${lead}', 'Package', current_date + 14, 'MH', true, 100000, 0, 100000, 18000, 118000, '${items}'::jsonb);`,
+      )
+    ).rows[0]!
+  const statusOf = async (id: string) =>
+    (await db.query<{ status: string }>(`select status from crm_quotes where id = '${id}';`)).rows[0]!.status
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}','owner@crm9.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM9 Studio','Owner');`)
+    lead = (await db.query<{ id: string }>(`select add_lead('Phone yes', '9876980001', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+  })
+
+  it('a draft cannot be answered before it is sent', async () => {
+    const q = await newQuote()
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'accepted');`)).rejects.toThrow(/before recording an answer/)
+  })
+
+  it('the studio records an acceptance given on the phone, and it sets the deal value', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    expect((await db.query<{ s: string }>(`select crm_set_quote_outcome('${q.id}', 'accepted', 'Priya on the phone') as s;`)).rows[0]!.s).toBe('accepted')
+    const row = await db.query<{ status: string; accepted_by_name: string; accepted_at: string | null }>(
+      `select status, accepted_by_name, accepted_at from crm_quotes where id = '${q.id}';`,
+    )
+    expect(row.rows[0]!.status).toBe('accepted')
+    expect(row.rows[0]!.accepted_by_name).toBe('Priya on the phone')
+    expect(row.rows[0]!.accepted_at).not.toBeNull()
+    const l = await db.query<{ deal_value: string }>(`select deal_value from crm_leads where id = '${lead}';`)
+    expect(Number(l.rows[0]!.deal_value)).toBe(118000)
+    const ev = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_lead_events where lead_id = '${lead}' and note like 'quote % marked accepted%';`,
+    )
+    expect(ev.rows[0]!.n).toBe(1)
+  })
+
+  it('a decline carries its reason, and a mistake can be put back', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    await db.query(`select crm_set_quote_outcome('${q.id}', 'declined', null, 'Went with a cheaper studio');`)
+    const d = await db.query<{ status: string; decline_reason: string }>(
+      `select status, decline_reason from crm_quotes where id = '${q.id}';`,
+    )
+    expect(d.rows[0]).toEqual({ status: 'declined', decline_reason: 'Went with a cheaper studio' })
+
+    expect((await db.query<{ s: string }>(`select crm_set_quote_outcome('${q.id}', 'sent') as s;`)).rows[0]!.s).toBe('sent')
+    const back = await db.query<{ status: string; declined_at: string | null; decline_reason: string | null }>(
+      `select status, declined_at, decline_reason from crm_quotes where id = '${q.id}';`,
+    )
+    expect(back.rows[0]).toEqual({ status: 'sent', declined_at: null, decline_reason: null })
+  })
+
+  it('an unknown status is refused, and another studio cannot answer this quote', async () => {
+    const q = await newQuote()
+    await db.query(`select issue_quote_link('${q.id}');`)
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'expired');`)).rejects.toThrow(/unknown quote status/)
+    const stranger = '4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e4e'
+    await db.exec(`insert into auth.users (id, email) values ('${stranger}','stranger@crm9.test');`)
+    await asUser(db, stranger)
+    await db.query(`select register_company_and_admin('Other Studio','Stranger');`)
+    await expect(db.query(`select crm_set_quote_outcome('${q.id}', 'accepted');`)).rejects.toThrow(/unknown quote/)
+    await asUser(db, owner)
+    expect(await statusOf(q.id)).toBe('sent')
+  })
+
+  it('the public page states which state the tax was worked out for', async () => {
+    const q = await newQuote()
+    const token = (await db.query<{ t: string }>(`select issue_quote_link('${q.id}') as t;`)).rows[0]!.t
+    const shown = await db.query<{ q: { place_of_supply: string; intra_state: boolean } }>(
+      `select get_quote_for_token('${token}') as q;`,
+    )
+    expect(shown.rows[0]!.q.place_of_supply).toBe('MH')
+    expect(shown.rows[0]!.q.intra_state).toBe(true)
   })
 })

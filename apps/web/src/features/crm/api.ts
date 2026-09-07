@@ -21,6 +21,7 @@ import {
   emailSyncResponse,
   placeCallResponse,
   scheduleMeetingResponse,
+  crmQuoteStatusResponse,
   sendQuoteResponse,
   timelineResponse,
   crmLead,
@@ -73,6 +74,7 @@ import {
   type MoveStageRequest,
   type PlaceCallRequest,
   type ScheduleMeetingRequest,
+  type SetQuoteOutcomeRequest,
   type SendTemplateRequest,
   type UpdateCrmUserPrefsRequest,
   type UpdateActivityRequest,
@@ -782,6 +784,15 @@ export function useCreateQuote() {
 export function useSendQuote() {
   return useCrmMutation(({ id, ...body }: { id: string; channel: 'none' | 'whatsapp' | 'email'; ttl_hours?: number }) =>
     callApi(`/crm/quotes/${id}/send`, { method: 'POST', body, responseSchema: sendQuoteResponse }),
+  )
+}
+
+/** Record an answer the client gave off the link — by phone, in person. */
+export function useSetQuoteOutcome() {
+  return useCrmMutation(
+    ({ id, ...body }: SetQuoteOutcomeRequest & { id: string }) =>
+      callApi(`/crm/quotes/${id}/outcome`, { method: 'POST', body, responseSchema: crmQuoteStatusResponse }),
+    (r) => (r.status === 'sent' ? 'Quote reopened' : `Quote marked ${r.status}`),
   )
 }
 

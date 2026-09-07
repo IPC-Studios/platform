@@ -4,12 +4,14 @@ import {
   acceptQuoteRequest,
   createQuoteRequest,
   crmQuote,
+  crmQuoteStatusResponse,
   crmUserPrefs,
   declineQuoteRequest,
   okResponse,
   publicQuote,
   sendQuoteRequest,
   sendQuoteResponse,
+  setQuoteOutcomeRequest,
   updateCrmUserPrefsRequest,
 } from '@ipc/contracts'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
@@ -22,6 +24,7 @@ import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 import { resolveClientIp } from '../../lib/client-ip'
 import { sendWhatsAppText, whatsappConfigured, whatsappLink } from '../../lib/whatsapp'
+import { claimRule } from './rules'
 
 /**
  * Quotes on a deal, and each person's CRM preferences. Totals come from
@@ -34,7 +37,7 @@ const remove = requireAction('crm', 'delete')
 const selectQuotes = (sql: TransactionSql) => sql`
   select q.id, q.lead_id, l.name as lead_name, q.quote_number, q.title, q.status, q.valid_until, q.place_of_supply, q.intra_state,
          q.subtotal, q.discount, q.taxable, q.tax, q.total, q.notes, q.terms, q.sent_at, q.accepted_at, q.accepted_by_name,
-         q.declined_at, q.decline_reason, q.created_at,
+         q.accepted_by_email, q.accepted_ip, q.declined_at, q.decline_reason, q.created_at,
          coalesce((
            select jsonb_agg(jsonb_build_object(
              'id', i.id, 'description', i.description, 'quantity', i.quantity, 'rate', i.rate, 'amount', i.amount,
@@ -165,6 +168,33 @@ export const crmQuotesRouter = new Hono<AppEnv>()
     }
     await audit(c, { action: 'quote.send', entityType: 'crm_quote', entityId: id, after: { channel: v.channel, delivery } })
     return c.json(sendQuoteResponse.parse({ url, open_url: openUrl, delivery }))
+  })
+
+  /**
+   * The answer a client gave off the link — on the phone, at the studio.
+   * Same transition the public page makes, with the person's name on it and
+   * no token, so a quote does not sit at "sent" for ever.
+   */
+  .post('/quotes/:id/outcome', edit, async (c) => {
+    const parsed = setQuoteOutcomeRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Pick an outcome.')
+    const id = uuidParam(c)
+    const v = parsed.data
+    const result = await attempt(
+      c,
+      'crm.quote_outcome',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const [r] = await sql<{ status: string }[]>`
+            select crm_set_quote_outcome(${id}, ${v.status}, ${v.name ?? null}, ${v.reason ?? null}) as status`
+          return r ?? null
+        }),
+      { onCode: claimRule },
+    )
+    if (result && 'rule' in result) fail(422, result.rule)
+    if (!result) fail(400, 'We could not record that answer.')
+    await audit(c, { action: 'quote.outcome', entityType: 'crm_quote', entityId: id, after: v })
+    return c.json(crmQuoteStatusResponse.parse({ status: result.status }))
   })
 
   // A draft can be dropped; anything sent stays as the record of the offer.

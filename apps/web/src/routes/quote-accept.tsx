@@ -131,6 +131,11 @@ export function QuoteAcceptPage() {
                   <p className="mt-1 whitespace-pre-wrap">{quote.terms}</p>
                 </div>
               )}
+              {quote.place_of_supply && (
+                <p className="text-xs text-muted-foreground">
+                  Priced for {quote.place_of_supply}, so tax is charged as {quote.intra_state ? 'CGST and SGST' : 'IGST'}.
+                </p>
+              )}
               {quote.valid_until && (
                 <p className="text-xs text-muted-foreground">
                   Valid until {new Date(quote.valid_until).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}.
@@ -195,7 +200,9 @@ function Totals({ quote }: { quote: PublicQuote }) {
         <dd className="tabular-nums">{formatINR(quote.discount)}</dd>
       </div>
       <div>
-        <dt className="text-xs text-muted-foreground">GST</dt>
+        <dt className="text-xs text-muted-foreground">
+          GST{quote.place_of_supply ? ` · ${quote.intra_state ? 'CGST + SGST' : 'IGST'}` : ''}
+        </dt>
         <dd className="tabular-nums">{formatINR(quote.tax)}</dd>
       </div>
       <div>

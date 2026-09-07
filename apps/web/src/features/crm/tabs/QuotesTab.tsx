@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, FileText, Mail, MessageCircle, Send, Trash2 } from 'lucide-react'
+import { Check, Copy, FileText, Mail, MessageCircle, RotateCcw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CrmQuote, QuoteStatus } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -12,7 +12,7 @@ import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { formatINR } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useDeleteQuote, useQuotes, useSendQuote } from '../api'
+import { useDeleteQuote, useQuotes, useSendQuote, useSetQuoteOutcome } from '../api'
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 
@@ -80,6 +80,7 @@ export function QuotesTab({ onOpen }: { onOpen: (leadId: string) => void }) {
 /** One quote with its actions; used by the tab and by the drawer's quote panel. */
 export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuote; onOpen?: () => void; compact?: boolean }) {
   const send = useSendQuote()
+  const outcome = useSetQuoteOutcome()
   const del = useDeleteQuote()
   const confirm = useConfirm()
   const access = useAccess()
@@ -106,6 +107,25 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
     if (await confirm({ title: `Delete draft ${q.quote_number}?`, confirmLabel: 'Delete', destructive: true })) del.mutate(q.id)
   }
 
+  async function decline() {
+    const yes = await confirm({
+      title: `Mark ${q.quote_number} declined?`,
+      description: 'The client can no longer accept it through their link.',
+      confirmLabel: 'Mark declined',
+      destructive: true,
+    })
+    if (yes) outcome.mutate({ id: q.id, status: 'declined' })
+  }
+
+  async function reopen() {
+    const yes = await confirm({
+      title: `Reopen ${q.quote_number}?`,
+      description: 'It goes back to awaiting an answer, and the recorded acceptance is cleared.',
+      confirmLabel: 'Reopen',
+    })
+    if (yes) outcome.mutate({ id: q.id, status: 'sent' })
+  }
+
   return (
     <li className={`flex flex-wrap items-center gap-3 ${compact ? 'py-1.5 text-xs' : 'p-3 text-sm'}`}>
       <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -125,7 +145,9 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
         <p className="truncate text-xs text-muted-foreground">
           {q.items.length} line{q.items.length === 1 ? '' : 's'}
           {q.valid_until ? ` · valid till ${dayFormat.format(new Date(q.valid_until))}` : ''}
-          {q.accepted_at ? ` · accepted by ${q.accepted_by_name ?? 'client'} ${dayFormat.format(new Date(q.accepted_at))}` : ''}
+          {q.accepted_at
+            ? ` · accepted by ${q.accepted_by_name ?? 'client'}${q.accepted_by_email ? ` (${q.accepted_by_email})` : ''}${q.accepted_ip ? ` from ${q.accepted_ip}` : ''} ${dayFormat.format(new Date(q.accepted_at))}`
+            : ''}
           {q.declined_at ? ` · declined${q.decline_reason ? `: ${q.decline_reason}` : ''}` : ''}
         </p>
       </div>
@@ -150,7 +172,26 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
               <span className="sr-only">Delete</span>
             </Button>
           )}
+          {/* Most answers arrive on the phone, not through the link. */}
+          {q.status === 'sent' && (
+            <>
+              <Button size="sm" variant="ghost" disabled={outcome.isPending} onClick={() => outcome.mutate({ id: q.id, status: 'accepted' })} title="They accepted — record it">
+                <Check />
+                <span className="sr-only">Mark accepted</span>
+              </Button>
+              <Button size="sm" variant="ghost" disabled={outcome.isPending} onClick={() => void decline()} title="They declined — record it">
+                <X />
+                <span className="sr-only">Mark declined</span>
+              </Button>
+            </>
+          )}
         </span>
+      )}
+      {canEdit && (q.status === 'accepted' || q.status === 'declined') && (
+        <Button size="sm" variant="ghost" disabled={outcome.isPending} onClick={() => void reopen()} title="Answered by mistake — put it back">
+          <RotateCcw />
+          <span className="sr-only">Reopen</span>
+        </Button>
       )}
     </li>
   )

@@ -29,6 +29,7 @@ import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
+import { claimRule } from './rules'
 
 /**
  * The CRM's objects around the deal: pipelines with their stages, contacts,
@@ -42,13 +43,6 @@ import { audit } from '../../lib/audit'
 const edit = requireAction('crm', 'edit')
 const create = requireAction('crm', 'create')
 const remove = requireAction('crm', 'delete')
-
-const pgMessage = (err: unknown): string | undefined => {
-  const m = (err as { message?: unknown })?.message
-  return typeof m === 'string' && m.length > 0 && m.length < 300 ? m : undefined
-}
-/** Claim a check failure so its own sentence reaches the client. */
-const claimRule = (code: string, err: unknown) => (code === 'P0001' || code === '22023' ? { rule: pgMessage(err) ?? 'Please check the details and try again.' } : undefined)
 
 const selectPipelines = (sql: TransactionSql) => sql`
   select p.id, p.name, p.is_default, p.position, p.created_at,

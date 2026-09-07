@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { createQuoteRequest, type CreateQuoteRequest, type CrmLead } from '@ipc/contracts'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
@@ -53,6 +53,16 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
   const totals = useMemo(() => computeInvoice(parsedLines, { intraState: intra, discount: Number(discount) || 0 }), [parsedLines, intra, discount])
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)))
+  // The order is kept on the quote and shown to the client, so it is worth
+  // being able to put the headline item first.
+  const moveLine = (i: number, dir: -1 | 1) =>
+    setLines((ls) => {
+      const next = [...ls]
+      const to = i + dir
+      if (to < 0 || to >= next.length) return ls
+      ;[next[i], next[to]] = [next[to]!, next[i]!]
+      return next
+    })
 
   function save() {
     setError(null)
@@ -104,9 +114,17 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
                     </option>
                   ))}
                 </Select>
-                <Button size="icon" variant="ghost" className="sm:col-span-1" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label="Remove line">
-                  <Trash2 className="size-4" />
-                </Button>
+                <span className="flex sm:col-span-1">
+                  <Button size="icon" variant="ghost" className="size-7" disabled={i === 0} onClick={() => moveLine(i, -1)} aria-label={`Move line ${i + 1} up`}>
+                    <ArrowUp className="size-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="size-7" disabled={i === lines.length - 1} onClick={() => moveLine(i, 1)} aria-label={`Move line ${i + 1} down`}>
+                    <ArrowDown className="size-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="size-7" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label={`Remove line ${i + 1}`}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </span>
               </div>
             ))}
             <div>

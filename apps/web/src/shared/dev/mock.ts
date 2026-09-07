@@ -348,6 +348,8 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
     return { ...crmQuotesFx[0], id: uid(0xd0), ...(body as Record<string, unknown>) }
   if (method === 'POST' && /^\/crm\/quotes\/[^/]+\/send$/.test(path))
     return { url: 'https://app.example/quote/accept?token=demo', open_url: null, delivery: 'none' }
+  if (method === 'POST' && /^\/crm\/quotes\/[^/]+\/outcome$/.test(path))
+    return { status: String((body as { status?: string }).status ?? 'accepted') }
   if (method === 'DELETE' && path.startsWith('/crm/quotes/')) return {}
   if (method === 'GET' && path === '/crm/prefs') return crmPrefsFx
   if (method === 'PUT' && path === '/crm/prefs') return { ...crmPrefsFx, ...(body as Record<string, unknown>) }
@@ -1663,6 +1665,8 @@ const crmQuotesFx = [
     sent_at: '2026-09-04T09:00:00Z',
     accepted_at: null,
     accepted_by_name: null,
+    accepted_by_email: null,
+    accepted_ip: null,
     declined_at: null,
     decline_reason: null,
     items: [
@@ -1691,6 +1695,8 @@ const crmQuotesFx = [
     sent_at: '2026-08-28T09:00:00Z',
     accepted_at: '2026-08-30T09:00:00Z',
     accepted_by_name: 'Meera',
+    accepted_by_email: 'meera@x.in',
+    accepted_ip: '203.0.113.7',
     declined_at: null,
     decline_reason: null,
     items: [

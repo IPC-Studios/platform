@@ -1224,6 +1224,9 @@ export const crmQuote = z.object({
   sent_at: isoDateTime.nullable(),
   accepted_at: isoDateTime.nullable(),
   accepted_by_name: z.string().nullable(),
+  accepted_by_email: z.string().nullable().default(null),
+  /** Kept as evidence when a client accepts through the public link. */
+  accepted_ip: z.string().nullable().default(null),
   declined_at: isoDateTime.nullable(),
   decline_reason: z.string().nullable(),
   items: z.array(quoteItem).default([]),
@@ -1262,6 +1265,18 @@ export const sendQuoteResponse = z.object({
 export type SendQuoteResponse = z.infer<typeof sendQuoteResponse>
 
 /** What the client sees on the public page. */
+/** Recording an answer that arrived off the link — by phone, in person. */
+export const setQuoteOutcomeRequest = z.object({
+  status: z.enum(['accepted', 'declined', 'sent']),
+  /** Who accepted, when the studio is recording it on their behalf. */
+  name: z.string().trim().max(160).optional(),
+  reason: z.string().trim().max(500).optional(),
+})
+export type SetQuoteOutcomeRequest = z.infer<typeof setQuoteOutcomeRequest>
+
+export const crmQuoteStatusResponse = z.object({ status: quoteStatus })
+export type CrmQuoteStatusResponse = z.infer<typeof crmQuoteStatusResponse>
+
 export const publicQuote = z.object({
   quote_number: z.string(),
   title: z.string().nullable(),
@@ -1276,6 +1291,8 @@ export const publicQuote = z.object({
   terms: z.string().nullable(),
   accepted_at: isoDateTime.nullable(),
   declined_at: isoDateTime.nullable(),
+  place_of_supply: z.string().nullable().default(null),
+  intra_state: z.boolean().default(true),
   studio: z.string(),
   client_name: z.string().nullable(),
   items: z.array(quoteItem),
