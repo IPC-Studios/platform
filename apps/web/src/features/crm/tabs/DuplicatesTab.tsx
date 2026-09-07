@@ -15,9 +15,11 @@ import { STAGE_TONE, prettyDate } from './shared'
 /**
  * Leads that share a phone number. Merge folds the others into a survivor;
  * the survivor keeps a note of what was folded in and can unmerge it.
- * `archivedLeads` are the ones merged so far, so the undo is right here.
+ * `archivedLeads` are the ones merged so far, so the undo is right here —
+ * and `allLeads` includes the survivors, which merge deliberately leaves
+ * unarchived and which the undo list therefore could not name.
  */
-export function DuplicatesTab({ archivedLeads }: { archivedLeads: readonly CrmLead[] }) {
+export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: readonly CrmLead[]; allLeads: readonly CrmLead[] }) {
   const { data, isLoading, isError, error, refetch } = useDuplicateGroups()
   const merge = useMerge()
   const unmerge = useUnmerge()
@@ -100,7 +102,7 @@ export function DuplicatesTab({ archivedLeads }: { archivedLeads: readonly CrmLe
             <p className="mt-0.5 text-xs text-muted-foreground">Unmerging brings the folded leads back exactly as they were.</p>
             <ul className="mt-3 divide-y divide-border">
               {[...merged.entries()].map(([survivorId, n]) => {
-                const survivor = archivedLeads.find((l) => l.id === survivorId)
+                const survivor = allLeads.find((l) => l.id === survivorId)
                 return (
                   <li key={survivorId} className="flex flex-wrap items-center gap-3 py-2 text-sm">
                     <span className="min-w-0 flex-1 truncate font-medium">{survivor?.name ?? survivor?.phone ?? 'Lead'}</span>

@@ -357,7 +357,6 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path.includes('/public/quote/')) return { ok: true }
   if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
     return atStage(dealLeads(), 'partial')
-  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/events$/.test(path)) return crmEventsFx
   if (method === 'POST' && /^\/crm\/leads\/[^/]+\/send-template$/.test(path))
     return { url: 'https://wa.me/919876543210?text=Hi', rendered: 'Hi', delivery: 'link' }
   if (method === 'POST' && path === '/crm/leads/bulk') return { updated: 0, previous: [] }
@@ -1782,18 +1781,6 @@ const crmIntegrationsFx = [
   { provider: 'twilio', status: 'connected', credentials_present: true, config: {}, last_error: null, last_sync_at: null, connected_by: uid(1), updated_at: '2026-09-01T09:00:00Z' },
 ]
 
-const crmEventsFx = [
-  {
-    id: uid(0xe0),
-    lead_id: uid(0xb1),
-    from_status: null,
-    to_status: 'new',
-    actor_id: null,
-    actor_name: null,
-    note: 'created',
-    created_at: '2026-08-01T09:00:00Z',
-  },
-]
 
 const crmTemplatesFx = [
   {

@@ -30,7 +30,6 @@ import {
   duplicateGroup,
   idResponse,
   leadCadence,
-  leadEvent,
   leadSourceRow,
   leadsQuery,
   mergeLeadsRequest,
@@ -131,25 +130,6 @@ export const crmRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not load leads.')
     return c.json(list.parse(rows))
-  })
-
-  .get('/leads/:id/events', async (c) => {
-    const id = uuidParam(c)
-    const rows = await attempt(c, 'crm.lead_events', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`
-          select e.id, e.lead_id, e.from_status, e.to_status, e.actor_id, u.name as actor_name, e.note, e.created_at
-          from crm_lead_events e
-          left join users u on u.user_id = e.actor_id
-          where e.lead_id = ${id}
-          order by e.created_at desc
-          limit 100`,
-      ),
-    )
-    if (!rows) fail(400, 'We could not load history.')
-    return c.json(leadEvent.array().parse(rows))
   })
 
   // Manual entry. add_lead carries the dedupe and round-robin the webhook path

@@ -74,6 +74,7 @@ function Crm() {
   const [openLead, setOpenLead] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
 
   const active = useLeads(false)
   // The full list, archived included, is only fetched when a tab needs it.
@@ -96,12 +97,12 @@ function Crm() {
       <PageHeader
         title="CRM"
         description="Manage new leads, follow-ups, reminders, and your lead pipeline in one place."
-        actions={<AddLeadDialog onAdded={(id) => setOpenLead(id)} />}
+        actions={<AddLeadDialog open={addOpen} onOpenChange={setAddOpen} onAdded={(id) => setOpenLead(id)} />}
       />
 
       <SummaryStrip totals={totals} leads={leads} expanded={showSummary} onToggle={() => setShowSummary((s) => !s)} />
 
-      <SetupChecklist leads={leads} onAddLead={() => setTab('inbox')} />
+      <SetupChecklist leads={leads} onAddLead={() => setAddOpen(true)} />
 
       <div role="tablist" aria-label="CRM sections" className="no-print mt-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
         {TABS.map((t) => (
@@ -162,7 +163,7 @@ function Crm() {
         ) : tab === 'imports' ? (
           <ImportsTab />
         ) : tab === 'duplicates' ? (
-          <DuplicatesTab archivedLeads={archived} />
+          <DuplicatesTab archivedLeads={archived} allLeads={allLeads} />
         ) : (
           <CrmSettingsTab leads={leads} archived={archived} />
         )}

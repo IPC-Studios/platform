@@ -19,10 +19,24 @@ const LABELS: Record<Field, string> = { name: 'Name', phone: 'Phone', email: 'Em
  * what the server dedupes on. Everything else can be filled in from the drawer
  * once there is time.
  */
-export function AddLeadDialog({ onAdded }: { onAdded?: (id: string) => void }) {
+export function AddLeadDialog({
+  onAdded,
+  open: openProp,
+  onOpenChange,
+}: {
+  onAdded?: (id: string) => void
+  /** Controlled when given, so the setup checklist can open it. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const add = useAddLead()
   const { canCreate } = useCrmAccess()
-  const [open, setOpen] = useState(false)
+  const [openSelf, setOpenSelf] = useState(false)
+  const open = openProp ?? openSelf
+  const setOpen = (v: boolean) => {
+    setOpenSelf(v)
+    onOpenChange?.(v)
+  }
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')

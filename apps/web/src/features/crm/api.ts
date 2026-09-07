@@ -42,7 +42,6 @@ import {
   duplicateGroup,
   idResponse,
   leadCadence,
-  leadEvent,
   lostReason,
   mergeLeadsResponse,
   moveStageResponse,
@@ -141,15 +140,6 @@ export function useTeamStats(range: CrmStatsQuery) {
   return useCrmQuery(['team-stats', range.from, range.to], () =>
     callApi(`/crm/team-stats?from=${range.from}&to=${range.to}`, { responseSchema: crmTeamStatsRow.array() }),
   )
-}
-
-export function useLeadEvents(id: string) {
-  const { session } = useAuth()
-  return useQuery({
-    queryKey: ['crm', 'events', id],
-    queryFn: () => callApi(`/crm/leads/${id}/events`, { responseSchema: leadEvent.array() }),
-    enabled: !!session && !!id,
-  })
 }
 
 function useCrmMutation<TInput, TOutput>(
