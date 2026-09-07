@@ -141,6 +141,9 @@ as $$
     'contact_lifecycle', (select c.lifecycle from crm_contacts c where c.id = p_lead.contact_id)
   )
 $$;
+-- Definer, and it counts rows for whatever lead row it is handed, so it stays
+-- internal: crm_cond_matches() and crm_score_lead() are the only callers.
+revoke all on function crm_lead_facts(crm_leads) from public, anon, authenticated;
 
 -- One comparison. Numbers compare as numbers, everything else as text
 -- (ISO dates sort correctly as text).
@@ -206,6 +209,7 @@ begin
   return true;
 end;
 $$;
+revoke all on function crm_cond_matches(jsonb, crm_leads, text) from public, anon, authenticated;
 
 -- ══════════════════════════════════════════════════════════════
 -- 3. Scoring
@@ -250,6 +254,11 @@ begin
   end loop;
 end $$;
 
+-- The three entry points below take a bare id and run as definer, so each one
+-- checks the caller. A session that belongs to a studio may only touch that
+-- studio's rows; a caller with no studio in scope — the cron as service_role,
+-- and the anon webhook path that inserts leads — is left alone, because those
+-- run on behalf of every tenant by design.
 -- Recompute one lead's score from the studio's rules plus any workflow
 -- adjustment. Returns the new score; enrolls 'score_changed' workflows when
 -- it moved.
@@ -260,13 +269,17 @@ security definer
 set search_path = public
 as $$
 declare
-  v_lead  crm_leads;
-  v_facts jsonb;
-  v_score int := 0;
+  v_lead    crm_leads;
+  v_facts   jsonb;
+  v_score   int := 0;
+  v_company uuid := get_current_company_id();
   r crm_scoring_rules;
 begin
   select * into v_lead from crm_leads where id = p_lead;
   if not found then return 0; end if;
+  if v_company is not null and v_company is distinct from v_lead.company_id then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
   v_facts := crm_lead_facts(v_lead);
   for r in select * from crm_scoring_rules where company_id = v_lead.company_id and is_active loop
     if crm_cond_op(v_facts -> r.field, r.op, r.value) then v_score := v_score + r.points; end if;
@@ -360,6 +373,9 @@ begin
   return v_action;
 end;
 $$;
+-- It writes against whatever lead row it is handed, so it must never be
+-- callable directly: crm_run_enrollment() is the only caller.
+revoke all on function crm_workflow_do_action(crm_leads, jsonb, crm_workflows) from public, anon, authenticated;
 
 -- Execute an enrollment from its current step until it waits, exits or
 -- finishes. Every step is appended to the enrollment's log.
@@ -379,9 +395,14 @@ declare
   v_result text;
   v_amount int;
   v_unit text;
+  v_explicit boolean;
+  v_company uuid := get_current_company_id();
 begin
   select * into v_e from crm_workflow_enrollments where id = p_enrollment and status = 'active';
   if not found then return 'skipped'; end if;
+  if v_company is not null and v_company is distinct from v_e.company_id then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
   select * into v_wf from crm_workflows where id = v_e.workflow_id;
   if not found or not v_wf.is_active then
     update crm_workflow_enrollments set status = 'exited', exit_reason = 'workflow off', next_at = null where id = p_enrollment;
@@ -422,11 +443,22 @@ begin
         return 'waiting';
       elsif v_step.kind = 'branch' then
         if crm_cond_matches(jsonb_build_object('conditions', coalesce(v_step.config->'conditions', '[]'::jsonb)), v_lead, null) then
+          v_explicit := (v_step.config->>'yes_step') is not null;
           v_next := coalesce((v_step.config->>'yes_step')::int, v_e.current_step + 1);
           v_result := 'yes';
         else
+          v_explicit := (v_step.config->>'no_step') is not null;
           v_next := coalesce((v_step.config->>'no_step')::int, v_e.current_step + 1);
           v_result := 'no';
+        end if;
+        -- Falling off the end is how a workflow finishes, so an implicit
+        -- "next step" that does not exist is fine. A branch that NAMES a step
+        -- which was since deleted is a broken workflow, and saying so beats
+        -- marking the enrollment complete as though the branch had run.
+        if v_explicit and not exists (
+          select 1 from crm_workflow_steps s where s.workflow_id = v_wf.id and s.step_no = v_next
+        ) then
+          raise exception 'step % branches to step %, which does not exist', v_step.step_no, v_next using errcode = '22023';
         end if;
       elsif v_step.kind = 'exit' then
         update crm_workflow_enrollments
@@ -464,9 +496,13 @@ declare
   v_wf crm_workflows;
   v_id uuid;
   v_n int := 0;
+  v_company uuid := get_current_company_id();
 begin
   select * into v_lead from crm_leads where id = p_lead;
   if not found then return 0; end if;
+  if v_company is not null and v_company is distinct from v_lead.company_id then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
   for v_wf in
     select * from crm_workflows
     where company_id = v_lead.company_id and is_active and trigger = p_trigger

@@ -255,6 +255,9 @@ begin
   return v_legacy[least(v_rank, 3) + 1];
 end;
 $$;
+-- Definer, so it reads stages regardless of RLS: keep it off the public role.
+revoke all on function crm_stage_status(uuid) from public, anon;
+grant execute on function crm_stage_status(uuid) to authenticated;
 
 -- The stage a legacy status lands in: the stage with that key, else the
 -- pipeline's won/lost stage, else the open stage at the same rank.
@@ -286,6 +289,10 @@ begin
   return v;
 end;
 $$;
+-- Deleting a pipeline re-homes its deals through this as the caller, so
+-- `authenticated` keeps it; nobody else needs it.
+revoke all on function crm_stage_for_status(uuid, text) from public, anon;
+grant execute on function crm_stage_for_status(uuid, text) to authenticated;
 
 -- The contact a deal belongs to: the studio's row for that number, created
 -- when there is none. A deal without a number gets a contact of its own.
@@ -317,6 +324,9 @@ begin
   return v;
 end;
 $$;
+-- It takes the company as an argument and writes with it, so it must never be
+-- callable directly: crm_leads_sync() is the only caller, and runs as definer.
+revoke all on function crm_link_contact(uuid, uuid, text, text, text, text, uuid, text) from public, anon, authenticated;
 
 -- The one trigger that keeps a deal consistent. It runs first (its name sorts
 -- before every other crm_leads trigger) so the event log, the automations
@@ -547,6 +557,7 @@ set search_path = public
 as $$
 declare
   v_company uuid := get_current_company_id();
+  v_pipeline uuid;
 begin
   if v_company is null or not is_current_user_active() then
     raise exception 'not allowed' using errcode = '42501';
@@ -554,10 +565,20 @@ begin
   if p_patch ? 'status' and p_patch->>'status' not in ('new','contacted','qualified','proposal_sent','converted','lost') then
     raise exception 'unknown status' using errcode = '22023';
   end if;
-  if p_patch ? 'stage_id' and not exists (
-    select 1 from crm_pipeline_stages s where s.id = (p_patch->>'stage_id')::uuid and s.company_id = v_company
-  ) then
-    raise exception 'unknown stage' using errcode = '22023';
+  if p_patch ? 'stage_id' then
+    select s.pipeline_id into v_pipeline from crm_pipeline_stages s
+     where s.id = (p_patch->>'stage_id')::uuid and s.company_id = v_company;
+    if v_pipeline is null then
+      raise exception 'unknown stage' using errcode = '22023';
+    end if;
+    -- crm_move_stage() refuses a stage from another pipeline; a bulk edit must
+    -- refuse it too, or a deal lands in a pipeline it was never in.
+    if exists (
+      select 1 from crm_leads l
+      where l.id = any(p_ids) and l.company_id = v_company and l.pipeline_id is distinct from v_pipeline
+    ) then
+      raise exception 'That stage belongs to another pipeline.' using errcode = 'P0001';
+    end if;
   end if;
 
   return query

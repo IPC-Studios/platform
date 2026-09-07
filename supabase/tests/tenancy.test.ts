@@ -3151,3 +3151,121 @@ describe('CRM quotes, preferences, lost analysis (0041)', () => {
     expect(p.rows[0]!.prefs.columns).toEqual(['name'])
   })
 })
+
+describe('CRM guards — execute privileges and cross-studio calls', () => {
+  let db: PGlite
+  const ownerA = '1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a'
+  const ownerB = '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b'
+  let leadB = ''
+  let stageA = ''
+  let otherPipelineStageA = ''
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${ownerA}','a@guards.test'),('${ownerB}','b@guards.test');`,
+    )
+    await asUser(db, ownerA)
+    await db.query(`select register_company_and_admin('Studio A','Owner A');`)
+    stageA = (
+      await db.query<{ id: string }>(
+        `select id from crm_pipeline_stages where company_id = get_current_company_id() and key = 'qualified';`,
+      )
+    ).rows[0]!.id
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipelines (company_id, name) values (get_current_company_id(), 'Corporate') returning id;`,
+      )
+    ).rows[0]!.id
+    otherPipelineStageA = (
+      await db.query<{ id: string }>(
+        `insert into crm_pipeline_stages (pipeline_id, company_id, name, key, position)
+         values ('${other}', get_current_company_id(), 'Brief', 'brief', 0) returning id;`,
+      )
+    ).rows[0]!.id
+
+    await asUser(db, ownerB)
+    await db.query(`select register_company_and_admin('Studio B','Owner B');`)
+    leadB = (await db.query<{ id: string }>(`select add_lead('B lead', '9876990001', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+  })
+
+  // The helpers that take a company id or a whole row and write with it must
+  // not be reachable from a session at all — the trigger is their only caller.
+  it('the internal definer helpers are not executable by anon or authenticated', async () => {
+    const internal = [
+      'crm_link_contact(uuid, uuid, text, text, text, text, uuid, text)',
+      'crm_workflow_do_action(crm_leads, jsonb, crm_workflows)',
+      'crm_lead_facts(crm_leads)',
+      'crm_cond_matches(jsonb, crm_leads, text)',
+      'crm_ensure_default_pipeline(uuid)',
+      'crm_ensure_scoring_defaults(uuid)',
+    ]
+    for (const sig of internal) {
+      const r = await db.query<{ a: boolean; n: boolean }>(
+        `select has_function_privilege('authenticated', '${sig}', 'execute') as a,
+                has_function_privilege('anon', '${sig}', 'execute') as n;`,
+      )
+      expect(r.rows[0], sig).toEqual({ a: false, n: false })
+    }
+  })
+
+  it('no CRM definer function is executable by anon except the tokened quote pages', async () => {
+    const rows = await db.query<{ name: string; args: string }>(
+      `select p.proname as name, pg_get_function_identity_arguments(p.oid) as args
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.prosecdef and p.prorettype <> 'trigger'::regtype
+         and p.proname like 'crm%'
+         and has_function_privilege('anon', p.oid, 'execute');`,
+    )
+    expect(rows.rows.map((r) => r.name)).toEqual([])
+  })
+
+  it('a studio cannot score, enroll or run a workflow on another studio’s lead', async () => {
+    await asUser(db, ownerA)
+    await expect(db.query(`select crm_score_lead('${leadB}');`)).rejects.toThrow(/not allowed/)
+    await expect(db.query(`select crm_enroll_workflows('${leadB}', 'manual', null);`)).rejects.toThrow(/not allowed/)
+    // Its own lead is fine.
+    const mine = (await db.query<{ id: string }>(`select add_lead('A lead', '9876990002', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await expect(db.query(`select crm_score_lead('${mine}');`)).resolves.toBeDefined()
+  })
+
+  it('a bulk move refuses a stage from another pipeline', async () => {
+    await asUser(db, ownerA)
+    const lead = (await db.query<{ id: string }>(`select add_lead('Bulk pipe', '9876990003', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${lead}']::uuid[], '{"stage_id":"${otherPipelineStageA}"}'::jsonb);`),
+    ).rejects.toThrow(/another pipeline/)
+    // The same move inside the deal's own pipeline is allowed.
+    const ok = await db.query(`select * from crm_bulk_patch(array['${lead}']::uuid[], '{"stage_id":"${stageA}"}'::jsonb);`)
+    expect(ok.rows).toHaveLength(1)
+    const after = await db.query<{ status: string }>(`select status from crm_leads where id = '${lead}';`)
+    expect(after.rows[0]!.status).toBe('qualified')
+  })
+
+  it('a branch that names a step which no longer exists errors the enrollment instead of completing it', async () => {
+    await asUser(db, ownerA)
+    const wf = await workflow(db, 'Broken branch', 'manual', {}, [
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: false }], yes_step: 9, no_step: 9 } },
+    ])
+    const lead = (await db.query<{ id: string }>(`select add_lead('Broken', '9876990004', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)
+    const e = await db.query<{ status: string; exit_reason: string }>(
+      `select status, exit_reason from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`,
+    )
+    expect(e.rows[0]!.status).toBe('errored')
+    expect(e.rows[0]!.exit_reason).toContain('does not exist')
+  })
+
+  it('a branch that simply runs off the end still completes normally', async () => {
+    await asUser(db, ownerA)
+    const wf = await workflow(db, 'Open branch', 'manual', {}, [
+      { kind: 'branch', config: { conditions: [{ field: 'is_hot', op: 'eq', value: false }], yes_step: null, no_step: null } },
+    ])
+    const lead = (await db.query<{ id: string }>(`select add_lead('Runs off', '9876990005', null, 'enquiry', null, null) as id;`)).rows[0]!.id
+    await db.query(`select crm_enroll_manual('${wf}', array['${lead}']::uuid[]);`)
+    const e = await db.query<{ status: string }>(
+      `select status from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`,
+    )
+    expect(e.rows[0]!.status).toBe('completed')
+  })
+})

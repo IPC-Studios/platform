@@ -156,13 +156,19 @@ export const crmActivitiesRouter = new Hono<AppEnv>()
       }),
     )
     if (!rows) fail(400, 'We could not load the timeline.')
-    const items = [
+    const merged = [
       ...rows.events.map((e) => ({ kind: 'event' as const, at: String(e.created_at), event: e })),
       ...rows.activities.map((a) => ({ kind: 'activity' as const, at: String(a.created_at), activity: a })),
-    ]
-      .sort((a, b) => b.at.localeCompare(a.at) || (a.kind === 'event' ? -1 : 1))
-      .slice(0, limit)
-    const more = rows.events.length + rows.activities.length > items.length || rows.events.length === limit || rows.activities.length === limit
+    ].sort((a, b) => b.at.localeCompare(a.at) || (a.kind === 'event' ? -1 : 1))
+
+    // The cursor is a timestamp and the next page asks for strictly older
+    // rows, so a page must not end in the middle of a group that shares one
+    // instant — whatever was left behind would never be asked for again.
+    // Carry the whole group instead; a page may run slightly long.
+    let end = Math.min(limit, merged.length)
+    while (end > 0 && end < merged.length && merged[end]!.at === merged[end - 1]!.at) end += 1
+    const items = merged.slice(0, end)
+    const more = merged.length > items.length || rows.events.length === limit || rows.activities.length === limit
     return c.json(timelineResponse.parse({ items, next_cursor: more && items.length ? items[items.length - 1]!.at : null }))
   })
 
