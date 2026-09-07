@@ -210,6 +210,22 @@ export const crmObjectsRouter = new Hono<AppEnv>()
     if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
     const id = uuidParam(c)
     const { required_fields, ...rest } = parsed.data
+    // Changing what a stage MEANS can strand a pipeline with no way to win
+    // or lose, which crm_stage_for_status() then cannot resolve.
+    if (rest.kind) {
+      const blocked = await attempt(c, 'crm.stage_kind_check', () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const [s] = await sql<{ kind: string; pipeline_id: string }[]>`
+            select kind, pipeline_id from crm_pipeline_stages where id = ${id}`
+          if (!s || s.kind === rest.kind || s.kind === 'open') return null
+          const [others] = await sql<{ n: number }[]>`
+            select count(*)::int as n from crm_pipeline_stages
+            where pipeline_id = ${s.pipeline_id} and kind = ${s.kind} and id <> ${id}`
+          return (others?.n ?? 0) === 0 ? s.kind : null
+        }),
+      )
+      if (blocked) fail(422, `This is the pipeline's only ${blocked === 'won' ? 'won' : 'lost'} stage. Add another before changing it.`)
+    }
     const rows = await attempt(c, 'crm.stage_update', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         if (required_fields) {

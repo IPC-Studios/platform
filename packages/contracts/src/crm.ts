@@ -595,11 +595,19 @@ export const scoringRule = z.object({
 })
 export type ScoringRule = z.infer<typeof scoringRule>
 
+/** Same shape a workflow condition takes, so the two rule editors agree. */
+const scoringValue = z.union([
+  z.string().max(200),
+  z.number(),
+  z.boolean(),
+  z.array(z.union([z.string().max(200), z.number()])).max(50),
+])
+
 export const createScoringRuleRequest = z.object({
   label: z.string().trim().min(2).max(80),
   field: z.string().trim().min(1).max(40),
   op: conditionOp.default('eq'),
-  value: z.union([z.string().max(200), z.number(), z.boolean()]).optional(),
+  value: scoringValue.optional(),
   points: z.number().int().min(-100).max(100),
 })
 export type CreateScoringRuleRequest = z.infer<typeof createScoringRuleRequest>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Repeat, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Repeat, Trash2, X } from 'lucide-react'
 import { createCadenceRequest, type CadenceStepInput } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
@@ -28,6 +28,8 @@ export function CadencesSection() {
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
   const canDelete = access.hasAction('crm', 'delete')
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   async function onDelete(id: string, name: string, active: number) {
     const yes = await confirm({
@@ -76,8 +78,28 @@ export function CadencesSection() {
                 </div>
                 <StatusBadge tone={c.active_leads > 0 ? 'info' : 'neutral'}>{c.active_leads} on it</StatusBadge>
                 <StatusBadge tone={c.is_active ? 'success' : 'neutral'}>{c.is_active ? 'On' : 'Off'}</StatusBadge>
-                {canEdit && (
+                {canEdit && renaming === c.id && (
+                  <span className="flex items-center gap-1">
+                    <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-8 w-44" autoFocus aria-label="Cadence name" />
+                    <Button
+                      size="sm"
+                      disabled={renameValue.trim().length < 2 || update.isPending}
+                      onClick={() => update.mutate({ id: c.id, patch: { name: renameValue.trim() } }, { onSuccess: () => setRenaming(null) })}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRenaming(null)}>
+                      <X />
+                      <span className="sr-only">Cancel rename</span>
+                    </Button>
+                  </span>
+                )}
+                {canEdit && renaming !== c.id && (
                   <>
+                    <Button size="sm" variant="ghost" onClick={() => { setRenameValue(c.name); setRenaming(c.id) }} title="Rename">
+                      <Pencil />
+                      <span className="sr-only">Rename {c.name}</span>
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => update.mutate({ id: c.id, patch: { is_active: !c.is_active } })}>
                       {c.is_active ? 'Turn off' : 'Turn on'}
                     </Button>

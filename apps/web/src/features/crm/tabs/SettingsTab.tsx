@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Archive, ArrowDown, ArrowUp, Columns3, Gauge, KanbanSquare, Megaphone, Plug, Plus, RefreshCw, RotateCcw, Timer, Trash2, XCircle } from 'lucide-react'
-import type { ConditionOp, CrmLead, PipelineStage, StageRequiredField } from '@ipc/contracts'
+import type { ConditionOp, CrmLead, PipelineStage, StageKind, StageRequiredField } from '@ipc/contracts'
 import { CONDITION_FIELDS, OP_LABEL, REQUIRED_FIELD_LABEL, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -41,7 +41,12 @@ import {
 } from '../api'
 import { DEFAULT_INBOX_COLUMNS } from './shared'
 
-const REQUIRED_OPTIONS: StageRequiredField[] = ['deal_value', 'close_date', 'email', 'name', 'assigned_to', 'title']
+const REQUIRED_OPTIONS: StageRequiredField[] = ['deal_value', 'close_date', 'email', 'name', 'assigned_to', 'title', 'lost_reason']
+const STAGE_KINDS: Array<{ key: StageKind; label: string; hint: string }> = [
+  { key: 'open', label: 'Open', hint: 'still being worked' },
+  { key: 'won', label: 'Won', hint: 'counts as a sale' },
+  { key: 'lost', label: 'Lost', hint: 'asks for a reason' },
+]
 
 /** Housekeeping: the things done once a quarter, not once an hour. */
 export function CrmSettingsTab({ leads, archived }: { leads: readonly CrmLead[]; archived: readonly CrmLead[] }) {
@@ -186,6 +191,7 @@ function PipelinesCard() {
   const [pick, setPick] = useState<string | null>(null)
   const [newPipeline, setNewPipeline] = useState('')
   const [newStage, setNewStage] = useState('')
+  const [newStageKind, setNewStageKind] = useState<StageKind>('open')
   const [editing, setEditing] = useState<string | null>(null)
 
   const list = data ?? []
@@ -311,15 +317,27 @@ function PipelinesCard() {
             {current && canEdit && (
               <div className="flex flex-wrap items-center gap-2">
                 <Input value={newStage} onChange={(e) => setNewStage(e.target.value)} placeholder="New stage, e.g. Negotiation" className="w-56" aria-label="New stage name" />
+                <Select value={newStageKind} onChange={(e) => setNewStageKind(e.target.value as StageKind)} className="w-32" aria-label="What the stage means">
+                  {STAGE_KINDS.map((k) => (
+                    <option key={k.key} value={k.key}>
+                      {k.label}
+                    </option>
+                  ))}
+                </Select>
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={!newStage.trim() || createStage.isPending}
-                  onClick={() => createStage.mutate({ pipelineId: current.id, name: newStage.trim(), kind: 'open', required_fields: [] }, { onSuccess: () => setNewStage('') })}
+                  onClick={() =>
+                    createStage.mutate(
+                      { pipelineId: current.id, name: newStage.trim(), kind: newStageKind, required_fields: [] },
+                      { onSuccess: () => { setNewStage(''); setNewStageKind('open') } },
+                    )
+                  }
                 >
                   <Plus /> Add stage
                 </Button>
-                <span className="text-xs text-muted-foreground">New stages go before Won and Lost; use the arrows to place them.</span>
+                <span className="text-xs text-muted-foreground">Use the arrows to place it. A second Won stage lets you tell a deposit from a full booking.</span>
               </div>
             )}
           </>
@@ -329,8 +347,17 @@ function PipelinesCard() {
   )
 }
 
-function StageEditor({ stage, onSave, pending }: { stage: PipelineStage; onSave: (patch: { name?: string; probability_default?: number; wip_limit?: number | null; required_fields?: StageRequiredField[] }) => void; pending: boolean }) {
+function StageEditor({
+  stage,
+  onSave,
+  pending,
+}: {
+  stage: PipelineStage
+  onSave: (patch: { name?: string; kind?: StageKind; probability_default?: number; wip_limit?: number | null; required_fields?: StageRequiredField[] }) => void
+  pending: boolean
+}) {
   const [name, setName] = useState(stage.name)
+  const [kind, setKind] = useState<StageKind>(stage.kind)
   const [prob, setProb] = useState(String(stage.probability_default))
   const [wip, setWip] = useState(stage.wip_limit === null ? '' : String(stage.wip_limit))
   const [required, setRequired] = useState<StageRequiredField[]>(stage.required_fields)
@@ -345,14 +372,24 @@ function StageEditor({ stage, onSave, pending }: { stage: PipelineStage; onSave:
         <Input id={`st-name-${stage.id}`} value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="flex flex-col gap-1">
+        <Label htmlFor={`st-kind-${stage.id}`}>This stage means</Label>
+        <Select id={`st-kind-${stage.id}`} value={kind} onChange={(e) => setKind(e.target.value as StageKind)}>
+          {STAGE_KINDS.map((k) => (
+            <option key={k.key} value={k.key}>
+              {k.label} — {k.hint}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
         <Label htmlFor={`st-prob-${stage.id}`}>Default probability %</Label>
-        <Input id={`st-prob-${stage.id}`} type="number" min={0} max={100} value={prob} onChange={(e) => setProb(e.target.value)} disabled={stage.kind !== 'open'} />
+        <Input id={`st-prob-${stage.id}`} type="number" min={0} max={100} value={prob} onChange={(e) => setProb(e.target.value)} disabled={kind !== 'open'} />
       </div>
       <div className="flex flex-col gap-1">
         <Label htmlFor={`st-wip-${stage.id}`}>WIP limit</Label>
         <Input id={`st-wip-${stage.id}`} type="number" min={1} max={1000} value={wip} onChange={(e) => setWip(e.target.value)} placeholder="No limit" />
       </div>
-      {stage.kind === 'open' && (
+      {kind === 'open' && (
         <div className="flex flex-col gap-1 sm:col-span-3">
           <Label>Required before entering</Label>
           <div className="flex flex-wrap gap-2">
@@ -371,7 +408,7 @@ function StageEditor({ stage, onSave, pending }: { stage: PipelineStage; onSave:
         </div>
       )}
       <div className="sm:col-span-3">
-        <Button size="sm" disabled={!valid || pending} onClick={() => onSave({ name: name.trim(), probability_default: p, wip_limit: w, required_fields: required })}>
+        <Button size="sm" disabled={!valid || pending} onClick={() => onSave({ name: name.trim(), kind, probability_default: p, wip_limit: w, required_fields: required })}>
           Save stage
         </Button>
       </div>
@@ -491,7 +528,7 @@ function IntegrationsCard() {
   )
 }
 
-const OPS: ConditionOp[] = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'is_null', 'not_null']
+const OPS: ConditionOp[] = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'is_null', 'not_null']
 
 /** Points a lead earns for each fact about it; the sum is its score, recomputed on every change. */
 function ScoringCard() {
@@ -522,13 +559,15 @@ function ScoringCard() {
   function add() {
     const p = Number(points)
     if (!Number.isInteger(p) || label.trim().length < 2) return
-    const v: string | number | boolean | undefined = noValue
+    const v: string | number | boolean | Array<string | number> | undefined = noValue
       ? undefined
-      : meta?.type === 'number'
-        ? Number(value)
-        : meta?.type === 'boolean'
-          ? value !== 'false'
-          : value
+      : op === 'in'
+        ? value.split(',').map((x) => x.trim()).filter(Boolean).map((x) => (meta?.type === 'number' ? Number(x) : x))
+        : meta?.type === 'number'
+          ? Number(value)
+          : meta?.type === 'boolean'
+            ? value !== 'false'
+            : value
     create.mutate({ label: label.trim(), field, op, points: p, ...(v === undefined ? {} : { value: v }) }, { onSuccess: () => { setLabel(''); setValue('') } })
   }
 
@@ -551,7 +590,9 @@ function ScoringCard() {
                   <span className="font-medium">{r.label}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     {CONDITION_FIELDS.find((f) => f.key === r.field)?.label ?? r.field} {OP_LABEL[r.op]}
-                    {r.op === 'is_null' || r.op === 'not_null' ? '' : ` ${String(r.value ?? '')}`}
+                    {r.op === 'is_null' || r.op === 'not_null'
+                      ? ''
+                      : ` ${Array.isArray(r.value) ? r.value.join(', ') : String(r.value ?? '')}`}
                   </span>
                 </span>
                 <StatusBadge tone={r.points >= 0 ? 'success' : 'danger'}>
@@ -603,6 +644,8 @@ function ScoringCard() {
                   <option value="true">yes</option>
                   <option value="false">no</option>
                 </Select>
+              ) : op === 'in' ? (
+                <Input value={value} onChange={(e) => setValue(e.target.value)} className="w-44" placeholder="referral, webform" aria-label="Values, comma separated" />
               ) : (
                 <Input type={meta?.type === 'number' ? 'number' : meta?.type === 'date' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} className="w-32" aria-label="Value" />
               ))}
