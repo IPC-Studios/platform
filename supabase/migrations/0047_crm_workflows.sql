@@ -1,4 +1,4 @@
--- 0040: CRM workflows — multi-step automations with delays and branches,
+-- 0047: CRM workflows — multi-step automations with delays and branches,
 -- enrollment that exits on a reply, an outbox for template sends, and lead
 -- scoring.
 --

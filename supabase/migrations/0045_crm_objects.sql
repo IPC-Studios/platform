@@ -1,4 +1,4 @@
--- 0038: CRM objects — pipelines with stages, contacts, companies, lost
+-- 0045: CRM objects — pipelines with stages, contacts, companies, lost
 -- reasons — and the loose ends 0037 left: bulk edits that can lose a lead,
 -- a phone edit that re-normalises, shared views that do not collide, a
 -- forecast anyone can call, and the SLA breach sweep the index was built for.

@@ -71,10 +71,10 @@ async function freshDb() {
   await db.exec(mig('0035_crm_v3.sql'))
   await db.exec(mig('0036_crm_v4.sql'))
   await db.exec(mig('0037_truly_amazing.sql'))
-  await db.exec(mig('0038_crm_objects.sql'))
-  await db.exec(mig('0039_crm_activities.sql'))
-  await db.exec(mig('0040_crm_workflows.sql'))
-  await db.exec(mig('0041_crm_quotes_prefs.sql'))
+  await db.exec(mig('0045_crm_objects.sql'))
+  await db.exec(mig('0046_crm_activities.sql'))
+  await db.exec(mig('0047_crm_workflows.sql'))
+  await db.exec(mig('0048_crm_quotes_prefs.sql'))
   return db
 }
 
@@ -2896,7 +2896,7 @@ describe('CRM workflows — delays, branches, replies, scoring, outbox (0040)', 
       `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
        values (get_current_company_id(), 'Legacy rule', 'lead_created', '{}', 'mark_hot', '{}');`,
     )
-    await db.exec(readMig('0040_crm_workflows.sql'))
+    await db.exec(readMig('0047_crm_workflows.sql'))
     const wf = await db.query<{ name: string; is_active: boolean; kind: string; config: { action: string } }>(
       `select w.name, w.is_active, s.kind, s.config from crm_workflows w join crm_workflow_steps s on s.workflow_id = w.id where w.name = 'Legacy rule';`,
     )

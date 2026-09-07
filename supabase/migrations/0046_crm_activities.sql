@@ -1,4 +1,4 @@
--- 0039: CRM activities — calls, emails, meetings, notes, tasks and messages
+-- 0046: CRM activities — calls, emails, meetings, notes, tasks and messages
 -- as first-class rows, and the integrations a studio has connected.
 --
 -- crm_lead_events (0032) is the stage/audit trail: what the system saw. An

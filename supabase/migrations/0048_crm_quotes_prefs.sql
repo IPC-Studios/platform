@@ -1,4 +1,4 @@
--- 0041: CRM quotes, per-person preferences, and the reports the lost reasons
+-- 0048: CRM quotes, per-person preferences, and the reports the lost reasons
 -- and the forecast were collected for.
 --
 -- A quote is the priced offer on a deal: numbered like an invoice, built
