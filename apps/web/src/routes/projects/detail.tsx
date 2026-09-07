@@ -1,6 +1,24 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
-import { Pencil, Plus, Trash2, IndianRupee } from 'lucide-react'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import {
+  ArrowRight,
+  Briefcase,
+  Camera,
+  CircleCheck,
+  Clock,
+  FileText,
+  IndianRupee,
+  LayoutGrid,
+  Package,
+  PauseCircle,
+  Pencil,
+  Phone,
+  Plus,
+  Trash2,
+  Users,
+  Wallet,
+  X,
+} from 'lucide-react'
 import type {
   DeliverableInput,
   PaymentInput,
@@ -8,27 +26,56 @@ import type {
   UpdateProjectRequest,
 } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
-import { PageHeader } from '@/shared/layout/page-header'
 import { QuotationLinkDialog } from '@/features/projects/QuotationLinkDialog'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useConfirm } from '@/shared/ui/confirm'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
-import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR, humanize } from '@/shared/ui/format'
+import { cn } from '@/shared/ui/cn'
 import {
   useProject,
   useUpdateProject,
   useAddDeliverable,
   useDeleteDeliverable,
   useAddPayment,
+  useDeleteProject,
 } from '@/features/projects/api'
+
+/** The tabs across a project. Each one is a view of the same project. */
+const TABS = [
+  { value: 'overview', label: 'Overview', icon: LayoutGrid },
+  { value: 'deliverables', label: 'Deliverables', icon: Package },
+  { value: 'billing', label: 'Billing', icon: Wallet },
+] as const
+type Tab = (typeof TABS)[number]['value']
+
+const STATUS_TONE: Record<ProjectStatus, 'info' | 'success' | 'danger' | 'warning'> = {
+  active: 'info',
+  completed: 'success',
+  cancelled: 'danger',
+  on_hold: 'warning',
+}
+
+const STATUS_ICON: Record<ProjectStatus, typeof Clock> = {
+  active: Clock,
+  completed: CircleCheck,
+  cancelled: X,
+  on_hold: PauseCircle,
+}
+
+const dayFormat = new Intl.DateTimeFormat('en-IN', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+})
+const prettyDate = (iso: string) => dayFormat.format(new Date(iso))
 
 export function ProjectDetailPage() {
   return (
@@ -40,17 +87,22 @@ export function ProjectDetailPage() {
 
 function ProjectDetail() {
   const { id } = useParams({ from: '/authed/projects/$id' })
+  const navigate = useNavigate()
   const { data, isLoading, isError, refetch } = useProject(id)
   const access = useAccess()
   const canEdit = access.hasAction('projects', 'edit')
   const del = useDeleteDeliverable(id)
+  const update = useUpdateProject(id)
+  const removeProject = useDeleteProject()
   const confirm = useConfirm()
+  const [tab, setTab] = useState<Tab>('overview')
 
   if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
   const received = data.payments.reduce((s, p) => s + p.amount, 0)
   const balance = Math.max(0, data.total_cost - received)
+  const StatusIcon = STATUS_ICON[data.status]
 
   async function removeDeliverable(dId: string, title: string) {
     if (await confirm({ title: `Remove "${title}"?`, destructive: true, confirmLabel: 'Remove' })) {
@@ -58,28 +110,188 @@ function ProjectDetail() {
     }
   }
 
+  async function onDelete() {
+    const yes = await confirm({
+      title: `Delete ?`,
+      description:
+        'Its shoots, deliverables and tasks go with it. A project with payments recorded cannot be deleted — cancel it instead.',
+      confirmLabel: 'Delete project',
+      destructive: true,
+    })
+    if (yes) removeProject.mutate(id, { onSuccess: () => void navigate({ to: '/projects' }) })
+  }
+
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Projects', to: '/projects' }, { label: data.name }]} />
-      <PageHeader
-        title={data.name}
-        actions={
-          <div className="flex items-center gap-2">
-            <StatusBadge tone="info">{humanize(data.status)}</StatusBadge>
-            {canEdit && <QuotationLinkDialog projectId={id} />}
-            {canEdit && <EditProjectDialog id={id} name={data.name} status={data.status} packageCost={data.package_cost} />}
-          </div>
-        }
+      <Breadcrumbs
+        items={[
+          { label: 'Home', to: '/dashboard' },
+          { label: 'Projects', to: '/projects' },
+          { label: data.name },
+        ]}
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total" value={formatINR(data.total_cost)} />
-        <StatCard label="Package" value={formatINR(data.package_cost)} />
-        <StatCard label="Received" value={formatINR(received)} />
-        <StatCard label="Balance" value={formatINR(balance)} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">{data.name}</h1>
+            <StatusBadge tone={STATUS_TONE[data.status]}>
+              <StatusIcon className="mr-1 size-3" aria-hidden />
+              {humanize(data.status)}
+            </StatusBadge>
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Created {prettyDate(data.created_at)}
+          </p>
+        </div>
+
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status is one press here rather than buried in the edit dialog:
+                it is the field that changes most often. */}
+            <Select
+              value={data.status}
+              onChange={(e) => update.mutate({ status: e.target.value as ProjectStatus })}
+              aria-label="Project status"
+              className="w-40"
+            >
+              <option value="active">Active</option>
+              <option value="on_hold">On hold</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </Select>
+            <EditProjectDialog
+              id={id}
+              name={data.name}
+              status={data.status}
+              packageCost={data.package_cost}
+            />
+            <Button
+              variant="outline"
+              className="text-destructive hover:bg-destructive/10"
+              disabled={removeProject.isPending}
+              onClick={() => void onDelete()}
+            >
+              <Trash2 /> Delete
+            </Button>
+          </div>
+        )}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure icon={IndianRupee} label="Total cost" value={formatINR(data.total_cost)} />
+        <Figure icon={CircleCheck} label="Received" value={formatINR(received)} tone="success" />
+        <Figure icon={Clock} label="Pending payments" value={formatINR(balance)} tone="warning" />
+        <Figure icon={Briefcase} label="Balance" value={formatINR(balance)} tone="info" />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-1 rounded-lg border border-border bg-card p-1.5">
+        {TABS.map((t) => (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => setTab(t.value)}
+            aria-current={tab === t.value ? 'page' : undefined}
+            className={cn(
+              'flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+              tab === t.value
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            <t.icon className="size-4" aria-hidden />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {canEdit && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Quick actions:
+          </span>
+          <QuotationLinkDialog projectId={id} />
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/team-allocation">
+              <Users /> Allocation
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/shoots">
+              <Camera /> Shoots
+            </Link>
+          </Button>
+        </div>
+      )}
+
+      {tab === 'overview' && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <div className="flex flex-col gap-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Project &amp; client</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                <Fact label="Project" value={data.name} />
+                <Fact label="Status" value={humanize(data.status)} />
+                <Fact label="Created" value={prettyDate(data.created_at)} />
+                <Fact label="Client" value={data.client_name ?? '—'} />
+                <Fact label="Phone" value={data.client_phone ?? '—'} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Financial snapshot</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="flex flex-col gap-2 text-sm">
+                  <Money label="Package cost" value={data.package_cost} />
+                  <Money label="Additional" value={data.additional_deliverables_cost} />
+                  <Money label="Total project value" value={data.total_cost} accent />
+                  <Money label="Received" value={received} />
+                  <Money label="Balance due" value={balance} accent />
+                </dl>
+                {canEdit && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <AddPaymentDialog id={id} balance={balance} />
+                    <Button variant="outline" size="sm" onClick={() => setTab('billing')}>
+                      <FileText /> View payments
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="self-start">
+            <CardHeader className="pb-3">
+              <CardTitle>Client</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="font-medium">{data.client_name ?? 'No client on file'}</p>
+              {data.client_phone && (
+                <a
+                  href={`tel:${data.client_phone}`}
+                  className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <Phone className="size-3.5" aria-hidden />
+                  {data.client_phone}
+                </a>
+              )}
+              <Link
+                to="/clients"
+                className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+              >
+                View client <ArrowRight className="size-3.5" aria-hidden />
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'deliverables' && (
+      <div className="mt-4">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Deliverables</CardTitle>
@@ -118,6 +330,11 @@ function ProjectDetail() {
           </CardContent>
         </Card>
 
+      </div>
+      )}
+
+      {tab === 'billing' && (
+      <div className="mt-4">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Payments</CardTitle>
@@ -144,13 +361,65 @@ function ProjectDetail() {
           </CardContent>
         </Card>
       </div>
-
-      <div className="mt-6">
-        <Button asChild variant="outline">
-          <Link to="/projects">Back to projects</Link>
-        </Button>
-      </div>
+      )}
     </>
+  )
+}
+
+/** One figure in the strip under the header: icon tile, number, label. */
+function Figure({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: typeof Clock
+  label: string
+  value: string
+  tone?: 'success' | 'warning' | 'info'
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-center gap-3 p-4">
+        <span
+          className={cn(
+            'flex size-10 shrink-0 items-center justify-center rounded-lg',
+            tone === 'success'
+              ? 'bg-success/10 text-success'
+              : tone === 'warning'
+                ? 'bg-warning/10 text-warning'
+                : 'bg-primary/10 text-primary',
+          )}
+        >
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-xl font-semibold tabular-nums">{value}</p>
+          <p className="truncate text-sm text-muted-foreground">{label}</p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** A label and its value, side by side, the way the reference reads them. */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 border-b border-border/60 py-1.5 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-sm font-medium">{value}</span>
+    </div>
+  )
+}
+
+function Money({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('tabular-nums', accent ? 'font-semibold text-primary' : 'font-medium')}>
+        {formatINR(value)}
+      </dd>
+    </div>
   )
 }
 

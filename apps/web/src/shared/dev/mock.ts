@@ -106,6 +106,8 @@ const projectDetail: ProjectDetail = {
   name: 'Sharma Wedding',
   status: 'active',
   client_id: CLIENT.sharma,
+  client_name: 'Sharma Family',
+  client_phone: '9876543210',
   package_cost: 185000,
   additional_deliverables_cost: 42000,
   total_cost: 227000,

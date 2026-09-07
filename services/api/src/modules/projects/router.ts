@@ -200,6 +200,7 @@ export const projectsRouter = new Hono<AppEnv>()
         const rows = await sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost,
                  p.additional_deliverables_cost, p.total_cost, p.show_quotation, p.created_at,
+                 cl.name as client_name, cl.phone as client_phone,
                  coalesce((
                    select jsonb_agg(to_jsonb(d) order by d.created_at)
                    from deliverables d where d.project_id = p.id
@@ -211,7 +212,8 @@ export const projectsRouter = new Hono<AppEnv>()
                    from received_payments rp where rp.project_id = p.id
                  ), '[]'::jsonb) as payments
           from projects p
-          where p.id = ${id}`
+          left join clients cl on cl.id = p.client_id
+          where p.id = `
         return rows[0] ?? null
       }),
     )
@@ -234,6 +236,34 @@ export const projectsRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not update the project.')
     if (!rows.length) fail(404, 'That project was not found.')
     await audit(c, { action: 'project.update', entityType: 'project', entityId: id, after: parsed.data })
+    return c.body(null, 204)
+  })
+
+  /**
+   * Delete a project outright — shoots, deliverables and tasks go with it.
+   *
+   * Refused once money has been recorded against it. A payment is a financial
+   * record, and a studio that wants a paid project off the board wants it
+   * cancelled, not erased; the UI says so and offers that instead.
+   */
+  .delete('/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const outcome = await attempt(c, 'projects.delete', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const paid = await sql<{ n: number }[]>`
+          select count(*)::int as n from received_payments where project_id = ${id}`
+        if ((paid[0]?.n ?? 0) > 0) return 'has_payments' as const
+        const rows = await sql<{ id: string }[]>`
+          delete from projects where id = ${id} returning id`
+        return rows.length ? ('deleted' as const) : ('missing' as const)
+      }),
+    )
+    if (!outcome) fail(400, 'We could not delete this project.')
+    if (outcome === 'has_payments') {
+      fail(409, 'This project has payments recorded against it. Cancel it instead of deleting.')
+    }
+    if (outcome === 'missing') fail(404, 'That project was not found.')
+    await audit(c, { action: 'project.delete', entityType: 'project', entityId: id })
     return c.body(null, 204)
   })
 

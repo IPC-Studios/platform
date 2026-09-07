@@ -169,3 +169,19 @@ export function useIssueQuotation() {
       }),
   })
 }
+
+/**
+ * Delete a project. Refused by the API once payments exist, so the error it
+ * throws is the message worth showing.
+ */
+export function useDeleteProject() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      callApi(`/projects/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Project deleted')
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}

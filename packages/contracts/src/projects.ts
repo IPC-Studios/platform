@@ -98,6 +98,8 @@ export const projectDetail = z.object({
   name: z.string(),
   status: projectStatus,
   client_id: uuid,
+  client_name: z.string().nullable(),
+  client_phone: z.string().nullable(),
   package_cost: money,
   additional_deliverables_cost: money,
   total_cost: money,
