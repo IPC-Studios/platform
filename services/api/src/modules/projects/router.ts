@@ -213,7 +213,7 @@ export const projectsRouter = new Hono<AppEnv>()
                  ), '[]'::jsonb) as payments
           from projects p
           left join clients cl on cl.id = p.client_id
-          where p.id = `
+          where p.id = ${id}`
         return rows[0] ?? null
       }),
     )
