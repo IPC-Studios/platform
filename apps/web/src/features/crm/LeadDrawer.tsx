@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
   Archive,
@@ -23,6 +23,7 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
+import { formatINR } from '@/shared/ui/format'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useMembers } from '@/features/allocation/api'
 import { useClients } from '@/features/clients/api'
@@ -556,8 +557,10 @@ function WorkflowPanel({ lead }: { lead: CrmLead }) {
 function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
   const convert = useConvertLead()
   const { data: clients } = useClients()
+  const { data: quotes } = useQuotes(lead.id)
   const [open, setOpen] = useState(false)
   const [clientId, setClientId] = useState('')
+  const [quoteId, setQuoteId] = useState('')
   const [name, setName] = useState(`${lead.name ?? 'New'} project`)
   const [cost, setCost] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -565,10 +568,23 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
   // A client with this number is very likely the same person.
   const digits = (lead.phone ?? '').replace(/\D/g, '').slice(-10)
   const match = digits ? (clients ?? []).find((c) => (c.phone ?? '').replace(/\D/g, '').endsWith(digits)) : undefined
+  const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
+  const accepted = rows.find((q) => q.status === 'accepted')
 
   useEffect(() => {
     if (match && !clientId) setClientId(match.id)
   }, [match, clientId])
+
+  // The accepted quote is what the client agreed to, so it is the default —
+  // once. `picked` latches so choosing "no quote" afterwards sticks.
+  const picked = useRef(false)
+  useEffect(() => {
+    if (picked.current || !accepted) return
+    picked.current = true
+    setQuoteId(accepted.id)
+    setCost(String(accepted.total))
+    if (accepted.title) setName(accepted.title)
+  }, [accepted])
 
   if (!open) {
     return (
@@ -589,6 +605,7 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
       {
         leadId: lead.id,
         ...(clientId ? { client_id: clientId } : {}),
+        ...(quoteId ? { quote_id: quoteId } : {}),
         project: { name: name.trim(), package_cost: amount, status: 'active' },
       },
       { onSuccess: () => onDone() },
@@ -624,6 +641,30 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
           <Label htmlFor="conv-cost">Package (₹)</Label>
           <Input id="conv-cost" type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" />
         </div>
+        {rows.length > 0 && (
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <Label htmlFor="conv-quote">Build it from a quote</Label>
+            <Select
+              id="conv-quote"
+              value={quoteId}
+              onChange={(e) => {
+                setQuoteId(e.target.value)
+                const q = rows.find((x) => x.id === e.target.value)
+                if (q) setCost(String(q.total))
+              }}
+            >
+              <option value="">No quote — package cost only</option>
+              {rows.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.quote_number} · {q.status} · {formatINR(q.total)}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              The quote's lines become the project's deliverables and show on its quotation.
+            </p>
+          </div>
+        )}
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-3 flex justify-end gap-2">
