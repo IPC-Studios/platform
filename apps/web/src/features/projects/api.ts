@@ -4,10 +4,12 @@ import { z } from '@ipc/contracts'
 import {
   createProjectRequest,
   deliverableSet,
+  issuedLink,
   projectDetail,
   projectListItem,
   type CreateProjectRequest,
   type DeliverableInput,
+  type IssueQuotationRequest,
   type PaymentInput,
   type SaveDeliverableSetRequest,
   type UpdateProjectRequest,
@@ -147,5 +149,23 @@ export function useDeleteDeliverableSet() {
       toast.success('Set removed')
       void qc.invalidateQueries({ queryKey: ['projects', 'deliverable-sets'] })
     },
+  })
+}
+
+/**
+ * Turn a project into a quotation link.
+ *
+ * Shared by the project page and the "what next?" dialog the wizard shows, so
+ * a quotation issued from either place is built the same way — the server
+ * snapshots the prices, and what comes back is the link to send.
+ */
+export function useIssueQuotation() {
+  return useMutation({
+    mutationFn: (input: IssueQuotationRequest) =>
+      callApi('/documents/quotations', {
+        method: 'POST',
+        body: input,
+        responseSchema: issuedLink,
+      }),
   })
 }

@@ -9,6 +9,9 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  Copy,
+  FileText,
+  Send,
   Clock,
   Eye,
   MapPin,
@@ -40,6 +43,7 @@ import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
+import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { cn } from '@/shared/ui/cn'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
@@ -53,6 +57,7 @@ import {
   useCreateProject,
   useDeleteDeliverableSet,
   useDeliverableSets,
+  useIssueQuotation,
   useSaveDeliverableSet,
 } from '@/features/projects/api'
 import {
@@ -136,6 +141,8 @@ function NewProject() {
   const [restored, setRestored] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Set once the project exists; the dialog takes over from there. */
+  const [created, setCreated] = useState<{ id: string; warning: string | null } | null>(null)
   const loaded = useRef(false)
   const sectionRef = useRef<HTMLDivElement>(null)
 
@@ -236,12 +243,15 @@ function NewProject() {
       void qc.invalidateQueries({ queryKey: ['shoots'] })
 
       clearDraft()
-      if (failed.length) {
-        setError(
-          `Project created, but these shoots did not save: ${failed.join(', ')}. Add them from the project.`,
-        )
-      }
-      await navigate({ to: '/projects/$id', params: { id } })
+      // The project exists now, so the wizard's job is done whether or not
+      // every shoot landed. Hand over to the "what next?" dialog and carry the
+      // bad news into it rather than dropping someone on a page with a toast.
+      setCreated({
+        id,
+        warning: failed.length
+          ? `Created, but these shoots did not save: ${failed.join(', ')}. Add them from the project.`
+          : null,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the project.')
     } finally {
@@ -256,6 +266,13 @@ function NewProject() {
 
   return (
     <>
+      {created && (
+        <CreatedDialog
+          projectId={created.id}
+          warning={created.warning}
+          onClose={() => void navigate({ to: '/projects/', params: { id: created.id } })}
+        />
+      )}
       <Breadcrumbs items={[{ label: 'Home', to: '/dashboard' }, { label: 'Projects', to: '/projects' }, { label: 'New' }]} />
       <PageHeader
         title="Create project"
@@ -376,6 +393,103 @@ function Money({ label, value, strong }: { label: string; value: number; strong?
         {formatINR(value)}
       </p>
     </div>
+  )
+}
+
+/**
+ * What now? — the moment after a project is created.
+ *
+ * The wizard's last press is not really the end of the job: nine times in ten
+ * the next thing is the quotation, and hunting for it on a page they have
+ * never seen is a poor reward for finishing six steps. So the three things
+ * anyone actually does next are offered here, and "Continue to project" stays
+ * plain because it is the least likely of them.
+ */
+function CreatedDialog({
+  projectId,
+  warning,
+  onClose,
+}: {
+  projectId: string
+  warning: string | null
+  onClose: () => void
+}) {
+  const navigate = useNavigate()
+  const issue = useIssueQuotation()
+  const [link, setLink] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const openProject = (quotation?: boolean) =>
+    void navigate({
+      to: '/projects/$id',
+      params: { id: projectId },
+      ...(quotation ? { search: { quotation: '1' } } : {}),
+    })
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent title="Project created" description="What would you like to do next?">
+        {/* A shoot that failed to save is the one thing here worth
+            interrupting for — the project exists either way. */}
+        {warning && (
+          <p className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+            {warning}
+          </p>
+        )}
+
+        {link ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm">
+              Send the client this link. It opens without an account, and the prices on it stay as
+              they are today.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(link)
+                  setCopied(true)
+                }}
+              >
+                {copied ? <Check /> : <Copy />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <Button variant="outline" onClick={() => openProject()}>
+              Go to the project
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Button className="w-full justify-start" onClick={() => openProject(true)}>
+              <FileText /> View / edit quotation
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              disabled={issue.isPending}
+              onClick={() =>
+                issue.mutate(
+                  { project_id: projectId, notes: null },
+                  { onSuccess: (r) => setLink(r.link) },
+                )
+              }
+            >
+              <Send /> {issue.isPending ? 'Preparing…' : 'Share quotation'}
+            </Button>
+            {issue.isError && (
+              <p className="text-sm text-destructive">
+                {issue.error instanceof Error ? issue.error.message : 'Could not build the link.'}
+              </p>
+            )}
+            <Button variant="ghost" className="w-full" onClick={() => openProject()}>
+              Continue to project
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
