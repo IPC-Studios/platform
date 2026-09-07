@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
+  BUILT_IN_SETS,
   EMPTY_DRAFT,
+  QUICK_DELIVERABLES,
   SHOOT_PRESET,
   SHOOT_TYPES,
+  bucketOf,
   canSubmit,
+  deliverablesIn,
   draftTotals,
   estimatedDateFor,
   internalWorkFor,
@@ -11,6 +15,8 @@ import {
   isDirty,
   matchShootTypes,
   newInternalWork,
+  newAddOn,
+  newClientDeliverable,
   newDeliverable,
   newPayment,
   newShoot,
@@ -19,9 +25,12 @@ import {
   shootStartAt,
   nextStep,
   prevStep,
+  recallLeadDays,
+  rememberLeadDays,
   stepErrors,
   toProjectRequest,
   toShootRequests,
+  withDeliverables,
   withShoots,
   type ProjectDraft,
   type ShootDraft,
@@ -396,5 +405,98 @@ describe('shootStartAt', () => {
   it('sends nothing when either half is missing', () => {
     expect(shootStartAt({ ...newShoot(), shoot_date: '2026-11-22' })).toBeNull()
     expect(shootStartAt({ ...newShoot(), start_time: '09:30' })).toBeNull()
+  })
+})
+
+describe('deliverable buckets', () => {
+  it('reads the bucket off the switches the row already has', () => {
+    expect(bucketOf(newClientDeliverable('Photo Album'))).toBe('client')
+    expect(bucketOf(newAddOn('Drone Shots'))).toBe('add_on')
+    expect(bucketOf(newInternalWork(0, 'Data Sorting'))).toBe('internal')
+    // Charged on top but hidden from the client is still internal work.
+    expect(bucketOf({ ...newAddOn('X'), visibility_scope: 'internal' })).toBe('internal')
+  })
+
+  it('splits the list three ways, keeping each row’s index', () => {
+    const d = draft({
+      deliverables: [
+        newClientDeliverable('Photo Album'),
+        newInternalWork(0, 'Data Sorting'),
+        newAddOn('Drone Shots'),
+      ],
+    })
+    expect(deliverablesIn(d, 'client').map((r) => r.at)).toEqual([0])
+    expect(deliverablesIn(d, 'internal').map((r) => r.at)).toEqual([1])
+    expect(deliverablesIn(d, 'add_on').map((r) => r.item.title)).toEqual(['Drone Shots'])
+  })
+})
+
+describe('adding deliverables', () => {
+  it('adds what is missing and skips what is there', () => {
+    const existing = [newClientDeliverable('Photo Album')]
+    const after = withDeliverables(existing, [
+      { title: 'photo album' },
+      { title: 'Wedding Teaser' },
+    ])
+    expect(after.map((d) => d.title)).toEqual(['Photo Album', 'Wedding Teaser'])
+  })
+
+  it('returns the same array when a set adds nothing new', () => {
+    const existing = [newClientDeliverable('Photo Album')]
+    expect(withDeliverables(existing, [{ title: 'Photo Album' }])).toBe(existing)
+  })
+
+  it('carries a set’s pricing decisions onto the row', () => {
+    const [row] = withDeliverables([], [
+      { title: 'Drone Shots', is_additional_charge: true, additional_charge_amount: 15000, show_on_quotation: false },
+    ])
+    expect(row).toMatchObject({
+      title: 'Drone Shots',
+      is_additional_charge: true,
+      additional_charge_amount: '15000',
+      show_on_quotation: false,
+    })
+  })
+
+  // Every built-in package should be made of chips the studio can also add by hand.
+  it('builds its packages out of the quick-add list', () => {
+    const known = new Set<string>(QUICK_DELIVERABLES)
+    for (const set of BUILT_IN_SETS) {
+      for (const title of set.titles) expect(known.has(title)).toBe(true)
+    }
+  })
+})
+
+// The wizard reads storage through globalThis and copes with it missing; the
+// node test env has none, so the memory tests bring their own.
+describe('lead-time memory', () => {
+  const store = new Map<string, string>()
+  beforeAll(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+    })
+  })
+  beforeEach(() => store.clear())
+
+  it('recalls the days last used for a title, however it was cased', () => {
+    rememberLeadDays('Photo Album', '45')
+    expect(recallLeadDays('photo album')).toBe('45')
+    expect(newClientDeliverable('Photo Album').lead_days).toBe('45')
+  })
+
+  it('has nothing to say about a title it has not seen', () => {
+    expect(recallLeadDays('Drone Shots')).toBe('')
+    expect(newClientDeliverable('Drone Shots').lead_days).toBe('')
+  })
+
+  it('ignores a blank on either side rather than storing it', () => {
+    rememberLeadDays('  ', '45')
+    rememberLeadDays('Teaser', '  ')
+    expect(recallLeadDays('Teaser')).toBe('')
   })
 })

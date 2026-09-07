@@ -453,6 +453,162 @@ export function shootStartAt(shoot: ShootDraft): string | null {
   return Number.isNaN(at.getTime()) ? null : at.toISOString()
 }
 
+/**
+ * The line items a wedding studio actually sells, as chips.
+ *
+ * Ordered the way a quotation reads — film first, then photographs, then the
+ * physical album — rather than alphabetically, because this list is scanned
+ * while talking to a client, not searched.
+ */
+export const QUICK_DELIVERABLES = [
+  'Wedding Teaser',
+  'Full Wedding Film',
+  'Highlight Film',
+  'Instagram Reels Pack',
+  'Wedding Film',
+  'Traditional Video',
+  'Candid Photos',
+  'Edited Photos',
+  'Raw Photos',
+  'Photo Album',
+  'Teaser',
+  'Reel / Short Video',
+  'Drone Shots',
+  'Full Ceremony Video',
+] as const
+
+/**
+ * The three packages nearly every studio starts from, so "Load set" is useful
+ * on day one — before anyone has saved a set of their own. A studio's own sets
+ * come from the server and sit beside these.
+ */
+export const BUILT_IN_SETS: { name: string; titles: string[] }[] = [
+  {
+    name: 'Basic Wedding Package',
+    titles: ['Edited Photos', 'Wedding Teaser', 'Photo Album'],
+  },
+  {
+    name: 'Premium Wedding Package',
+    titles: ['Edited Photos', 'Candid Photos', 'Wedding Teaser', 'Highlight Film', 'Photo Album'],
+  },
+  {
+    name: 'Luxury Wedding Package',
+    titles: [
+      'Edited Photos',
+      'Candid Photos',
+      'Raw Photos',
+      'Wedding Teaser',
+      'Highlight Film',
+      'Full Wedding Film',
+      'Instagram Reels Pack',
+      'Drone Shots',
+      'Photo Album',
+    ],
+  },
+]
+
+/**
+ * Which of the three lists on the Deliverables step a row belongs to.
+ *
+ * Not a stored field: the bucket falls out of the two switches the row already
+ * has, so moving an item between lists is done by the same toggles that decide
+ * what it costs and who sees it — there is no third source of truth to drift.
+ */
+export type DeliverableBucket = 'client' | 'add_on' | 'internal'
+
+export function bucketOf(d: DeliverableDraft): DeliverableBucket {
+  if (d.visibility_scope === 'internal') return 'internal'
+  return d.is_additional_charge ? 'add_on' : 'client'
+}
+
+/** The rows in one bucket, each with its index in draft.deliverables. */
+export function deliverablesIn(
+  draft: ProjectDraft,
+  bucket: DeliverableBucket,
+): { at: number; item: DeliverableDraft }[] {
+  const out: { at: number; item: DeliverableDraft }[] = []
+  draft.deliverables.forEach((item, at) => {
+    if (bucketOf(item) === bucket) out.push({ at, item })
+  })
+  return out
+}
+
+const LEAD_KEY = 'ipc.project.leadDays'
+
+/**
+ * How long "Photo Album" takes, remembered from the last time this studio
+ * quoted one.
+ *
+ * Per-device on purpose: it is a typing shortcut, not a policy. Two people at
+ * the same studio may work to different turnarounds, and neither should
+ * silently rewrite the other's — which is why sets go to the server and this
+ * stays in the browser. Told to the user in as many words on the step.
+ */
+function readLeadMemory(): Record<string, string> {
+  try {
+    const raw = globalThis.localStorage?.getItem(LEAD_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function recallLeadDays(title: string): string {
+  const key = title.trim().toLowerCase()
+  return key ? (readLeadMemory()[key] ?? '') : ''
+}
+
+export function rememberLeadDays(title: string, leadDays: string): void {
+  const key = title.trim().toLowerCase()
+  const value = leadDays.trim()
+  if (!key || !value) return
+  try {
+    globalThis.localStorage?.setItem(LEAD_KEY, JSON.stringify({ ...readLeadMemory(), [key]: value }))
+  } catch {
+    // A blocked localStorage costs the shortcut, not the deliverable.
+  }
+}
+
+/** A client line item, with the lead time this studio last used for it. */
+export function newClientDeliverable(title = ''): DeliverableDraft {
+  return { ...newDeliverable(), title, lead_days: recallLeadDays(title) }
+}
+
+/** An extra billed on top of the package. */
+export function newAddOn(title = ''): DeliverableDraft {
+  return {
+    ...newClientDeliverable(title),
+    is_additional_charge: true,
+  }
+}
+
+/**
+ * Add titles that are not on the list already, so a chip pressed twice and a
+ * set loaded over a half-filled list both do the obvious thing.
+ */
+export function withDeliverables(
+  existing: DeliverableDraft[],
+  items: { title: string; is_additional_charge?: boolean; additional_charge_amount?: number; show_on_quotation?: boolean }[],
+): DeliverableDraft[] {
+  const taken = new Set(existing.map((d) => d.title.trim().toLowerCase()))
+  const added: DeliverableDraft[] = []
+  for (const item of items) {
+    const key = item.title.trim().toLowerCase()
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    added.push({
+      ...newClientDeliverable(item.title.trim()),
+      ...(item.is_additional_charge ? { is_additional_charge: true } : {}),
+      ...(item.additional_charge_amount
+        ? { additional_charge_amount: String(item.additional_charge_amount) }
+        : {}),
+      ...(item.show_on_quotation === false ? { show_on_quotation: false } : {}),
+    })
+  }
+  return added.length ? [...existing, ...added] : existing
+}
+
 /** A draft worth restoring — anything typed beyond the defaults. */
 export function isDirty(draft: ProjectDraft): boolean {
   return (
