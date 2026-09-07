@@ -59,9 +59,20 @@ async function saveRequirements(
 /** The shared projection, as a fragment the two list queries embed. */
 const selectShoots = (sql: TransactionSql) => sql`
   select s.id, s.name, s.project_id, s.shoot_date, s.location, s.status,
-         p.name as project_name
+         p.name as project_name, cl.name as client_name,
+         -- The booking screen fills crew against these, so they travel with
+         -- the shoot rather than costing a request per row.
+         coalesce((
+           select jsonb_agg(jsonb_build_object(
+                    'service_id', ss.service_id, 'name', sv.name, 'quantity', ss.quantity)
+                  order by sv.name)
+           from shoot_services ss
+           join services sv on sv.id = ss.service_id
+           where ss.shoot_id = s.id
+         ), '[]'::jsonb) as requirements
   from shoots s
-  left join projects p on p.id = s.project_id`
+  left join projects p on p.id = s.project_id
+  left join clients cl on cl.id = p.client_id`
 
 export const shootsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)

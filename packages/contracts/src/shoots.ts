@@ -4,17 +4,6 @@ import { uuid, isoDate, isoDateTime } from './shared/primitives'
 export const shootStatus = z.enum(['planned', 'confirmed', 'completed', 'cancelled'])
 export type ShootStatus = z.infer<typeof shootStatus>
 
-export const shootListItem = z.object({
-  id: uuid,
-  name: z.string(),
-  project_id: uuid,
-  project_name: z.string().nullable(),
-  shoot_date: isoDate.nullable(),
-  location: z.string().nullable(),
-  status: shootStatus,
-})
-export type ShootListItem = z.infer<typeof shootListItem>
-
 /**
  * One line of "who and what this day needs" — a service by name and how many
  * of it. Named rather than referenced by id: the picker lets a studio type
@@ -33,6 +22,20 @@ export const shootRequirement = z.object({
   quantity: z.number().int(),
 })
 export type ShootRequirement = z.infer<typeof shootRequirement>
+
+export const shootListItem = z.object({
+  id: uuid,
+  name: z.string(),
+  project_id: uuid,
+  project_name: z.string().nullable(),
+  client_name: z.string().nullable(),
+  shoot_date: isoDate.nullable(),
+  location: z.string().nullable(),
+  status: shootStatus,
+  /** What the day was planned to need — the booking screen fills against it. */
+  requirements: z.array(shootRequirement),
+})
+export type ShootListItem = z.infer<typeof shootListItem>
 
 /** A service this company has used before, offered as you type. */
 export const serviceOption = z.object({ id: uuid, name: z.string() })
