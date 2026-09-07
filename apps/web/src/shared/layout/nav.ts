@@ -17,6 +17,7 @@ import {
   Wallet,
   TrendingUp,
   Contact,
+  Inbox,
   Bell,
   Megaphone,
   Users,
@@ -116,6 +117,7 @@ export const NAV: NavEntry[] = [
     icon: Contact,
     match: '/clients',
     children: [
+      leaf('Enquiries', '/enquiries', Inbox, { module: 'crm' }),
       leaf('CRM', '/follow-ups', Bell, { module: 'crm' }),
       leaf('Clients', '/clients', Contact, { module: 'clients' }),
       leaf('Lead Sources', '/lead-sources', Megaphone, { module: 'lead_sources' }),

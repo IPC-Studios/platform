@@ -210,6 +210,14 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'GET' && (path === '/enquiries' || path.startsWith('/enquiries?')))
+    return atStage(enquiriesFx, 'partial').length
+      ? { items: enquiriesFx, summary: enquirySummaryFx }
+      : { items: [], summary: { total_count: 0, open_count: 0, new_count: 0, reviewed_count: 0, contacted_count: 0, converted_count: 0, closed_count: 0 } }
+  if (method === 'POST' && path === '/enquiries') return { id: uid(0xe1) }
+  if (method === 'PATCH' && path.startsWith('/enquiries/')) return { ok: true }
+  if (method === 'DELETE' && path.startsWith('/enquiries/')) return { ok: true }
+  if (method === 'POST' && /^\/enquiries\/[^/]+\/convert$/.test(path)) return { lead_id: uid(0xe9) }
   if (method === 'POST' && path === '/documents/quotations')
     return { link: 'http://localhost:5173/quotation?token=demo-quote' }
   if (method === 'POST' && path === '/documents/receipts')
@@ -911,6 +919,58 @@ const deliverableSetsFx = [
 ]
 
 const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
+
+const enquiriesFx = [
+  {
+    id: uid(0xe2),
+    name: 'Meera Iyer',
+    phone: '9812000001',
+    email: 'meera@example.com',
+    message: 'Wedding in December, looking for candid plus a film.',
+    source: 'website',
+    enquiry_status: 'new' as const,
+    assigned_to: null,
+    assigned_to_name: null,
+    converted_lead_id: null,
+    created_at: '2026-09-05T09:10:00Z',
+  },
+  {
+    id: uid(0xe3),
+    name: 'Arjun Nair',
+    phone: '9812000002',
+    email: null,
+    message: 'Asked about pre-wedding packages in Goa.',
+    source: 'instagram',
+    enquiry_status: 'contacted' as const,
+    assigned_to: uid(0x3),
+    assigned_to_name: 'Rahul Sharma',
+    converted_lead_id: null,
+    created_at: '2026-09-03T14:20:00Z',
+  },
+  {
+    id: uid(0xe4),
+    name: 'Kavya Reddy',
+    phone: '9812000003',
+    email: 'kavya@example.com',
+    message: null,
+    source: 'referral',
+    enquiry_status: 'converted' as const,
+    assigned_to: uid(0x3),
+    assigned_to_name: 'Rahul Sharma',
+    converted_lead_id: uid(0xe9),
+    created_at: '2026-08-28T11:00:00Z',
+  },
+]
+
+const enquirySummaryFx = {
+  total_count: 3,
+  open_count: 2,
+  new_count: 1,
+  reviewed_count: 0,
+  contacted_count: 1,
+  converted_count: 1,
+  closed_count: 0,
+}
 
 const publicQuotationFx = {
   snapshot: {
