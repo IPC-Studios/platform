@@ -32,7 +32,7 @@ export const STEP_HINTS: Record<WizardStep, string> = {
   shoots: 'The days you are shooting. Deliverable dates follow these.',
   deliverables: 'What the client receives, and what costs extra.',
   billing: 'The package price and anything already paid.',
-  review: 'Check it over, then create.',
+  review: 'Confirm everything before creating the project.',
 }
 
 export interface ShootRequirementDraft {

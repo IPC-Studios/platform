@@ -290,14 +290,19 @@ function NewProject() {
       </div>
 
       <Card className="mt-4">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <Stepper
-            steps={WIZARD_STEPS.map((s) => ({ value: s, label: STEP_LABELS[s] }))}
-            current={step}
-            visited={visited}
-            invalid={invalid}
-            onJump={goTo}
-          />
+        <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Step-by-step setup</p>
+            <p className="text-xs text-muted-foreground">Complete one focused section at a time.</p>
+            <Stepper
+              className="mt-3"
+              steps={WIZARD_STEPS.map((s) => ({ value: s, label: STEP_LABELS[s] }))}
+              current={step}
+              visited={visited}
+              invalid={invalid}
+              onJump={goTo}
+            />
+          </div>
           <StatusBadge tone="info">
             Step {stepIndex(step) + 1} of {WIZARD_STEPS.length}
           </StatusBadge>
@@ -1853,6 +1858,15 @@ function BillingStep({
   )
 }
 
+/**
+ * The last look before the project exists.
+ *
+ * Six tiles rather than a table of twenty rows: what a studio checks here is
+ * "is this the right client, the right days, the right money", and each tile
+ * carries the Edit that takes them back to fix it. A tile whose step still has
+ * a problem says what the problem is, in place — so nobody has to open a step
+ * to find out why the button won't fire.
+ */
 function ReviewStep({
   draft,
   totals,
@@ -1866,45 +1880,118 @@ function ReviewStep({
 }) {
   const { data: clients } = useClients()
   const client = clients?.find((c) => c.id === draft.client_id)
+  const clientName = client?.name ?? draft.new_client_name.trim()
   const problems = WIZARD_STEPS.filter((s) => errors[s])
 
   return (
-    <div className="flex flex-col gap-5">
-      {problems.length > 0 && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm font-medium text-destructive">Fix these before creating:</p>
-          <ul className="mt-2 space-y-1 text-sm">
-            {problems.map((s) => (
-              <li key={s}>
-                <button type="button" onClick={() => onJump(s)} className="text-destructive hover:underline">
-                  {STEP_LABELS[s]} — {errors[s]}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ReviewTile
+          label="Project"
+          value={draft.name.trim() || '—'}
+          problem={errors.client && !draft.name.trim() ? errors.client : undefined}
+          onEdit={() => onJump('client')}
+        />
+        <ReviewTile
+          label="Client"
+          value={clientName || 'Not set'}
+          problem={errors.client && !clientName ? errors.client : undefined}
+          onEdit={() => onJump('client')}
+        />
+        <ReviewTile
+          label="Shoots"
+          value={
+            draft.shoots.length ? `${countLabel(draft.shoots.length, 'shoot')} added` : 'None added'
+          }
+          hint={summarise(draft.shoots.map((s) => s.name.trim() || 'Untitled'))}
+          problem={errors.shoots}
+          onEdit={() => onJump('shoots')}
+        />
+        <ReviewTile
+          label="Deliverables"
+          value={
+            draft.deliverables.length
+              ? `${countLabel(draft.deliverables.length, 'deliverable')} added`
+              : 'None added'
+          }
+          hint={summarise(draft.deliverables.map((d) => d.title.trim() || 'Untitled'))}
+          problem={errors.deliverables}
+          onEdit={() => onJump('deliverables')}
+        />
+        <ReviewTile
+          label="Package / add-ons / total"
+          value={`${formatINR(totals.packageCost)} + ${formatINR(totals.addOns)} = ${formatINR(totals.total)}`}
+          accent
+          onEdit={() => onJump('billing')}
+        />
+        <ReviewTile
+          label="Payments"
+          value={`Received ${formatINR(totals.received)} · Pending ${formatINR(totals.balance)}`}
+          problem={errors.billing}
+          onEdit={() => onJump('billing')}
+        />
+      </div>
+
+      {problems.length > 0 ? (
+        <p className="text-sm font-medium text-warning">
+          Some required fields are missing. Use Edit to fix them before creating the project.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Creating this makes {countLabel(1, 'project')}
+          {draft.shoots.length ? `, ${countLabel(draft.shoots.length, 'shoot')}` : ''}
+          {draft.deliverables.length ? `, ${countLabel(draft.deliverables.length, 'deliverable')}` : ''}
+          {draft.payments.length ? ` and ${countLabel(draft.payments.length, 'payment')}` : ''}
+          {draft.client_id ? '' : ' and a new client record'}.
+        </p>
       )}
+    </div>
+  )
+}
 
-      <dl className="divide-y divide-border rounded-lg border border-border">
-        <ReviewRow label="Project" value={draft.name || '—'} />
-        <ReviewRow label="Client" value={client?.name ?? draft.new_client_name ?? '—'} />
-        <ReviewRow label="Quotation" value={draft.show_quotation ? 'Visible to client' : 'Hidden from client'} />
-        <ReviewRow label="Shoots" value={summarise(draft.shoots.map((s) => s.name || 'Untitled'))} />
-        <ReviewRow label="Deliverables" value={summarise(draft.deliverables.map((d) => d.title || 'Untitled'))} />
-        <ReviewRow label="Package" value={formatINR(totals.packageCost)} />
-        <ReviewRow label="Chargeable extras" value={formatINR(totals.addOns)} />
-        <ReviewRow label="Total" value={formatINR(totals.total)} strong />
-        <ReviewRow label="Received" value={formatINR(totals.received)} />
-        <ReviewRow label="Balance" value={formatINR(totals.balance)} />
-      </dl>
-
-      <p className="text-sm text-muted-foreground">
-        Creating this makes {countLabel(1, 'project')}
-        {draft.shoots.length ? `, ${countLabel(draft.shoots.length, 'shoot')}` : ''}
-        {draft.deliverables.length ? `, ${countLabel(draft.deliverables.length, 'deliverable')}` : ''}
-        {draft.payments.length ? ` and ${countLabel(draft.payments.length, 'payment')}` : ''}
-        {draft.client_id ? '' : ' and a new client record'}.
-      </p>
+/** One fact about the project, and the way back to change it. */
+function ReviewTile({
+  label,
+  value,
+  hint,
+  problem,
+  accent,
+  onEdit,
+}: {
+  label: string
+  value: string
+  hint?: string
+  problem?: string | undefined
+  accent?: boolean
+  onEdit: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-3 rounded-lg border p-4',
+        problem
+          ? 'border-destructive/30 bg-destructive/5'
+          : accent
+            ? 'border-primary/30 bg-primary/5'
+            : 'border-border bg-muted/30',
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        <p className={cn('break-words font-semibold', accent && 'text-primary')}>
+          {value}
+        </p>
+        {problem ? (
+          <p className="mt-1 text-xs text-destructive">{problem}</p>
+        ) : (
+          hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>
+        )}
+      </div>
+      <Button variant="ghost" size="sm" onClick={onEdit}>
+        <Pencil /> Edit
+      </Button>
     </div>
   )
 }
@@ -1912,12 +1999,3 @@ function ReviewStep({
 const countLabel = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 const summarise = (names: string[]) => (names.length === 0 ? 'None' : names.join(', '))
-
-function ReviewRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="flex gap-4 px-4 py-2.5 text-sm">
-      <dt className="w-44 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className={cn('min-w-0 flex-1 break-words', strong ? 'font-semibold' : 'font-medium')}>{value}</dd>
-    </div>
-  )
-}
