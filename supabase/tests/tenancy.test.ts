@@ -73,6 +73,7 @@ async function freshDb() {
   await db.exec(mig('0038_shoot_details.sql'))
   await db.exec(mig('0039_deliverable_sets.sql'))
   await db.exec(mig('0040_role_library.sql'))
+  await db.exec(mig('0041_team_terms.sql'))
   return db
 }
 
@@ -2630,5 +2631,165 @@ describe('role library (0040)', () => {
          values ('${company.rows[0]!.id}', 'Bad', 'bad', 'during');`,
       ),
     ).rejects.toThrow()
+  })
+})
+
+describe('team terms (0041)', () => {
+  let db: PGlite
+  let company: string
+  let shoot: string
+  let template: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+    const client = (
+      await db.query<{ id: string }>(
+        `insert into clients (company_id, name) values ('${company}', 'Sharma') returning id;`,
+      )
+    ).rows[0]!.id
+    const project = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name) values ('${company}', '${client}', 'Sharma Wedding') returning id;`,
+      )
+    ).rows[0]!.id
+    shoot = (
+      await db.query<{ id: string }>(
+        `insert into shoots (company_id, project_id, name, shoot_date)
+         values ('${company}', '${project}', 'Wedding Day', '2026-11-22') returning id;`,
+      )
+    ).rows[0]!.id
+    template = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body, category)
+         values ('${company}', 'Photographer terms', 'You agree to {{shoot_name}}.', 'production')
+         returning id;`,
+      )
+    ).rows[0]!.id
+  })
+
+  const issue = async (ttl = 336) =>
+    (
+      await db.query<{ send_id: string; token: string }>(
+        `select send_id, token from issue_team_terms(
+           '${shoot}'::uuid, '${template}'::uuid, 'You agree to Wedding Day.', 'Rahul',
+           'rahul@studio.test', null, null, null, 'Photographer', ${ttl});`,
+      )
+    ).rows[0]!
+
+  it('issues a send and a link together, stamped with the template version', async () => {
+    const { send_id, token } = await issue()
+    expect(token.length).toBeGreaterThan(20)
+    const row = await db.query<{ status: string; template_version: number; project_id: string }>(
+      `select status, template_version, project_id from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ status: 'draft', template_version: 1 })
+    // The project is taken from the shoot rather than trusted from the caller.
+    expect(row.rows[0]!.project_id).not.toBeNull()
+  })
+
+  it('refuses a template from another studio', async () => {
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into companies (name, owner_user_id)
+         values ('Other Studio', (select user_id from users limit 1)) returning id;`,
+      )
+    ).rows[0]!.id
+    const stray = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body)
+         values ('${other}', 'Theirs', 'body') returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(
+      db.query(
+        `select * from issue_team_terms('${shoot}'::uuid, '${stray}'::uuid, 'x', 'Rahul');`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('marks a send viewed the first time the link is opened', async () => {
+    const { send_id, token } = await issue()
+    const read = await db.query<{ status: string; rendered_body: string }>(
+      `select status, rendered_body from get_team_terms_for_token('${token}');`,
+    )
+    expect(read.rows[0]!.rendered_body).toContain('Wedding Day')
+    const after = await db.query<{ status: string; viewed_at: string | null }>(
+      `select status, viewed_at from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(after.rows[0]!.status).toBe('viewed')
+    expect(after.rows[0]!.viewed_at).not.toBeNull()
+  })
+
+  it('records an acknowledgement once, with evidence', async () => {
+    const { send_id, token } = await issue()
+    const first = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Rahul Sharma', '1.2.3.4', 'test-agent');`,
+    )
+    expect(first.rows[0]!.acknowledge_team_terms).toBe(true)
+    const row = await db.query<{ status: string; acknowledged_by_name: string; acknowledged_ip: string }>(
+      `select status, acknowledged_by_name, acknowledged_ip from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({
+      status: 'acknowledged',
+      acknowledged_by_name: 'Rahul Sharma',
+      acknowledged_ip: '1.2.3.4',
+    })
+    // The token is spent: a second press cannot re-sign it.
+    const second = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Someone Else');`,
+    )
+    expect(second.rows[0]!.acknowledge_team_terms).toBe(false)
+  })
+
+  it('gives nothing to a junk or expired token', async () => {
+    const junk = await db.query(`select * from get_team_terms_for_token('not-a-token');`)
+    expect(junk.rows).toHaveLength(0)
+    const { token } = await issue(0)
+    await db.exec(`update access_tokens set expires_at = now() - interval '1 hour';`)
+    const expired = await db.query(`select * from get_team_terms_for_token('${token}');`)
+    expect(expired.rows).toHaveLength(0)
+  })
+
+  it('hides a revoked send from the link', async () => {
+    const { send_id, token } = await issue()
+    await db.exec(
+      `update team_terms_sends set revoked_at = now(), status = 'revoked' where id = '${send_id}';`,
+    )
+    const read = await db.query(`select * from get_team_terms_for_token('${token}');`)
+    expect(read.rows).toHaveLength(0)
+  })
+
+  // A briefing has no button, so pressing one must not forge a signature.
+  it('will not acknowledge a send-only template', async () => {
+    const briefing = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body, mode)
+         values ('${company}', 'Call sheet', 'Be there at 6.', 'send_only') returning id;`,
+      )
+    ).rows[0]!.id
+    const { send_id, token } = (
+      await db.query<{ send_id: string; token: string }>(
+        `select send_id, token from issue_team_terms('${shoot}'::uuid, '${briefing}'::uuid, 'Be there at 6.', 'Rahul');`,
+      )
+    ).rows[0]!
+    const done = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Rahul');`,
+    )
+    expect(done.rows[0]!.acknowledge_team_terms).toBe(false)
+    const row = await db.query<{ status: string }>(
+      `select status from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]!.status).not.toBe('acknowledged')
+  })
+
+  it('drops the preset table nothing ever used', async () => {
+    const left = await db.query(
+      `select 1 from information_schema.tables where table_name = 'deliverable_presets';`,
+    )
+    expect(left.rows).toHaveLength(0)
   })
 })
