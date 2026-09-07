@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
-import { Menu, Moon, Sun, LogOut, ChevronDown, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react'
+import { Menu, Moon, Sun, ChevronDown, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { useAccess } from '../auth/useAccess'
 import { useTheme } from '../theme/ThemeProvider'
@@ -8,6 +8,9 @@ import { Button } from '../ui/button'
 import { cn } from '../ui/cn'
 import { NAV, type NavEntry, type NavGroup, type NavLeaf, filterNav } from './nav'
 import { CommandPalette, openCommandPalette, paletteShortcutHint } from './CommandPalette'
+import { QuickLinks } from './QuickLinks'
+import { NotificationBell } from './NotificationBell'
+import { AccountMenu } from './AccountMenu'
 
 
 const COLLAPSE_KEY = 'ipc.sidebar.collapsed'
@@ -102,7 +105,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background print:block print:h-auto print:overflow-visible">
       <Sidebar
         entries={entries}
-        onSignOut={() => void signOut()}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((c) => !c)}
         openGroups={openGroups}
@@ -115,7 +117,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} />
           <Sidebar
             entries={entries}
-            onSignOut={() => void signOut()}
             collapsed={false}
             onClose={() => setMobileOpen(false)}
             openGroups={openGroups}
@@ -134,27 +135,35 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Brand />
           </span>
 
-          {/* A shortcut nobody can see is a shortcut nobody uses, so the
-              trigger sits in the bar and names its own key. */}
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            className="ml-auto flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64"
-          >
-            <Search className="size-4 shrink-0" aria-hidden />
-            <span className="hidden flex-1 text-left sm:inline">Search…</span>
-            <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline">
-              {paletteShortcutHint()}
-            </kbd>
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <QuickLinks className="hidden lg:flex" />
 
-          <div className="ml-2 flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
-              {scheme === 'dark' ? <Sun /> : <Moon />}
-            </Button>
-            <span className="hidden px-2 text-sm text-muted-foreground sm:inline">
-              {session?.display_name}
-            </span>
+            {/* A shortcut nobody can see is a shortcut nobody uses, so the
+                trigger sits in the bar and names its own key.
+
+                Between lg and xl the pills are up and the bar is full, so the
+                field gives back its 16rem and rides as an icon until the
+                label fits again. */}
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              aria-label="Search"
+              className="flex items-center justify-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64 lg:w-9 lg:px-2 xl:w-64 xl:px-2.5"
+            >
+              <Search className="size-4 shrink-0" aria-hidden />
+              <span className="hidden flex-1 text-left sm:inline lg:hidden xl:inline">Search…</span>
+              <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline xl:inline lg:hidden">
+                {paletteShortcutHint()}
+              </kbd>
+            </button>
+
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <Button variant="ghost" size="icon" onClick={toggleScheme} aria-label="Toggle theme">
+                {scheme === 'dark' ? <Sun /> : <Moon />}
+              </Button>
+              <AccountMenu onSignOut={() => void signOut()} />
+            </div>
           </div>
         </header>
 
@@ -179,7 +188,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function Sidebar({
   entries,
-  onSignOut,
   collapsed,
   onToggleCollapse,
   onClose,
@@ -188,7 +196,6 @@ function Sidebar({
   className,
 }: {
   entries: NavEntry[]
-  onSignOut: () => void
   collapsed: boolean
   onToggleCollapse?: () => void
   onClose?: () => void
@@ -286,21 +293,6 @@ function Sidebar({
           ),
         )}
       </nav>
-
-      <div className={cn('border-t border-border p-2', collapsed && 'px-2')}>
-        <button
-          type="button"
-          onClick={onSignOut}
-          title={collapsed ? 'Log out' : undefined}
-          className={cn(
-            'flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand hover:text-brand-foreground',
-            collapsed && 'justify-center px-0',
-          )}
-        >
-          <LogOut className="size-4 shrink-0" />
-          {!collapsed && 'Log out'}
-        </button>
-      </div>
     </aside>
   )
 }

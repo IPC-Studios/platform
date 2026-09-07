@@ -1,29 +1,55 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
+  Bookmark,
   CalendarDays,
-  Camera,
+  Check,
   CheckCircle2,
+  Copy,
+  FileText,
+  Send,
+  Clock,
+  Eye,
+  MapPin,
   Package,
   Plus,
+  Pencil,
   RotateCcw,
+  Save,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   UserPlus,
   Users,
   Wallet,
+  X,
+  type LucideIcon,
 } from 'lucide-react'
-import { z, type CreateShootRequest } from '@ipc/contracts'
+import {
+  DUE_BASIS_OPTIONS,
+  deliverableRuleForTitle,
+  internalLeadDaysForTitle,
+  type DueBasis,
+} from '@ipc/domain'
+import {
+  z,
+  type CreateShootRequest,
+  type ShootPreset,
+  type ShootPresetKind,
+  type ShootPresetPayload,
+} from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
+import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { cn } from '@/shared/ui/cn'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
@@ -33,31 +59,61 @@ import { Switch } from '@/shared/ui/switch'
 import { useConfirm } from '@/shared/ui/confirm'
 import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
-import { useCreateProject } from '@/features/projects/api'
 import {
+  useCreateProject,
+  useDeleteDeliverableSet,
+  useDeliverableSets,
+  useIssueQuotation,
+  useSaveDeliverableSet,
+} from '@/features/projects/api'
+import { useRoleLibrary } from '@/features/team/api'
+import {
+  useDeleteShootPreset,
+  useSaveShootPreset,
+  useServices,
+  useShootPresets,
+} from '@/features/shoots/api'
+import {
+  BUILT_IN_SETS,
   EMPTY_DRAFT,
+  QUICK_DELIVERABLES,
+  QUICK_SHOOTS,
+  SHOOT_PRESET,
   STEP_HINTS,
   STEP_LABELS,
   WIZARD_STEPS,
   canSubmit,
   clearDraft,
+  deliverablesIn,
   draftTotals,
   estimatedDateFor,
   isDirty,
+  internalWorkFor,
+  internalWorkSuggestions,
   loadDraft,
-  newDeliverable,
+  matchShootTypes,
+  money,
+  newAddOn,
+  newClientDeliverable,
+  newInternalWork,
   newPayment,
   newShoot,
   nextStep,
   prevStep,
+  rememberDueDays,
+  removeShootAt,
   saveDraft,
+  shootIssues,
   stepErrors,
   stepIndex,
   toProjectRequest,
   toShootRequests,
+  withDeliverables,
+  withShoots,
   type DeliverableDraft,
   type ProjectDraft,
   type ShootDraft,
+  type ShootRequirementDraft,
   type WizardStep,
 } from '@/features/projects/wizard'
 
@@ -91,6 +147,8 @@ function NewProject() {
   const [restored, setRestored] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Set once the project exists; the dialog takes over from there. */
+  const [created, setCreated] = useState<{ id: string; warning: string | null } | null>(null)
   const loaded = useRef(false)
   const sectionRef = useRef<HTMLDivElement>(null)
 
@@ -191,12 +249,15 @@ function NewProject() {
       void qc.invalidateQueries({ queryKey: ['shoots'] })
 
       clearDraft()
-      if (failed.length) {
-        setError(
-          `Project created, but these shoots did not save: ${failed.join(', ')}. Add them from the project.`,
-        )
-      }
-      await navigate({ to: '/projects/$id', params: { id } })
+      // The project exists now, so the wizard's job is done whether or not
+      // every shoot landed. Hand over to the "what next?" dialog and carry the
+      // bad news into it rather than dropping someone on a page with a toast.
+      setCreated({
+        id,
+        warning: failed.length
+          ? `Created, but these shoots did not save: ${failed.join(', ')}. Add them from the project.`
+          : null,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the project.')
     } finally {
@@ -211,6 +272,13 @@ function NewProject() {
 
   return (
     <>
+      {created && (
+        <CreatedDialog
+          projectId={created.id}
+          warning={created.warning}
+          onClose={() => void navigate({ to: '/projects/', params: { id: created.id } })}
+        />
+      )}
       <Breadcrumbs items={[{ label: 'Home', to: '/dashboard' }, { label: 'Projects', to: '/projects' }, { label: 'New' }]} />
       <PageHeader
         title="Create project"
@@ -245,14 +313,19 @@ function NewProject() {
       </div>
 
       <Card className="mt-4">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <Stepper
-            steps={WIZARD_STEPS.map((s) => ({ value: s, label: STEP_LABELS[s] }))}
-            current={step}
-            visited={visited}
-            invalid={invalid}
-            onJump={goTo}
-          />
+        <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Step-by-step setup</p>
+            <p className="text-xs text-muted-foreground">Complete one focused section at a time.</p>
+            <Stepper
+              className="mt-3"
+              steps={WIZARD_STEPS.map((s) => ({ value: s, label: STEP_LABELS[s] }))}
+              current={step}
+              visited={visited}
+              invalid={invalid}
+              onJump={goTo}
+            />
+          </div>
           <StatusBadge tone="info">
             Step {stepIndex(step) + 1} of {WIZARD_STEPS.length}
           </StatusBadge>
@@ -263,7 +336,9 @@ function NewProject() {
         <Section title={STEP_LABELS[step]} hint={STEP_HINTS[step]}>
           {step === 'client' && <ClientStep draft={draft} patch={patch} />}
           {step === 'shoots' && <ShootsStep draft={draft} patch={patch} />}
-          {step === 'deliverables' && <DeliverablesStep draft={draft} patch={patch} />}
+          {step === 'deliverables' && (
+            <DeliverablesStep draft={draft} patch={patch} onJump={goTo} />
+          )}
           {step === 'billing' && <BillingStep draft={draft} patch={patch} totals={totals} />}
           {step === 'review' && <ReviewStep draft={draft} totals={totals} errors={errors} onJump={goTo} />}
 
@@ -327,6 +402,103 @@ function Money({ label, value, strong }: { label: string; value: number; strong?
   )
 }
 
+/**
+ * What now? — the moment after a project is created.
+ *
+ * The wizard's last press is not really the end of the job: nine times in ten
+ * the next thing is the quotation, and hunting for it on a page they have
+ * never seen is a poor reward for finishing six steps. So the three things
+ * anyone actually does next are offered here, and "Continue to project" stays
+ * plain because it is the least likely of them.
+ */
+function CreatedDialog({
+  projectId,
+  warning,
+  onClose,
+}: {
+  projectId: string
+  warning: string | null
+  onClose: () => void
+}) {
+  const navigate = useNavigate()
+  const issue = useIssueQuotation()
+  const [link, setLink] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const openProject = (quotation?: boolean) =>
+    void navigate({
+      to: '/projects/$id',
+      params: { id: projectId },
+      ...(quotation ? { search: { quotation: '1' } } : {}),
+    })
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent title="Project created" description="What would you like to do next?">
+        {/* A shoot that failed to save is the one thing here worth
+            interrupting for — the project exists either way. */}
+        {warning && (
+          <p className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+            {warning}
+          </p>
+        )}
+
+        {link ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm">
+              Send the client this link. It opens without an account, and the prices on it stay as
+              they are today.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(link)
+                  setCopied(true)
+                }}
+              >
+                {copied ? <Check /> : <Copy />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <Button variant="outline" onClick={() => openProject()}>
+              Go to the project
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Button className="w-full justify-start" onClick={() => openProject(true)}>
+              <FileText /> View / edit quotation
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              disabled={issue.isPending}
+              onClick={() =>
+                issue.mutate(
+                  { project_id: projectId, notes: null },
+                  { onSuccess: (r) => setLink(r.link) },
+                )
+              }
+            >
+              <Send /> {issue.isPending ? 'Preparing…' : 'Share quotation'}
+            </Button>
+            {issue.isError && (
+              <p className="text-sm text-destructive">
+                {issue.error instanceof Error ? issue.error.message : 'Could not build the link.'}
+              </p>
+            )}
+            <Button variant="ghost" className="w-full" onClick={() => openProject()}>
+              Continue to project
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   return (
     <Card>
@@ -373,10 +545,23 @@ function RowList({
 
 type Patch = (p: Partial<ProjectDraft>) => void
 
-function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  required,
+  hint,
+  icon: Icon,
+  children,
+}: {
+  label: string
+  required?: boolean
+  hint?: string
+  icon?: LucideIcon
+  children: ReactNode
+}) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>
+      <Label className="flex items-center gap-1.5">
+        {Icon && <Icon className="size-3.5 text-muted-foreground" aria-hidden />}
         {label}
         {required && <span className="ml-0.5 text-destructive">*</span>}
       </Label>
@@ -502,174 +687,1450 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   )
 }
 
+/**
+ * The full list of shoot types, searchable, behind the Add shoot button.
+ *
+ * Seventeen types is too many for chips and too few for the command palette,
+ * so it is a menu that opens with the search box focused: type three letters
+ * and press Enter, or scroll and click. Anything not on the list is typed in
+ * the box and added by name, which is how a studio's odd one-off gets in
+ * without anyone maintaining a list of every ceremony in the country.
+ */
+function AddShootMenu({
+  shoots,
+  onAdd,
+}: {
+  shoots: ShootDraft[]
+  onAdd: (name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const root = useRef<HTMLDivElement>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open) search.current?.focus()
+    else setQuery('')
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const taken = new Set(shoots.map((s) => s.name.trim().toLowerCase()))
+  const matches = matchShootTypes(query)
+  const custom = query.trim()
+  const free = matches.filter((m) => !taken.has(m.toLowerCase()))
+
+  const choose = (name: string) => {
+    onAdd(name)
+    setOpen(false)
+  }
+
+  /** Arrow keys walk from the box into the list and back, as a menu should. */
+  function step(from: HTMLElement | null, dir: 1 | -1) {
+    const items = [...(list.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [])]
+    if (items.length === 0) return
+    const at = from ? items.indexOf(from) : -1
+    const next = at === -1 ? (dir === 1 ? 0 : items.length - 1) : at + dir
+    if (next < 0) search.current?.focus()
+    else items[Math.min(next, items.length - 1)]?.focus()
+  }
+
+  return (
+    <div ref={root} className="relative">
+      <Button size="sm" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="menu">
+        <Plus /> Add shoot
+      </Button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Shoot types"
+          className="ipc-menu ipc-menu-left absolute left-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-3rem)] overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            e.preventDefault()
+            step(document.activeElement as HTMLElement, e.key === 'ArrowDown' ? 1 : -1)
+          }}
+        >
+          <div className="border-b border-border p-2">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                ref={search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter takes the obvious one: the first type still free, or
+                  // the words just typed if the list has nothing to offer.
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  const pick = free[0] ?? (custom || null)
+                  if (pick) choose(pick)
+                }}
+                placeholder="Search shoot type…"
+                aria-label="Search shoot type"
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          <div ref={list} className="max-h-64 overflow-y-auto p-1.5">
+            <p className="px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+              Common
+            </p>
+            {matches.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">
+                No type matches “{custom}”. Add it below.
+              </p>
+            ) : (
+              matches.map((name) => {
+                const already = taken.has(name.toLowerCase())
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    role="menuitem"
+                    disabled={already}
+                    onClick={() => choose(name)}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                      already
+                        ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                        : 'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
+                    )}
+                  >
+                    <span className="flex-1">{name}</span>
+                    {already && <Check className="size-4 shrink-0" aria-hidden />}
+                  </button>
+                )
+              })
+            )}
+          </div>
+
+          <div className="border-t border-border p-2">
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={() => choose(custom)}
+              disabled={!!custom && taken.has(custom.toLowerCase())}
+            >
+              <Plus /> {custom ? `Add “${custom}”` : 'Add new shoot type'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The busiest step in the wizard, so it opens with the shortcuts rather than a
+ * blank row: a chip per common shoot day, a preset that lays down the four a
+ * standard wedding books, and the whole searchable list behind Add shoot.
+ */
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
+  const services = useServices()
+  const shootPresets = useShootPresets('shoot')
+  const listRef = useRef<HTMLDivElement>(null)
+  // The chips sit above a list that can already be several cards long, so a
+  // shoot added from up there would otherwise land off the bottom of the
+  // screen. Only a growing list scrolls — arriving on the step should not.
+  const count = useRef(draft.shoots.length)
+  useEffect(() => {
+    if (draft.shoots.length > count.current) scrollIntoView(listRef.current?.lastElementChild ?? null)
+    count.current = draft.shoots.length
+  }, [draft.shoots.length])
+
   const set = (i: number, p: Partial<ShootDraft>) =>
     patch({ shoots: draft.shoots.map((s, idx) => (idx === i ? { ...s, ...p } : s)) })
 
+  const add = (names: readonly string[]) => patch({ shoots: withShoots(draft.shoots, names) })
+  // An empty name is the "add new shoot type" case with nothing typed yet: a
+  // blank row to fill in, which withShoots would otherwise drop.
+  const addNamed = (name: string) =>
+    patch({ shoots: name ? withShoots(draft.shoots, [name]) : [...draft.shoots, newShoot()] })
+  const wedding = withShoots(draft.shoots, SHOOT_PRESET)
+
+  /** A saved day, stamped out whole: its crew and its edit-room list with it. */
+  const applyShootPreset = (preset: ShootPreset) => {
+    const at = draft.shoots.length
+    patch({
+      shoots: [
+        ...draft.shoots,
+        {
+          ...newShoot(),
+          name: preset.name,
+          requirements: preset.payload.requirements.map((r) => ({
+            name: r.name,
+            quantity: String(r.quantity),
+          })),
+        },
+      ],
+      deliverables: [
+        ...draft.deliverables,
+        ...preset.payload.internal_work.map((title) => newInternalWork(at, title)),
+      ],
+    })
+  }
+
   return (
-    <RowList
-      items={draft.shoots}
-      empty="No shoots yet. You can add them later, but dating deliverables needs at least one."
-      addLabel="Add shoot"
-      onAdd={() => patch({ shoots: [...draft.shoots, newShoot()] })}
-    >
-      {draft.shoots.map((s, i) => (
-        <div key={i} className="rounded-lg border border-border p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Camera className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Shoot {i + 1}</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="ml-auto"
-              onClick={() => patch({ shoots: draft.shoots.filter((_, idx) => idx !== i) })}
-            >
-              <Trash2 />
-              <span className="sr-only">Remove shoot {i + 1}</span>
-            </Button>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Name" required>
-              <Input value={s.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Wedding day" />
-            </Field>
-            <Field label="Date">
-              <Input type="date" value={s.shoot_date} onChange={(e) => set(i, { shoot_date: e.target.value })} />
-            </Field>
-            <Field label="Location">
-              <Input value={s.location} onChange={(e) => set(i, { location: e.target.value })} placeholder="Taj Lands End" />
-            </Field>
-            <Field label="Status">
-              <Select value={s.status} onChange={(e) => set(i, { status: e.target.value as ShootDraft['status'] })}>
-                <option value="planned">Planned</option>
-                <option value="confirmed">Confirmed</option>
-              </Select>
-            </Field>
-          </div>
+    <div className="flex flex-col gap-4">
+      {/* One list for every requirement input on the step: the browser reads
+          it by id, and rendering it per row would repeat it a dozen times. */}
+      <datalist id={SERVICE_LIST_ID}>
+        {(services.data ?? []).map((s) => (
+          <option key={s.id} value={s.name} />
+        ))}
+      </datalist>
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Shoot schedule</p>
+          <p className="text-xs text-muted-foreground">
+            Add every shoot day. Pick a common one below, or add a custom shoot.
+          </p>
         </div>
-      ))}
-    </RowList>
+        <div className="flex items-center gap-2">
+          <AddShootMenu shoots={draft.shoots} onAdd={addNamed} />
+          <PresetMenu
+            label="Apply preset"
+            presets={shootPresets.data ?? []}
+            onApply={applyShootPreset}
+            builtIn={{
+              label: `Standard wedding — ${SHOOT_PRESET.join(', ')}`,
+              disabled: wedding.length === draft.shoots.length,
+              onApply: () => patch({ shoots: wedding }),
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Quick add
+        </span>
+        {QUICK_SHOOTS.map((name) => {
+          const already = draft.shoots.some(
+            (s) => s.name.trim().toLowerCase() === name.toLowerCase(),
+          )
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => add([name])}
+              disabled={already}
+              title={already ? `${name} is already on the schedule` : undefined}
+              className={cn(
+                'press flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
+                already
+                  ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                  : 'hover:border-primary hover:bg-primary/10 hover:text-primary',
+              )}
+            >
+              {already ? <Check className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
+              {name}
+            </button>
+          )
+        })}
+      </div>
+
+      {draft.shoots.length === 0 ? (
+        <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-border px-6 py-10 text-center">
+          <CalendarDays className="size-5 text-muted-foreground" aria-hidden />
+          <p className="mt-1 font-medium">No shoots yet</p>
+          <p className="text-sm text-muted-foreground">
+            Add Haldi, Wedding Day, Reception and the rest with the buttons above. Deliverable
+            dates count forward from these.
+          </p>
+        </div>
+      ) : (
+        <div ref={listRef} className="flex flex-col gap-3">
+          {draft.shoots.map((s, i) => (
+            <ShootCard
+              key={i}
+              index={i}
+              shoot={s}
+              draft={draft}
+              patch={patch}
+              onChange={(p) => set(i, p)}
+              onRemove={() => patch(removeShootAt(draft, i))}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
-function DeliverablesStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
-  const set = (i: number, p: Partial<DeliverableDraft>) =>
-    patch({ deliverables: draft.deliverables.map((d, idx) => (idx === i ? { ...d, ...p } : d)) })
+/**
+ * Picking the crew a shoot needs.
+ *
+ * Three sources, in the order a studio actually thinks: what is already on
+ * this shoot, what they have booked before, and the standard roles for anyone
+ * who has booked nothing yet. Everything is a tap; the typing is there for the
+ * one-off nobody has a name for.
+ *
+ * The draft is local until Save, so half-tapped chips do not leak into the
+ * project when somebody backs out.
+ */
+function RequirementsDialog({
+  shootName,
+  requirements,
+  onSave,
+}: {
+  shootName: string
+  requirements: ShootRequirementDraft[]
+  onSave: (next: ShootRequirementDraft[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<ShootRequirementDraft[]>(requirements)
+  const [custom, setCustom] = useState('')
+  const services = useServices()
+  const library = useRoleLibrary()
+
+  const has = (name: string) =>
+    draft.some((r) => r.name.trim().toLowerCase() === name.trim().toLowerCase())
+
+  const add = (name: string) => {
+    const clean = name.trim()
+    if (!clean || has(clean)) return
+    setDraft((d) => [...d, { name: clean, quantity: '1' }])
+  }
+
+  const setQuantity = (at: number, quantity: string) =>
+    setDraft((d) => d.map((r, i) => (i === at ? { ...r, quantity } : r)))
+
+  // What this studio has booked before, minus what is already on this shoot.
+  const saved = (services.data ?? []).filter((s) => !has(s.name))
+  const suggested = (library.data ?? []).filter(
+    (r) => !has(r.type_name) && !saved.some((s) => s.name.toLowerCase() === r.type_name.toLowerCase()),
+  )
 
   return (
-    <RowList
-      items={draft.deliverables}
-      empty="Nothing listed yet. Add the album, the film, the reel — whatever the client is promised."
-      addLabel="Add deliverable"
-      onAdd={() => patch({ deliverables: [...draft.deliverables, newDeliverable()] })}
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (o) {
+          setDraft(requirements)
+          setCustom('')
+        }
+      }}
     >
-      {draft.deliverables.map((d, i) => {
-        const due = estimatedDateFor(draft, d)
-        return (
-          <div key={i} className="rounded-lg border border-border p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Package className="size-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Deliverable {i + 1}</span>
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <SlidersHorizontal /> Add requirements
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title="Shoot requirements"
+        description={`Pick what's needed for “${shootName || 'this shoot'}” and set quantities.`}
+      >
+        <div className="flex max-h-[65vh] flex-col gap-4 overflow-y-auto">
+          <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+            <p className="mb-2 text-sm font-medium text-primary">
+              Selected for this shoot ({draft.length})
+            </p>
+            {draft.length === 0 ? (
+              <p className="rounded-md border border-dashed border-warning/40 bg-warning/10 px-3 py-3 text-center text-sm text-warning">
+                No requirements added yet. Tap a suggestion or add a new one below.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {draft.map((r, at) => (
+                  <div key={at} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{r.name}</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={r.quantity}
+                      onChange={(e) => setQuantity(at, e.target.value)}
+                      aria-label={`How many ${r.name}`}
+                      className="w-20"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setDraft((d) => d.filter((_, i) => i !== at))}
+                    >
+                      <Trash2 />
+                      <span className="sr-only">Remove {r.name}</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border p-3">
+            <Label>Add custom requirement</Label>
+            <div className="mt-1.5 flex items-center gap-2">
+              <Input
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  add(custom)
+                  setCustom('')
+                }}
+                placeholder="e.g. Highlight Editor"
+              />
               <Button
-                variant="ghost"
-                size="icon"
-                className="ml-auto"
-                onClick={() => patch({ deliverables: draft.deliverables.filter((_, idx) => idx !== i) })}
+                onClick={() => {
+                  add(custom)
+                  setCustom('')
+                }}
+                disabled={!custom.trim()}
               >
-                <Trash2 />
-                <span className="sr-only">Remove deliverable {i + 1}</span>
+                <Plus /> Add
               </Button>
             </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Title" required>
-                <Input value={d.title} onChange={(e) => set(i, { title: e.target.value })} placeholder="Wedding album" />
-              </Field>
-              <Field label="Starts after">
-                <Select
-                  value={d.start_rule}
-                  onChange={(e) => set(i, { start_rule: e.target.value as DeliverableDraft['start_rule'] })}
-                >
-                  <option value="whole_project">All shoots are done</option>
-                  <option value="this_shoot">One specific shoot</option>
-                  <option value="specific_shoots">Selected shoots</option>
-                  <option value="no_data">No schedule</option>
-                </Select>
-              </Field>
-
-              {d.start_rule === 'this_shoot' && (
-                <Field label="Which shoot">
-                  <Select
-                    value={d.shoot_index ?? ''}
-                    onChange={(e) => set(i, { shoot_index: e.target.value === '' ? null : Number(e.target.value) })}
-                  >
-                    <option value="">— Pick a shoot —</option>
-                    {draft.shoots.map((s, idx) => (
-                      <option key={idx} value={idx}>
-                        {s.name || `Shoot ${idx + 1}`}
-                        {s.shoot_date ? ` · ${prettyDate(s.shoot_date)}` : ''}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              )}
-
-              {d.start_rule !== 'no_data' && (
-                <Field label="Delivery lead time (days)">
-                  <Input
-                    inputMode="numeric"
-                    value={d.lead_days}
-                    onChange={(e) => set(i, { lead_days: e.target.value })}
-                    placeholder="45"
-                  />
-                </Field>
-              )}
-            </div>
-
-            {d.start_rule !== 'no_data' && (
-              <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CalendarDays className="size-3.5" />
-                {due ? (
-                  <>
-                    Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
-                  </>
-                ) : (
-                  'Estimated delivery appears once the shoot has a date and a lead time.'
-                )}
-              </p>
-            )}
-
-            <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-border pt-4">
-              <Switch
-                className="w-auto"
-                checked={d.is_additional_charge}
-                onChange={(v) => set(i, { is_additional_charge: v })}
-                label="Charged on top of the package"
-              />
-              {d.is_additional_charge && (
-                <Field label="Amount (₹)" required>
-                  <Input
-                    inputMode="numeric"
-                    value={d.additional_charge_amount}
-                    onChange={(e) => set(i, { additional_charge_amount: e.target.value })}
-                    placeholder="15000"
-                    className="w-40"
-                  />
-                </Field>
-              )}
-              <Switch
-                className="w-auto"
-                checked={d.visibility_scope === 'client'}
-                onChange={(v) => set(i, { visibility_scope: v ? 'client' : 'internal' })}
-                label="Visible to the client"
-              />
-            </div>
           </div>
-        )
-      })}
-    </RowList>
+
+          <div>
+            <p className="mb-1.5 text-sm font-medium">Your saved requirements (tap to add)</p>
+            {saved.length === 0 ? (
+              <p className="rounded-md border border-dashed border-border px-3 py-3 text-center text-sm text-muted-foreground">
+                None yet. Add one above or pick from suggestions below.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {saved.map((s) => (
+                  <Chip key={s.id} label={s.name} onAdd={() => add(s.name)} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {suggested.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                <Sparkles className="size-3.5 text-muted-foreground" aria-hidden />
+                Suggested (tap to add)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {suggested.map((r) => (
+                  <Chip key={r.id} label={r.type_name} onAdd={() => add(r.type_name)} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button
+            onClick={() => {
+              onSave(draft.filter((r) => r.name.trim()))
+              setOpen(false)
+            }}
+          >
+            Save requirements
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
+function Chip({ label, onAdd }: { label: string; onAdd: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onAdd}
+      className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+    >
+      <Plus className="size-3.5" aria-hidden />
+      {label}
+    </button>
+  )
+}
+
+/** Shared by every requirement input on the step. */
+const SERVICE_LIST_ID = 'ipc-shoot-services'
+
+/**
+ * One shoot day, whole: when it is, where it is, who it needs, and what the
+ * edit room owes off the back of it.
+ *
+ * The card tints when something is missing rather than blocking — a studio
+ * booking a date off a phone call has the day before it has the crew, and the
+ * wizard should take the booking either way. Only a missing title actually
+ * stops the step.
+ */
+function ShootCard({
+  index,
+  shoot,
+  draft,
+  patch,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  shoot: ShootDraft
+  draft: ProjectDraft
+  patch: Patch
+  onChange: (p: Partial<ShootDraft>) => void
+  onRemove: () => void
+}) {
+  const issues = shootIssues(shoot)
+  const work = internalWorkFor(draft, index)
+  return (
+    <div
+      className={cn(
+        'card-enter rounded-lg border p-4',
+        issues.length ? 'border-destructive/25 bg-destructive/5' : 'border-border',
+      )}
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          {index + 1}
+        </span>
+        <span className="font-medium">{shoot.name.trim() || `Shoot ${index + 1}`}</span>
+        {issues.map((issue) => (
+          <StatusBadge key={issue} tone={issue === 'No requirements' ? 'warning' : 'danger'}>
+            <AlertCircle className="mr-1 size-3" aria-hidden />
+            {issue}
+          </StatusBadge>
+        ))}
+        <div className="ml-auto flex items-center gap-1">
+          <SavePresetButton
+            kind="shoot"
+            defaultName={shoot.name.trim() || `Shoot ${index + 1}`}
+            label="Save as preset"
+            payload={{
+              requirements: shoot.requirements
+                .filter((r) => r.name.trim())
+                .map((r) => ({ name: r.name.trim(), quantity: Math.max(1, Number(r.quantity) || 1) })),
+              internal_work: work.map((w) => w.item.title.trim()).filter(Boolean),
+            }}
+          />
+          <Button variant="ghost" size="icon" onClick={onRemove}>
+            <Trash2 className="text-destructive" />
+            <span className="sr-only">Remove shoot {index + 1}</span>
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Field label="Shoot title" required>
+          <Input
+            value={shoot.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder="Wedding day"
+          />
+        </Field>
+        <Field label="Date" icon={CalendarDays}>
+          <Input
+            type="date"
+            value={shoot.shoot_date}
+            onChange={(e) => onChange({ shoot_date: e.target.value })}
+          />
+        </Field>
+        <Field label="Time" icon={Clock}>
+          <Input
+            type="time"
+            value={shoot.start_time}
+            onChange={(e) => onChange({ start_time: e.target.value })}
+          />
+        </Field>
+        <Field label="City / Venue" icon={MapPin}>
+          <Input
+            value={shoot.location}
+            onChange={(e) => onChange({ location: e.target.value })}
+            placeholder="e.g. Jaipur"
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="lg:col-span-3">
+          <Field
+            label="Google Map link"
+            icon={MapPin}
+            hint="Optional. Paste a Google Maps link only — the address text belongs in City / Venue."
+          >
+            <Input
+              type="url"
+              inputMode="url"
+              value={shoot.map_link}
+              onChange={(e) => onChange({ map_link: e.target.value })}
+              placeholder="Paste Google Maps link"
+            />
+          </Field>
+        </div>
+        <Field label="Status">
+          <Select
+            value={shoot.status}
+            onChange={(e) => onChange({ status: e.target.value as ShootDraft['status'] })}
+          >
+            <option value="planned">Planned</option>
+            <option value="confirmed">Confirmed</option>
+          </Select>
+        </Field>
+      </div>
+
+      {/* ── who this day needs ── */}
+      <SubCard
+        icon={Users}
+        title="Shoot requirements"
+        hint="Pick people or services and set how many of each this day needs."
+        actions={
+          <RequirementsDialog
+            shootName={shoot.name}
+            requirements={shoot.requirements}
+            onSave={(requirements) => onChange({ requirements })}
+          />
+        }
+      >
+        {shoot.requirements.length === 0 ? (
+          <Band tone="warning">No requirements yet — tap “Add requirements” to plan the team.</Band>
+        ) : (
+          // A summary, not an editor: changes happen in the dialog, so the card
+          // stays readable when a wedding day needs eight people.
+          <div className="flex flex-wrap gap-2">
+            {shoot.requirements.map((r, at) => (
+              <span
+                key={at}
+                className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-sm"
+              >
+                {r.name.trim() || 'Unnamed'}
+                <span className="font-semibold text-primary">
+                  ×{Math.max(1, Number(r.quantity) || 1)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what the edit room owes off it ── */}
+      <InternalWorkBlock index={index} shoot={shoot} draft={draft} patch={patch} work={work} />
+    </div>
+  )
+}
+
+/**
+ * The team's own list for one shoot — culling, sorting, the reel — kept off
+ * the quotation because a client is not buying "data sorting", they are
+ * buying the album it feeds. Same deliverables array as step 3; this is the
+ * per-shoot window onto it.
+ */
+function InternalWorkBlock({
+  index,
+  shoot,
+  draft,
+  patch,
+  work,
+}: {
+  index: number
+  shoot: ShootDraft
+  draft: ProjectDraft
+  patch: Patch
+  work: { at: number; item: DeliverableDraft }[]
+}) {
+  const titles = new Set(work.map((w) => w.item.title.trim().toLowerCase()))
+  const suggestions = internalWorkSuggestions(shoot.name).filter(
+    (s) => !titles.has(s.toLowerCase()),
+  )
+  const presets = useShootPresets('internal_work')
+  /** Null = closed, -1 = adding, else the index in draft.deliverables to edit. */
+  const [editing, setEditing] = useState<number | null>(null)
+
+  const addTitles = (names: string[]) =>
+    patch({
+      deliverables: [
+        ...draft.deliverables,
+        ...names
+          .filter((n) => !n.trim() || !titles.has(n.trim().toLowerCase()))
+          .map((n) => newInternalWork(index, n.trim())),
+      ],
+    })
+
+  return (
+    <SubCard
+      icon={Package}
+      title="Deliverables for this shoot"
+      hint="These items help the team edit, sort, hand off and track. They never appear on the quotation unless you say so."
+      actions={
+        <>
+          <PresetMenu
+            label="Apply preset"
+            variant="ghost"
+            presets={presets.data ?? []}
+            onApply={(p) => addTitles([...p.payload.internal_work])}
+          />
+          <SavePresetButton
+            kind="internal_work"
+            defaultName={shoot.name.trim() ? `${shoot.name.trim()} edit room` : 'Edit room'}
+            label="Save preset"
+            payload={{
+              requirements: [],
+              internal_work: work.map((w) => w.item.title.trim()).filter(Boolean),
+            }}
+          />
+          <Button size="sm" onClick={() => setEditing(-1)}>
+            <Plus /> Add more deliverables
+          </Button>
+        </>
+      }
+    >
+      {work.length === 0 ? (
+        <Band>No deliverables added for this shoot yet.</Band>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {work.map(({ at, item }) => (
+            <li
+              key={at}
+              className="card-enter flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
+            >
+              <CheckCircle2 className="size-3.5 shrink-0 text-primary" aria-hidden />
+              <span className="font-medium">{item.title.trim() || 'Untitled'}</span>
+              <span className="text-muted-foreground">· Starts after:</span>
+              <span>{startRuleShortLabel(item.start_rule)}</span>
+              {item.lead_days.trim() && (
+                <span className="text-muted-foreground">
+                  · Due in {item.lead_days.trim()} {item.lead_days.trim() === '1' ? 'day' : 'days'}
+                </span>
+              )}
+              {item.show_on_quotation && <StatusBadge tone="info">On quotation</StatusBadge>}
+              <span className="ml-auto flex items-center gap-0.5">
+                <Button variant="ghost" size="icon" onClick={() => setEditing(at)}>
+                  <Pencil />
+                  <span className="sr-only">Edit {item.title.trim() || 'this deliverable'}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() =>
+                    patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })
+                  }
+                >
+                  <X />
+                  <span className="sr-only">Remove {item.title.trim() || 'this deliverable'}</span>
+                </Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <AddDeliverableDialog
+        open={editing !== null}
+        onOpenChange={(next) => setEditing(next ? editing : null)}
+        shootName={shoot.name}
+        // The row being edited is not a duplicate of itself.
+        existingTitles={
+          editing !== null && editing >= 0
+            ? new Set(
+                work
+                  .filter((w) => w.at !== editing)
+                  .map((w) => w.item.title.trim().toLowerCase()),
+              )
+            : titles
+        }
+        initial={editing !== null && editing >= 0 ? draft.deliverables[editing] : undefined}
+        onSubmit={(v) =>
+          patch({
+            deliverables:
+              editing !== null && editing >= 0
+                ? draft.deliverables.map((d, i) => (i === editing ? { ...d, ...v } : d))
+                : [
+                    ...draft.deliverables,
+                    { ...newInternalWork(index, v.title), ...v, shoot_index: index },
+                  ],
+          })
+        }
+      />
+
+      {suggestions.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Sparkles className="size-3.5" aria-hidden />
+            Suggested for {shoot.name.trim() || 'this shoot'}
+          </span>
+          {suggestions.map((title) => (
+            <button
+              key={title}
+              type="button"
+              onClick={() => addTitles([title])}
+              className="press flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+            >
+              <Plus className="size-3.5" aria-hidden />
+              {title}
+            </button>
+          ))}
+        </div>
+      )}
+    </SubCard>
+  )
+}
+
+/** A titled block inside a shoot card: heading, hint, buttons, body. */
+function SubCard({
+  icon: Icon,
+  title,
+  hint,
+  actions,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  hint: string
+  actions: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-card p-3">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <Icon className="size-4 text-muted-foreground" aria-hidden />
+            {title}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** The dashed "nothing here yet" strip inside a sub-card. */
+function Band({ tone, children }: { tone?: 'warning'; children: ReactNode }) {
+  return (
+    <p
+      className={cn(
+        'rounded-md border border-dashed px-3 py-4 text-center text-sm',
+        tone === 'warning'
+          ? 'border-warning/40 bg-warning/10 text-warning'
+          : 'border-border text-muted-foreground',
+      )}
+    >
+      {children}
+    </p>
+  )
+}
+
+/**
+ * Saved shapes, listed. The built-in wedding preset rides in the same menu as
+ * the studio's own, because from the pressing end they are the same thing.
+ */
+function PresetMenu({
+  label,
+  presets,
+  onApply,
+  builtIn,
+  variant = 'outline',
+}: {
+  label: string
+  presets: ShootPreset[]
+  onApply: (preset: ShootPreset) => void
+  builtIn?: { label: string; disabled: boolean; onApply: () => void }
+  variant?: 'outline' | 'ghost'
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const remove = useDeleteShootPreset()
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={root} className="relative">
+      <Button size="sm" variant={variant} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <Sparkles /> {label}
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={label}
+          className="ipc-menu absolute right-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-3rem)] overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
+        >
+          {builtIn && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={builtIn.disabled}
+              onClick={() => {
+                builtIn.onApply()
+                setOpen(false)
+              }}
+              className={cn(
+                'w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                builtIn.disabled
+                  ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                  : 'hover:bg-muted',
+              )}
+            >
+              {builtIn.label}
+            </button>
+          )}
+          {presets.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">
+              No saved presets yet. Set a shoot up the way you like it, then save it.
+            </p>
+          ) : (
+            presets.map((p) => (
+              <div key={p.id} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onApply(p)
+                    setOpen(false)
+                  }}
+                  className="flex-1 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                >
+                  {p.name}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  onClick={() => remove.mutate(p.id)}
+                  disabled={remove.isPending}
+                >
+                  <Trash2 />
+                  <span className="sr-only">Delete preset {p.name}</span>
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Save this shape under a name. The name field opens in place rather than in a
+ * dialog: it is one short answer, and a modal over a wizard step is a lot of
+ * ceremony for a text box.
+ */
+function SavePresetButton({
+  kind,
+  defaultName,
+  label,
+  payload,
+}: {
+  kind: ShootPresetKind
+  defaultName: string
+  label: string
+  payload: ShootPresetPayload
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(defaultName)
+  const save = useSaveShootPreset()
+  const empty = payload.requirements.length === 0 && payload.internal_work.length === 0
+
+  const submit = () => {
+    if (!name.trim()) return
+    save.mutate({ kind, name: name.trim(), payload }, { onSuccess: () => setOpen(false) })
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setName(defaultName)
+          setOpen((v) => !v)
+        }}
+        disabled={empty}
+        title={empty ? 'Nothing to save yet' : undefined}
+      >
+        <Bookmark /> {label}
+      </Button>
+      {open && (
+        <div className="ipc-menu absolute right-0 top-full z-40 mt-2 flex w-64 items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-lg">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit()
+              if (e.key === 'Escape') setOpen(false)
+            }}
+            aria-label="Preset name"
+            placeholder="Preset name"
+          />
+          <Button size="sm" onClick={submit} disabled={!name.trim() || save.isPending}>
+            Save
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+/**
+ * What the client is promised, what costs extra, and what only the team sees —
+ * three lists rather than one, because those are three different conversations
+ * and only the first two ever reach a quotation.
+ *
+ * A row's list is not a stored field: it falls out of the two switches the row
+ * already carries, so turning "Charged on top" on moves an item into add-ons
+ * with no second source of truth to disagree.
+ */
+function DeliverablesStep({
+  draft,
+  patch,
+  onJump,
+}: {
+  draft: ProjectDraft
+  patch: Patch
+  onJump: (step: WizardStep) => void
+}) {
+  const sets = useDeliverableSets()
+  const saveSet = useSaveDeliverableSet()
+  const deleteSet = useDeleteDeliverableSet()
+  const [naming, setNaming] = useState(false)
+  const [setName, setSetName] = useState('')
+
+  const client = deliverablesIn(draft, 'client')
+  const addOns = deliverablesIn(draft, 'add_on')
+  const internal = deliverablesIn(draft, 'internal')
+
+  const add = (items: { title: string }[]) =>
+    patch({ deliverables: withDeliverables(draft.deliverables, items) })
+
+  const saveable = [...client, ...addOns].map(({ item }) => ({
+    title: item.title.trim(),
+    is_additional_charge: item.is_additional_charge,
+    additional_charge_amount: money(item.additional_charge_amount),
+    show_on_quotation: item.show_on_quotation,
+  })).filter((i) => i.title)
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* ── what the client is promised ── */}
+      <SubCard
+        icon={Package}
+        title="Client deliverables"
+        hint="The final items promised to the client, shown on the quotation when enabled."
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => patch({ deliverables: [...draft.deliverables, newClientDeliverable()] })}
+          >
+            <Plus /> Add row
+          </Button>
+        }
+      >
+        <p className="mb-3 flex items-start gap-2 rounded-md bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+          <Eye className="mt-0.5 size-4 shrink-0" aria-hidden />
+          Only items with “Show on quotation” on will appear in the client quotation.
+        </p>
+
+        <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Load set
+            </span>
+            {BUILT_IN_SETS.map((s) => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => add(s.titles.map((title) => ({ title })))}
+                title={s.titles.join(', ')}
+                className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+              >
+                <Plus className="size-3.5" aria-hidden />
+                {s.name}
+              </button>
+            ))}
+            {(sets.data ?? []).map((s) => (
+              <span
+                key={s.id}
+                className="flex items-center rounded-full border border-border bg-card pr-1 text-sm font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => patch({ deliverables: withDeliverables(draft.deliverables, s.items) })}
+                  title={s.items.map((i) => i.title).join(', ')}
+                  className="flex items-center gap-1 rounded-full px-3 py-1 transition-colors hover:text-primary"
+                >
+                  <Plus className="size-3.5" aria-hidden />
+                  {s.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteSet.mutate(s.id)}
+                  disabled={deleteSet.isPending}
+                  className="rounded-full p-1 text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  <X className="size-3.5" aria-hidden />
+                  <span className="sr-only">Delete set {s.name}</span>
+                </button>
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {naming ? (
+              <>
+                <Input
+                  autoFocus
+                  value={setName}
+                  onChange={(e) => setSetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setNaming(false)
+                    if (e.key !== 'Enter' || !setName.trim()) return
+                    saveSet.mutate(
+                      { name: setName.trim(), items: saveable },
+                      { onSuccess: () => setNaming(false) },
+                    )
+                  }}
+                  placeholder="Name this set"
+                  aria-label="Set name"
+                  className="w-56"
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    saveSet.mutate(
+                      { name: setName.trim(), items: saveable },
+                      { onSuccess: () => setNaming(false) },
+                    )
+                  }
+                  disabled={!setName.trim() || saveSet.isPending}
+                >
+                  Save
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setSetName('')
+                  setNaming(true)
+                }}
+                disabled={saveable.length === 0}
+                title={saveable.length === 0 ? 'Add a deliverable first' : undefined}
+              >
+                <Save /> Save as set
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              Sets are shared with your whole team. Delivery-time memory stays on this device.
+            </span>
+          </div>
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <Sparkles className="size-3.5" aria-hidden />
+            Quick add
+          </span>
+          {QUICK_DELIVERABLES.map((title) => {
+            const already = draft.deliverables.some(
+              (d) => d.title.trim().toLowerCase() === title.toLowerCase(),
+            )
+            return (
+              <button
+                key={title}
+                type="button"
+                onClick={() => add([{ title }])}
+                disabled={already}
+                title={already ? `${title} is already on the list` : undefined}
+                className={cn(
+                  'flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
+                  already
+                    ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                    : 'hover:border-primary hover:bg-primary/10 hover:text-primary',
+                )}
+              >
+                {already ? <Check className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
+                {title}
+              </button>
+            )
+          })}
+        </div>
+
+        {client.length === 0 ? (
+          <Band>
+            No deliverables yet. Tap a Quick add chip above, or load one of your sets.
+          </Band>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {client.map(({ at, item }) => (
+              <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what costs extra ── */}
+      <SubCard
+        icon={Wallet}
+        title="Additional client services"
+        hint="Optional add-ons billed on top of the package. Turn off “Show on quotation” to keep one internal."
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => patch({ deliverables: [...draft.deliverables, newAddOn()] })}
+          >
+            <Plus /> Add row
+          </Button>
+        }
+      >
+        {addOns.length === 0 ? (
+          <Band>Nothing billed separately yet. Use “Add row” to add an extra.</Band>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {addOns.map(({ at, item }) => (
+              <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what only the team sees ── */}
+      {internal.length > 0 && (
+        <SubCard
+          icon={Users}
+          title="Internal work"
+          hint="For your team only — never shown on the quotation. Items added inside a shoot are edited there."
+          actions={
+            internal.some(({ item }) => item.shoot_index !== null) ? (
+              <Button size="sm" variant="ghost" onClick={() => onJump('shoots')}>
+                <Pencil /> Edit in Shoots
+              </Button>
+            ) : null
+          }
+        >
+          <div className="flex flex-col gap-2">
+            {internal.map(({ at, item }) =>
+              item.shoot_index === null ? (
+                <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+              ) : (
+                <div
+                  key={at}
+                  className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                >
+                  <Package className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="font-medium">{item.title || 'Untitled'}</span>
+                  <span className="text-muted-foreground">
+                    · {draft.shoots[item.shoot_index]?.name?.trim() || `Shoot ${item.shoot_index + 1}`}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+        </SubCard>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One deliverable, edited in place.
+ *
+ * The lead time is remembered per title on this device as it is typed, so the
+ * next project that quotes a "Photo Album" starts from the turnaround this
+ * studio actually works to instead of an empty box.
+ */
+function DeliverableRow({
+  at,
+  item,
+  draft,
+  patch,
+}: {
+  at: number
+  item: DeliverableDraft
+  draft: ProjectDraft
+  patch: Patch
+}) {
+  const set = (p: Partial<DeliverableDraft>) =>
+    patch({ deliverables: draft.deliverables.map((d, i) => (i === at ? { ...d, ...p } : d)) })
+  const due = estimatedDateFor(draft, item)
+
+  return (
+    <div className="card-enter rounded-lg border border-border p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Package className="size-4 text-muted-foreground" />
+        <span className="text-sm font-medium">{item.title.trim() || 'Untitled deliverable'}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto"
+          onClick={() => patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })}
+        >
+          <Trash2 />
+          <span className="sr-only">Remove {item.title.trim() || 'this deliverable'}</span>
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Title" required>
+          <Input
+            value={item.title}
+            onChange={(e) => set({ title: e.target.value })}
+            placeholder="Wedding album"
+          />
+        </Field>
+        {/* The client's clock, which is the one the quotation prints. */}
+        <Field label="Delivery days">
+          <Input
+            inputMode="numeric"
+            value={item.due_days}
+            onChange={(e) => set({ due_days: e.target.value })}
+            onBlur={(e) => rememberDueDays(item.title, e.target.value)}
+            placeholder="45"
+          />
+        </Field>
+        <Field label="Due basis">
+          <Select
+            value={item.due_basis}
+            onChange={(e) => set({ due_basis: e.target.value as DeliverableDraft['due_basis'] })}
+          >
+            {DUE_BASIS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {item.due_basis === 'custom' && (
+          <Field label="Estimated date">
+            <Input
+              type="date"
+              value={item.custom_date}
+              onChange={(e) => set({ custom_date: e.target.value })}
+            />
+          </Field>
+        )}
+
+        <Field label="When can this work start?">
+          <Select
+            value={item.start_rule}
+            onChange={(e) => set({ start_rule: e.target.value as DeliverableDraft['start_rule'] })}
+          >
+            {START_RULE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {item.start_rule === 'this_shoot' && (
+          <Field label="Which shoot">
+            <Select
+              value={item.shoot_index ?? ''}
+              onChange={(e) => set({ shoot_index: e.target.value === '' ? null : Number(e.target.value) })}
+            >
+              <option value="">— Pick a shoot —</option>
+              {draft.shoots.map((s, idx) => (
+                <option key={idx} value={idx}>
+                  {s.name || `Shoot ${idx + 1}`}
+                  {s.shoot_date ? ` · ${prettyDate(s.shoot_date)}` : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        {item.start_rule !== 'no_data' && (
+          <Field label="Days after work can start">
+            <Input
+              inputMode="numeric"
+              value={item.lead_days}
+              onChange={(e) => set({ lead_days: e.target.value })}
+              placeholder="7"
+            />
+          </Field>
+        )}
+      </div>
+
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <CalendarDays className="size-3.5" />
+        {due ? (
+          <>
+            Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
+          </>
+        ) : (
+          'Estimated delivery appears once the shoot it counts from has a date.'
+        )}
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-border pt-4">
+        <Switch
+          className="w-auto"
+          checked={item.is_additional_charge}
+          onChange={(v) => set({ is_additional_charge: v })}
+          label="Charged on top of the package"
+        />
+        {item.is_additional_charge && (
+          <Field label="Amount (₹)" required>
+            <Input
+              inputMode="numeric"
+              value={item.additional_charge_amount}
+              onChange={(e) => set({ additional_charge_amount: e.target.value })}
+              placeholder="15000"
+              className="w-40"
+            />
+          </Field>
+        )}
+        <Switch
+          className="w-auto"
+          checked={item.show_on_quotation}
+          onChange={(v) => set({ show_on_quotation: v })}
+          label="Show on quotation"
+        />
+        <Switch
+          className="w-auto"
+          checked={item.visibility_scope === 'client'}
+          onChange={(v) => set({ visibility_scope: v ? 'client' : 'internal' })}
+          label="Visible to the client"
+        />
+      </div>
+    </div>
+  )
+}
 function BillingStep({
   draft,
   patch,
@@ -765,6 +2226,15 @@ function BillingStep({
   )
 }
 
+/**
+ * The last look before the project exists.
+ *
+ * Six tiles rather than a table of twenty rows: what a studio checks here is
+ * "is this the right client, the right days, the right money", and each tile
+ * carries the Edit that takes them back to fix it. A tile whose step still has
+ * a problem says what the problem is, in place — so nobody has to open a step
+ * to find out why the button won't fire.
+ */
 function ReviewStep({
   draft,
   totals,
@@ -778,45 +2248,118 @@ function ReviewStep({
 }) {
   const { data: clients } = useClients()
   const client = clients?.find((c) => c.id === draft.client_id)
+  const clientName = client?.name ?? draft.new_client_name.trim()
   const problems = WIZARD_STEPS.filter((s) => errors[s])
 
   return (
-    <div className="flex flex-col gap-5">
-      {problems.length > 0 && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm font-medium text-destructive">Fix these before creating:</p>
-          <ul className="mt-2 space-y-1 text-sm">
-            {problems.map((s) => (
-              <li key={s}>
-                <button type="button" onClick={() => onJump(s)} className="text-destructive hover:underline">
-                  {STEP_LABELS[s]} — {errors[s]}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ReviewTile
+          label="Project"
+          value={draft.name.trim() || '—'}
+          problem={errors.client && !draft.name.trim() ? errors.client : undefined}
+          onEdit={() => onJump('client')}
+        />
+        <ReviewTile
+          label="Client"
+          value={clientName || 'Not set'}
+          problem={errors.client && !clientName ? errors.client : undefined}
+          onEdit={() => onJump('client')}
+        />
+        <ReviewTile
+          label="Shoots"
+          value={
+            draft.shoots.length ? `${countLabel(draft.shoots.length, 'shoot')} added` : 'None added'
+          }
+          hint={summarise(draft.shoots.map((s) => s.name.trim() || 'Untitled'))}
+          problem={errors.shoots}
+          onEdit={() => onJump('shoots')}
+        />
+        <ReviewTile
+          label="Deliverables"
+          value={
+            draft.deliverables.length
+              ? `${countLabel(draft.deliverables.length, 'deliverable')} added`
+              : 'None added'
+          }
+          hint={summarise(draft.deliverables.map((d) => d.title.trim() || 'Untitled'))}
+          problem={errors.deliverables}
+          onEdit={() => onJump('deliverables')}
+        />
+        <ReviewTile
+          label="Package / add-ons / total"
+          value={`${formatINR(totals.packageCost)} + ${formatINR(totals.addOns)} = ${formatINR(totals.total)}`}
+          accent
+          onEdit={() => onJump('billing')}
+        />
+        <ReviewTile
+          label="Payments"
+          value={`Received ${formatINR(totals.received)} · Pending ${formatINR(totals.balance)}`}
+          problem={errors.billing}
+          onEdit={() => onJump('billing')}
+        />
+      </div>
+
+      {problems.length > 0 ? (
+        <p className="text-sm font-medium text-warning">
+          Some required fields are missing. Use Edit to fix them before creating the project.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Creating this makes {countLabel(1, 'project')}
+          {draft.shoots.length ? `, ${countLabel(draft.shoots.length, 'shoot')}` : ''}
+          {draft.deliverables.length ? `, ${countLabel(draft.deliverables.length, 'deliverable')}` : ''}
+          {draft.payments.length ? ` and ${countLabel(draft.payments.length, 'payment')}` : ''}
+          {draft.client_id ? '' : ' and a new client record'}.
+        </p>
       )}
+    </div>
+  )
+}
 
-      <dl className="divide-y divide-border rounded-lg border border-border">
-        <ReviewRow label="Project" value={draft.name || '—'} />
-        <ReviewRow label="Client" value={client?.name ?? draft.new_client_name ?? '—'} />
-        <ReviewRow label="Quotation" value={draft.show_quotation ? 'Visible to client' : 'Hidden from client'} />
-        <ReviewRow label="Shoots" value={summarise(draft.shoots.map((s) => s.name || 'Untitled'))} />
-        <ReviewRow label="Deliverables" value={summarise(draft.deliverables.map((d) => d.title || 'Untitled'))} />
-        <ReviewRow label="Package" value={formatINR(totals.packageCost)} />
-        <ReviewRow label="Chargeable extras" value={formatINR(totals.addOns)} />
-        <ReviewRow label="Total" value={formatINR(totals.total)} strong />
-        <ReviewRow label="Received" value={formatINR(totals.received)} />
-        <ReviewRow label="Balance" value={formatINR(totals.balance)} />
-      </dl>
-
-      <p className="text-sm text-muted-foreground">
-        Creating this makes {countLabel(1, 'project')}
-        {draft.shoots.length ? `, ${countLabel(draft.shoots.length, 'shoot')}` : ''}
-        {draft.deliverables.length ? `, ${countLabel(draft.deliverables.length, 'deliverable')}` : ''}
-        {draft.payments.length ? ` and ${countLabel(draft.payments.length, 'payment')}` : ''}
-        {draft.client_id ? '' : ' and a new client record'}.
-      </p>
+/** One fact about the project, and the way back to change it. */
+function ReviewTile({
+  label,
+  value,
+  hint,
+  problem,
+  accent,
+  onEdit,
+}: {
+  label: string
+  value: string
+  hint?: string
+  problem?: string | undefined
+  accent?: boolean
+  onEdit: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-3 rounded-lg border p-4',
+        problem
+          ? 'border-destructive/30 bg-destructive/5'
+          : accent
+            ? 'border-primary/30 bg-primary/5'
+            : 'border-border bg-muted/30',
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        <p className={cn('break-words font-semibold', accent && 'text-primary')}>
+          {value}
+        </p>
+        {problem ? (
+          <p className="mt-1 text-xs text-destructive">{problem}</p>
+        ) : (
+          hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>
+        )}
+      </div>
+      <Button variant="ghost" size="sm" onClick={onEdit}>
+        <Pencil /> Edit
+      </Button>
     </div>
   )
 }
@@ -825,11 +2368,281 @@ const countLabel = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's
 
 const summarise = (names: string[]) => (names.length === 0 ? 'None' : names.join(', '))
 
-function ReviewRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+/** What a piece of internal work is waiting on before it can begin. */
+const START_RULE_OPTIONS: { value: DeliverableDraft['start_rule']; label: string }[] = [
+  { value: 'this_shoot', label: "After this shoot's data is received" },
+  { value: 'whole_project', label: 'After whole project data is received' },
+  { value: 'specific_shoots', label: 'I will choose specific shoots' },
+  { value: 'no_data', label: 'No shoot data needed' },
+]
+
+/** The one-word version of a start rule, for a row that has no space. */
+function startRuleShortLabel(rule: DeliverableDraft['start_rule']): string {
+  switch (rule) {
+    case 'this_shoot':
+      return 'This shoot data'
+    case 'whole_project':
+      return 'Whole project data'
+    case 'specific_shoots':
+      return 'Selected shoots'
+    case 'no_data':
+      return 'No data needed'
+  }
+}
+
+export interface AddedDeliverable {
+  title: string
+  description: string
+  due_days: string
+  due_basis: DueBasis
+  custom_date: string
+  visibility_scope: 'client' | 'internal'
+  show_on_quotation: boolean
+  start_rule: DeliverableDraft['start_rule']
+  lead_days: string
+}
+
+/**
+ * Add one deliverable to a shoot.
+ *
+ * Two clocks, because a studio runs two. The top pair is what the client was
+ * told — "thirty days after the wedding" — and it is what lands on the
+ * quotation. The panel below is production's: nothing can be edited before the
+ * footage arrives, so that work is timed from when its data lands. Typing a
+ * title people recognise fills both, which is the point — those numbers are
+ * trade knowledge, not decisions worth stopping over.
+ */
+function AddDeliverableDialog({
+  open,
+  onOpenChange,
+  shootName,
+  existingTitles,
+  initial,
+  onSubmit: onSubmitValue,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  shootName: string
+  /** Titles already on this shoot, lowercased — to warn before duplicating. */
+  existingTitles: Set<string>
+  /** Given when reopening on a row: the same form, editing what is there. */
+  initial?: DeliverableDraft | undefined
+  onSubmit: (value: AddedDeliverable) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [dueDays, setDueDays] = useState('30')
+  const [dueBasis, setDueBasis] = useState<DueBasis>('after_wedding_day')
+  const [customDate, setCustomDate] = useState('')
+  const [description, setDescription] = useState('')
+  const [onQuotation, setOnQuotation] = useState(false)
+  const [startRule, setStartRule] = useState<DeliverableDraft['start_rule']>('this_shoot')
+  const [leadDays, setLeadDays] = useState('7')
+  const [advanced, setAdvanced] = useState(false)
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
+  /** Whether the title has been typed into since the dialog opened. */
+  const [typed, setTyped] = useState(false)
+
+  // Opening resets the form: to the row being edited, or to blank. A
+  // half-typed title left over from last time is worse than retyping one.
+  useEffect(() => {
+    if (!open) return
+    setTitle(initial?.title ?? '')
+    setDueDays(initial?.due_days || '30')
+    setDueBasis(initial?.due_basis ?? 'after_wedding_day')
+    setCustomDate(initial?.custom_date ?? '')
+    setDescription(initial?.description ?? '')
+    setOnQuotation(initial?.show_on_quotation ?? false)
+    setStartRule(initial?.start_rule ?? 'this_shoot')
+    setLeadDays(initial?.lead_days || '7')
+    setAdvanced(initial?.start_rule === 'specific_shoots')
+    setConfirmDuplicate(false)
+    setTyped(false)
+  }, [open, initial])
+
+  // Typing a name the trade knows fills in the timings behind it — but only
+  // once someone types, so reopening a row does not overwrite its numbers.
+  useEffect(() => {
+    const t = title.trim()
+    if (!typed || !t) return
+    const rule = deliverableRuleForTitle(t)
+    setDueDays(String(rule.due_days))
+    setDueBasis(rule.due_basis)
+    setLeadDays(String(internalLeadDaysForTitle(t)))
+  }, [title, typed])
+
+  const trimmed = title.trim()
+  const duplicate = trimmed.length > 0 && existingTitles.has(trimmed.toLowerCase())
+  const valid = trimmed.length > 0 && (!duplicate || confirmDuplicate)
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (!valid) return
+    onSubmitValue({
+      title: trimmed,
+      description: description.trim(),
+      due_days: dueDays.trim(),
+      due_basis: dueBasis,
+      custom_date: dueBasis === 'custom' ? customDate : '',
+      visibility_scope: onQuotation ? 'client' : 'internal',
+      show_on_quotation: onQuotation,
+      // Only internal work waits on data. A client line is a promise, not a
+      // production step, so it carries no readiness rule.
+      start_rule: onQuotation ? 'no_data' : startRule,
+      lead_days: onQuotation ? '' : leadDays.trim(),
+    })
+    onOpenChange(false)
+  }
+
   return (
-    <div className="flex gap-4 px-4 py-2.5 text-sm">
-      <dt className="w-44 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className={cn('min-w-0 flex-1 break-words', strong ? 'font-semibold' : 'font-medium')}>{value}</dd>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        // Two panels of fields is taller than a laptop dialog, so it scrolls
+        // rather than pushing its own buttons off the screen.
+        className="max-h-[88vh] overflow-y-auto"
+        title={initial ? 'Edit deliverable' : 'Add deliverable'}
+        description={
+          <>
+            Linked to{' '}
+            <span className="font-medium text-foreground">{shootName.trim() || 'this shoot'}</span>.
+            Will appear in the project deliverables list automatically.
+          </>
+        }
+      >
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Deliverable title *</Label>
+            <Input
+              autoFocus
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                setTyped(true)
+              }}
+              placeholder="e.g. Haldi Highlight Teaser"
+            />
+            {duplicate && (
+              <label className="flex items-center gap-2 text-xs text-warning">
+                <input
+                  type="checkbox"
+                  checked={confirmDuplicate}
+                  onChange={(e) => setConfirmDuplicate(e.target.checked)}
+                  className="size-3.5 accent-current"
+                />
+                Already on this shoot — add anyway
+              </label>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Delivery days</Label>
+              <Input
+                inputMode="numeric"
+                value={dueDays}
+                onChange={(e) => setDueDays(e.target.value)}
+                placeholder="30"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Due basis</Label>
+              <Select value={dueBasis} onChange={(e) => setDueBasis(e.target.value as DueBasis)}>
+                {DUE_BASIS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          {dueBasis === 'custom' && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Estimated date</Label>
+              <Input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Brief / instructions (optional)</Label>
+            <textarea
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What does the team need to know?"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <Switch
+              checked={onQuotation}
+              onChange={setOnQuotation}
+              label={onQuotation ? 'Show on quotation' : 'Internal only'}
+              description={
+                onQuotation
+                  ? 'Visible to the client and can affect the quotation.'
+                  : 'Used by your team and hidden from client quotation.'
+              }
+            />
+          </div>
+
+          {!onQuotation && (
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>When can this work start?</Label>
+                <Select
+                  value={startRule}
+                  onChange={(e) => setStartRule(e.target.value as DeliverableDraft['start_rule'])}
+                >
+                  {START_RULE_OPTIONS.filter((o) => advanced || o.value !== 'specific_shoots').map(
+                    (o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ),
+                  )}
+                </Select>
+                {!advanced && (
+                  <button
+                    type="button"
+                    onClick={() => setAdvanced(true)}
+                    className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  >
+                    Change / advanced
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Delivery time</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Due in</span>
+                  <Input
+                    inputMode="numeric"
+                    value={leadDays}
+                    onChange={(e) => setLeadDays(e.target.value)}
+                    className="w-20"
+                    aria-label="Days after work can start"
+                  />
+                  <span className="text-xs text-muted-foreground">days after work can start</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-1 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!valid}>
+              {initial ? 'Save changes' : 'Add deliverable'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

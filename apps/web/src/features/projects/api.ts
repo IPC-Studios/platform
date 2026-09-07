@@ -3,11 +3,15 @@ import { toast } from 'sonner'
 import { z } from '@ipc/contracts'
 import {
   createProjectRequest,
+  deliverableSet,
+  issuedLink,
   projectDetail,
   projectListItem,
   type CreateProjectRequest,
   type DeliverableInput,
+  type IssueQuotationRequest,
   type PaymentInput,
+  type SaveDeliverableSetRequest,
   type UpdateProjectRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
@@ -97,5 +101,87 @@ export function useAddPayment(id: string) {
     mutationFn: (input: PaymentInput) =>
       callApi(`/projects/${id}/payments`, { method: 'POST', body: input, responseSchema: anySchema }),
     onSuccess: useProjectMutation(id, 'Payment recorded'),
+  })
+}
+
+const setsList = deliverableSet.array()
+
+/**
+ * The packages this studio quotes from, shared with the whole team.
+ *
+ * Sets live on the server precisely because they are a shared decision — what
+ * "Premium" includes is the studio's answer, not one laptop's. (The lead-time
+ * memory beside them on the same step is the opposite, and stays local.)
+ */
+export function useDeliverableSets() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['projects', 'deliverable-sets'],
+    queryFn: () => callApi('/projects/deliverable-sets', { responseSchema: setsList }),
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useSaveDeliverableSet() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: SaveDeliverableSetRequest) =>
+      callApi('/projects/deliverable-sets', {
+        method: 'POST',
+        body: input,
+        responseSchema: deliverableSet,
+      }),
+    onSuccess: (saved) => {
+      toast.success(`Saved “${saved.name}”`)
+      void qc.invalidateQueries({ queryKey: ['projects', 'deliverable-sets'] })
+    },
+  })
+}
+
+export function useDeleteDeliverableSet() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      callApi(`/projects/deliverable-sets/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Set removed')
+      void qc.invalidateQueries({ queryKey: ['projects', 'deliverable-sets'] })
+    },
+  })
+}
+
+/**
+ * Turn a project into a quotation link.
+ *
+ * Shared by the project page and the "what next?" dialog the wizard shows, so
+ * a quotation issued from either place is built the same way — the server
+ * snapshots the prices, and what comes back is the link to send.
+ */
+export function useIssueQuotation() {
+  return useMutation({
+    mutationFn: (input: IssueQuotationRequest) =>
+      callApi('/documents/quotations', {
+        method: 'POST',
+        body: input,
+        responseSchema: issuedLink,
+      }),
+  })
+}
+
+/**
+ * Delete a project. Refused by the API once payments exist, so the error it
+ * throws is the message worth showing.
+ */
+export function useDeleteProject() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      callApi(`/projects/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Project deleted')
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
   })
 }

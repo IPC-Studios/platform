@@ -71,6 +71,13 @@ async function freshDb() {
   await db.exec(mig('0035_crm_v3.sql'))
   await db.exec(mig('0036_crm_v4.sql'))
   await db.exec(mig('0037_truly_amazing.sql'))
+  await db.exec(mig('0038_shoot_details.sql'))
+  await db.exec(mig('0039_deliverable_sets.sql'))
+  await db.exec(mig('0040_role_library.sql'))
+  await db.exec(mig('0041_team_terms.sql'))
+  await db.exec(mig('0042_client_documents.sql'))
+  await db.exec(mig('0043_enquiries.sql'))
+  await db.exec(mig('0044_crm_bulk_lost.sql'))
   await db.exec(mig('0045_crm_objects.sql'))
   await db.exec(mig('0046_crm_activities.sql'))
   await db.exec(mig('0047_crm_workflows.sql'))
@@ -1875,6 +1882,110 @@ describe('task bundles (0031)', () => {
   })
 })
 
+describe('shoot details (0038)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('gives a shoot somewhere to keep its map link', async () => {
+    const cols = await db.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_name = 'shoots' and column_name = 'map_link';`,
+    )
+    expect(cols.rows).toHaveLength(1)
+  })
+
+  it('policies presets the way every other company-scoped table is', async () => {
+    const policies = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies where tablename = 'shoot_presets';`,
+    )
+    expect(policies.rows.map((p) => p.policyname).sort()).toEqual([
+      'shoot_presets_select',
+      'shoot_presets_write',
+    ])
+  })
+
+  // "Save preset" under a name that exists is an overwrite, not a second row.
+  it('keeps one preset per name and kind', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into shoot_presets (company_id, kind, name, payload)
+       values ('${id}', 'shoot', 'Wedding day', '{"requirements": []}'::jsonb);`,
+    )
+    await expect(
+      db.query(
+        `insert into shoot_presets (company_id, kind, name, payload)
+         values ('${id}', 'shoot', 'Wedding day', '{}'::jsonb);`,
+      ),
+    ).rejects.toThrow()
+    // Same name, different kind, is a different preset.
+    await db.query(
+      `insert into shoot_presets (company_id, kind, name, payload)
+       values ('${id}', 'internal_work', 'Wedding day', '{}'::jsonb);`,
+    )
+    const rows = await db.query(`select 1 from shoot_presets;`)
+    expect(rows.rows).toHaveLength(2)
+  })
+
+  it('rejects a kind nobody handles', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    await expect(
+      db.query(
+        `insert into shoot_presets (company_id, kind, name)
+         values ('${company.rows[0]!.id}', 'moodboard', 'x');`,
+      ),
+    ).rejects.toThrow()
+  })
+})
+
+describe('deliverable sets (0039)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('policies sets the way every other company-scoped table is', async () => {
+    const policies = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies where tablename = 'deliverable_sets';`,
+    )
+    expect(policies.rows.map((p) => p.policyname).sort()).toEqual([
+      'deliverable_sets_select',
+      'deliverable_sets_write',
+    ])
+  })
+
+  it('keeps one set per name, so saving over a package replaces it', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into deliverable_sets (company_id, name, items)
+       values ('${id}', 'Premium', '[{"title": "Photo Album"}]'::jsonb);`,
+    )
+    await expect(
+      db.query(
+        `insert into deliverable_sets (company_id, name, items)
+         values ('${id}', 'Premium', '[]'::jsonb);`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('goes with the company', async () => {
+    const before = await db.query(`select 1 from deliverable_sets;`)
+    expect(before.rows.length).toBeGreaterThan(0)
+    await db.exec(`delete from companies;`)
+    const after = await db.query(`select 1 from deliverable_sets;`)
+    expect(after.rows).toHaveLength(0)
+  })
+})
+
 describe('plan gate sits on feature access, not identity (0034)', () => {
   let db: PGlite
   const owner = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
@@ -2470,6 +2581,62 @@ describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
     const lead = await add('Auto cadence lead', '9876800020')
     const lc = await db.query<{ cadence_id: string }>(`select cadence_id from crm_lead_cadences where lead_id = '${lead}';`)
     expect(lc.rows[0]!.cadence_id).toBe(cad)
+  })
+
+  it('losing a lead needs its reason, and leaving lost clears it', async () => {
+    await asUser(db, owner)
+    const lead = await add('Slips away', '9876800040')
+    await expect(db.exec(`update crm_leads set status = 'lost' where id = '${lead}';`)).rejects.toThrow(
+      /lost_reason required/,
+    )
+    await expect(db.exec(`update crm_leads set status = 'lost', lost_reason = 'No' where id = '${lead}';`)).rejects.toThrow(
+      /lost_reason required/,
+    )
+    await db.exec(`update crm_leads set status = 'lost', lost_reason = 'No response' where id = '${lead}';`)
+    const reason = await db.query<{ lost_reason: string }>(`select lost_reason from crm_leads where id = '${lead}';`)
+    expect(reason.rows[0]!.lost_reason).toBe('No response')
+    await db.exec(`update crm_leads set status = 'contacted' where id = '${lead}';`)
+    const cleared = await db.query<{ lost_reason: string | null }>(
+      `select lost_reason from crm_leads where id = '${lead}';`,
+    )
+    expect(cleared.rows[0]!.lost_reason).toBeNull()
+  })
+
+  it('a bulk move to lost carries its reason, and undo puts the stage back', async () => {
+    await asUser(db, owner)
+    const a = await add('Bulk lost A', '9876800041')
+    const b = await add('Bulk lost B', '9876800042')
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost"}');`),
+    ).rejects.toThrow(/lost_reason required/)
+    const before = await db.query<{ id: string; lost_reason: string | null }>(
+      `select * from crm_bulk_patch(array['${a}','${b}']::uuid[], '{"status":"lost","lost_reason":"Budget"}');`,
+    )
+    expect(before.rows).toHaveLength(2)
+    expect(before.rows[0]!.lost_reason).toBeNull()
+    const after = await db.query<{ status: string; lost_reason: string }>(
+      `select status, lost_reason from crm_leads where id in ('${a}','${b}') order by id;`,
+    )
+    expect(after.rows.map((r) => [r.status, r.lost_reason])).toEqual([
+      ['lost', 'Budget'],
+      ['lost', 'Budget'],
+    ])
+    await db.query(`select crm_restore_leads('${JSON.stringify(before.rows)}');`)
+    const restored = await db.query<{ status: string; lost_reason: string | null }>(
+      `select status, lost_reason from crm_leads where id in ('${a}','${b}');`,
+    )
+    expect(restored.rows.every((r) => r.status === 'new')).toBe(true)
+    expect(restored.rows.every((r) => r.lost_reason === null)).toBe(true)
+  })
+
+  it('a new lead arrives with a probability and an SLA deadline', async () => {
+    await asUser(db, owner)
+    const lead = await add('Fresh arrival', '9876800043')
+    const row = await db.query<{ probability: number; sla_due_at: string | null }>(
+      `select probability, sla_due_at from crm_leads where id = '${lead}';`,
+    )
+    expect(row.rows[0]!.probability).toBe(10)
+    expect(row.rows[0]!.sla_due_at).not.toBeNull()
   })
 
   it('the team view counts first contact within the SLA', async () => {
@@ -3267,5 +3434,552 @@ describe('CRM guards — execute privileges and cross-studio calls', () => {
       `select status from crm_workflow_enrollments where workflow_id = '${wf}' and lead_id = '${lead}';`,
     )
     expect(e.rows[0]!.status).toBe('completed')
+  })
+})
+
+describe('role library (0040)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('ships a catalogue covering every stage of the job', async () => {
+    const rows = await db.query<{ stage: string; n: number }>(
+      `select stage, count(*)::int as n from role_library group by stage order by stage;`,
+    )
+    expect(rows.rows.map((r) => r.stage).sort()).toEqual(['other', 'post', 'pre', 'production'])
+    expect(rows.rows.every((r) => r.n > 0)).toBe(true)
+  })
+
+  // Re-running a migration must not double the catalogue.
+  it('seeds the same rows twice without duplicating them', async () => {
+    const before = await db.query<{ n: number }>(`select count(*)::int as n from role_library;`)
+    await db.exec(readMig('0040_role_library.sql'))
+    const after = await db.query<{ n: number }>(`select count(*)::int as n from role_library;`)
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n)
+  })
+
+  it('is readable by members and writable by none of them', async () => {
+    const policies = await db.query<{ policyname: string; cmd: string }>(
+      `select policyname, cmd from pg_policies where tablename = 'role_library';`,
+    )
+    expect(policies.rows).toEqual([{ policyname: 'role_library_select', cmd: 'SELECT' }])
+  })
+
+  it('lets a studio stage its own roles, and lets the stage stay unsaid', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const id = company.rows[0]!.id
+    await db.query(
+      `insert into employee_roles (company_id, type_name, role_code, stage)
+       values ('${id}', 'Candid Photographer', 'candid_photographer', 'production');`,
+    )
+    await db.query(
+      `insert into employee_roles (company_id, type_name, role_code)
+       values ('${id}', 'Odd Job', 'odd_job');`,
+    )
+    const rows = await db.query<{ type_name: string; stage: string | null }>(
+      `select type_name, stage from employee_roles order by type_name;`,
+    )
+    expect(rows.rows).toEqual([
+      { type_name: 'Candid Photographer', stage: 'production' },
+      { type_name: 'Odd Job', stage: null },
+    ])
+  })
+
+  it('refuses a stage nobody renders', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    await expect(
+      db.query(
+        `insert into employee_roles (company_id, type_name, role_code, stage)
+         values ('${company.rows[0]!.id}', 'Bad', 'bad', 'during');`,
+      ),
+    ).rejects.toThrow()
+  })
+})
+
+describe('team terms (0041)', () => {
+  let db: PGlite
+  let company: string
+  let shoot: string
+  let template: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+    const client = (
+      await db.query<{ id: string }>(
+        `insert into clients (company_id, name) values ('${company}', 'Sharma') returning id;`,
+      )
+    ).rows[0]!.id
+    const project = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name) values ('${company}', '${client}', 'Sharma Wedding') returning id;`,
+      )
+    ).rows[0]!.id
+    shoot = (
+      await db.query<{ id: string }>(
+        `insert into shoots (company_id, project_id, name, shoot_date)
+         values ('${company}', '${project}', 'Wedding Day', '2026-11-22') returning id;`,
+      )
+    ).rows[0]!.id
+    template = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body, category)
+         values ('${company}', 'Photographer terms', 'You agree to {{shoot_name}}.', 'production')
+         returning id;`,
+      )
+    ).rows[0]!.id
+  })
+
+  const issue = async (ttl = 336) =>
+    (
+      await db.query<{ send_id: string; token: string }>(
+        `select send_id, token from issue_team_terms(
+           '${shoot}'::uuid, '${template}'::uuid, 'You agree to Wedding Day.', 'Rahul',
+           'rahul@studio.test', null, null, null, 'Photographer', ${ttl});`,
+      )
+    ).rows[0]!
+
+  it('issues a send and a link together, stamped with the template version', async () => {
+    const { send_id, token } = await issue()
+    expect(token.length).toBeGreaterThan(20)
+    const row = await db.query<{ status: string; template_version: number; project_id: string }>(
+      `select status, template_version, project_id from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ status: 'draft', template_version: 1 })
+    // The project is taken from the shoot rather than trusted from the caller.
+    expect(row.rows[0]!.project_id).not.toBeNull()
+  })
+
+  it('refuses a template from another studio', async () => {
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into companies (name, owner_user_id)
+         values ('Other Studio', (select user_id from users limit 1)) returning id;`,
+      )
+    ).rows[0]!.id
+    const stray = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body)
+         values ('${other}', 'Theirs', 'body') returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(
+      db.query(
+        `select * from issue_team_terms('${shoot}'::uuid, '${stray}'::uuid, 'x', 'Rahul');`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('marks a send viewed the first time the link is opened', async () => {
+    const { send_id, token } = await issue()
+    const read = await db.query<{ status: string; rendered_body: string }>(
+      `select status, rendered_body from get_team_terms_for_token('${token}');`,
+    )
+    expect(read.rows[0]!.rendered_body).toContain('Wedding Day')
+    const after = await db.query<{ status: string; viewed_at: string | null }>(
+      `select status, viewed_at from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(after.rows[0]!.status).toBe('viewed')
+    expect(after.rows[0]!.viewed_at).not.toBeNull()
+  })
+
+  it('records an acknowledgement once, with evidence', async () => {
+    const { send_id, token } = await issue()
+    const first = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Rahul Sharma', '1.2.3.4', 'test-agent');`,
+    )
+    expect(first.rows[0]!.acknowledge_team_terms).toBe(true)
+    const row = await db.query<{ status: string; acknowledged_by_name: string; acknowledged_ip: string }>(
+      `select status, acknowledged_by_name, acknowledged_ip from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({
+      status: 'acknowledged',
+      acknowledged_by_name: 'Rahul Sharma',
+      acknowledged_ip: '1.2.3.4',
+    })
+    // The token is spent: a second press cannot re-sign it.
+    const second = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Someone Else');`,
+    )
+    expect(second.rows[0]!.acknowledge_team_terms).toBe(false)
+  })
+
+  it('gives nothing to a junk or expired token', async () => {
+    const junk = await db.query(`select * from get_team_terms_for_token('not-a-token');`)
+    expect(junk.rows).toHaveLength(0)
+    const { token } = await issue(0)
+    await db.exec(`update access_tokens set expires_at = now() - interval '1 hour';`)
+    const expired = await db.query(`select * from get_team_terms_for_token('${token}');`)
+    expect(expired.rows).toHaveLength(0)
+  })
+
+  it('hides a revoked send from the link', async () => {
+    const { send_id, token } = await issue()
+    await db.exec(
+      `update team_terms_sends set revoked_at = now(), status = 'revoked' where id = '${send_id}';`,
+    )
+    const read = await db.query(`select * from get_team_terms_for_token('${token}');`)
+    expect(read.rows).toHaveLength(0)
+  })
+
+  // A briefing has no button, so pressing one must not forge a signature.
+  it('will not acknowledge a send-only template', async () => {
+    const briefing = (
+      await db.query<{ id: string }>(
+        `insert into team_terms_templates (company_id, title, body, mode)
+         values ('${company}', 'Call sheet', 'Be there at 6.', 'send_only') returning id;`,
+      )
+    ).rows[0]!.id
+    const { send_id, token } = (
+      await db.query<{ send_id: string; token: string }>(
+        `select send_id, token from issue_team_terms('${shoot}'::uuid, '${briefing}'::uuid, 'Be there at 6.', 'Rahul');`,
+      )
+    ).rows[0]!
+    const done = await db.query<{ acknowledge_team_terms: boolean }>(
+      `select acknowledge_team_terms('${token}', 'Rahul');`,
+    )
+    expect(done.rows[0]!.acknowledge_team_terms).toBe(false)
+    const row = await db.query<{ status: string }>(
+      `select status from team_terms_sends where id = '${send_id}';`,
+    )
+    expect(row.rows[0]!.status).not.toBe('acknowledged')
+  })
+
+  it('drops the preset table nothing ever used', async () => {
+    const left = await db.query(
+      `select 1 from information_schema.tables where table_name = 'deliverable_presets';`,
+    )
+    expect(left.rows).toHaveLength(0)
+  })
+})
+
+describe('client documents (0042)', () => {
+  let db: PGlite
+  let company: string
+  let project: string
+  let payment: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+    const client = (
+      await db.query<{ id: string }>(
+        `insert into clients (company_id, name) values ('${company}', 'Sharma Family') returning id;`,
+      )
+    ).rows[0]!.id
+    project = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost)
+         values ('${company}', '${client}', 'Sharma Wedding', 150000) returning id;`,
+      )
+    ).rows[0]!.id
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation)
+       values ('${company}', '${project}', 'Wedding Album', 'client', true);`,
+    )
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation,
+                                 is_additional_charge, additional_charge_amount)
+       values ('${company}', '${project}', 'Drone Shots', 'client', true, true, 15000);`,
+    )
+    // Neither of these belongs on a quotation.
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope)
+       values ('${company}', '${project}', 'Data Sorting', 'internal');`,
+    )
+    await db.query(
+      `insert into deliverables (company_id, project_id, title, visibility_scope, show_on_quotation)
+       values ('${company}', '${project}', 'Hidden Extra', 'client', false);`,
+    )
+    payment = (
+      await db.query<{ id: string }>(
+        `insert into received_payments (company_id, project_id, amount, mode)
+         values ('${company}', '${project}', 50000, 'upi') returning id;`,
+      )
+    ).rows[0]!.id
+  })
+
+  const issueQuote = async () =>
+    (
+      await db.query<{ quotation_id: string; token: string }>(
+        `select quotation_id, token from issue_project_quotation('${project}'::uuid, 'Valid 30 days');`,
+      )
+    ).rows[0]!
+
+  it('quotes only what the client is meant to see', async () => {
+    const { token } = await issueQuote()
+    const read = await db.query<{ snapshot: { items: { title: string }[] } }>(
+      `select snapshot from get_quotation_for_token('${token}');`,
+    )
+    const titles = read.rows[0]!.snapshot.items.map((i) => i.title)
+    expect(titles).toEqual(['Wedding Album', 'Drone Shots'])
+    expect(titles).not.toContain('Data Sorting')
+    expect(titles).not.toContain('Hidden Extra')
+  })
+
+  // The snapshot is the point: what they accepted cannot move afterwards.
+  it('freezes the prices as they were when it went out', async () => {
+    const { token } = await issueQuote()
+    await db.query(`update projects set package_cost = 999999 where id = '${project}';`)
+    const read = await db.query<{ snapshot: { package_cost: number } }>(
+      `select snapshot from get_quotation_for_token('${token}');`,
+    )
+    expect(Number(read.rows[0]!.snapshot.package_cost)).toBe(150000)
+    await db.query(`update projects set package_cost = 150000 where id = '${project}';`)
+  })
+
+  it('records an acceptance with evidence', async () => {
+    const { quotation_id, token } = await issueQuote()
+    const ok = await db.query<{ respond_to_quotation: boolean }>(
+      `select respond_to_quotation('${token}', true, 'Rahul Sharma', '1.2.3.4', 'agent');`,
+    )
+    expect(ok.rows[0]!.respond_to_quotation).toBe(true)
+    const row = await db.query<{ accepted_by_name: string; accepted_ip: string }>(
+      `select accepted_by_name, accepted_ip from project_quotations where id = '${quotation_id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ accepted_by_name: 'Rahul Sharma', accepted_ip: '1.2.3.4' })
+  })
+
+  // Saying no on Monday must not burn the link before a yes on Tuesday.
+  it('lets a decline be changed to an acceptance', async () => {
+    const { quotation_id, token } = await issueQuote()
+    await db.query(`select respond_to_quotation('${token}', false);`)
+    expect(
+      (
+        await db.query<{ declined_at: string | null }>(
+          `select declined_at from project_quotations where id = '${quotation_id}';`,
+        )
+      ).rows[0]!.declined_at,
+    ).not.toBeNull()
+    await db.query(`select respond_to_quotation('${token}', true, 'Rahul');`)
+    const row = await db.query<{ accepted_at: string | null; declined_at: string | null }>(
+      `select accepted_at, declined_at from project_quotations where id = '${quotation_id}';`,
+    )
+    expect(row.rows[0]!.accepted_at).not.toBeNull()
+    expect(row.rows[0]!.declined_at).toBeNull()
+  })
+
+  it('will not re-accept what is already accepted', async () => {
+    const { token } = await issueQuote()
+    await db.query(`select respond_to_quotation('${token}', true, 'First');`)
+    const again = await db.query<{ respond_to_quotation: boolean }>(
+      `select respond_to_quotation('${token}', true, 'Second');`,
+    )
+    expect(again.rows[0]!.respond_to_quotation).toBe(false)
+  })
+
+  it('shows a receipt with what has been paid so far', async () => {
+    const token = (
+      await db.query<{ issue_payment_receipt: string }>(
+        `select issue_payment_receipt('${payment}'::uuid);`,
+      )
+    ).rows[0]!.issue_payment_receipt
+    const read = await db.query<{
+      amount: string
+      project_name: string
+      received_total: string
+      company_name: string
+    }>(
+      `select amount, project_name, received_total, company_name from get_receipt_for_token('${token}');`,
+    )
+    expect(read.rows[0]).toMatchObject({ project_name: 'Sharma Wedding', company_name: 'Studio' })
+    expect(Number(read.rows[0]!.amount)).toBe(50000)
+    expect(Number(read.rows[0]!.received_total)).toBe(50000)
+  })
+
+  it('gives nothing for a junk token, on any of the three', async () => {
+    expect((await db.query(`select * from get_quotation_for_token('nope');`)).rows).toHaveLength(0)
+    expect((await db.query(`select * from get_receipt_for_token('nope');`)).rows).toHaveLength(0)
+    expect((await db.query(`select * from get_delivery_for_token('nope');`)).rows).toHaveLength(0)
+  })
+
+  // Delivery only opens once the work has been reviewed and approved.
+  it('opens a delivery link only for approved work', async () => {
+    const submission = (
+      await db.query<{ id: string }>(
+        `insert into team_work_submissions (company_id, project_id, submission_link, status)
+         values ('${company}', '${project}', 'https://drive.example/album', 'submitted')
+         returning id;`,
+      )
+    ).rows[0]!.id
+    const token = (
+      await db.query<{ issue_access_token: string }>(
+        `select issue_access_token('work_delivery', '${submission}'::uuid, 168);`,
+      )
+    ).rows[0]!.issue_access_token
+    expect((await db.query(`select * from get_delivery_for_token('${token}');`)).rows).toHaveLength(0)
+
+    await db.query(`update team_work_submissions set status = 'approved' where id = '${submission}';`)
+    const open = await db.query<{ submission_link: string; project_name: string }>(
+      `select submission_link, project_name from get_delivery_for_token('${token}');`,
+    )
+    expect(open.rows[0]).toMatchObject({
+      submission_link: 'https://drive.example/album',
+      project_name: 'Sharma Wedding',
+    })
+  })
+})
+
+describe('enquiries (0043)', () => {
+  let db: PGlite
+  let company: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@studio.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    company = (await db.query<{ id: string }>(`select id from companies limit 1;`)).rows[0]!.id
+  })
+
+  const addEnquiry = async (name: string, phone: string | null, message = 'Need a quote') =>
+    (
+      await db.query<{ id: string }>(
+        `insert into enquiries (company_id, name, phone, message, source)
+         values ('${company}', '${name}', ${phone ? `'${phone}'` : 'null'}, '${message}', 'website')
+         returning id;`,
+      )
+    ).rows[0]!.id
+
+  it('starts every enquiry as new', async () => {
+    const id = await addEnquiry('Rahul', '9876500001')
+    const row = await db.query<{ enquiry_status: string; converted_lead_id: string | null }>(
+      `select enquiry_status, converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(row.rows[0]).toMatchObject({ enquiry_status: 'new', converted_lead_id: null })
+  })
+
+  it('refuses a status nobody renders', async () => {
+    await expect(
+      db.query(
+        `insert into enquiries (company_id, name, enquiry_status)
+         values ('${company}', 'Bad', 'maybe');`,
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('converts to a lead and remembers which one', async () => {
+    const id = await addEnquiry('Anita', '9876500002', 'Wedding in December')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    const enq = await db.query<{ enquiry_status: string; converted_lead_id: string }>(
+      `select enquiry_status, converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(enq.rows[0]!.enquiry_status).toBe('converted')
+    expect(enq.rows[0]!.converted_lead_id).toBe(lead)
+
+    const row = await db.query<{ name: string; source: string; notes: string }>(
+      `select name, source, notes from crm_leads where id = '${lead}';`,
+    )
+    // The CRM's own enum says where a lead came from; 'website' stays on the
+    // enquiry, which is the record of that.
+    expect(row.rows[0]).toMatchObject({
+      name: 'Anita',
+      source: 'enquiry',
+      notes: 'Wedding in December',
+    })
+  })
+
+  it('converts twice to the same lead, not two', async () => {
+    const id = await addEnquiry('Sana', '9876500003')
+    const first = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    const second = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    expect(second).toBe(first)
+  })
+
+  // One number, one lead — the rule the CRM's own intake already follows.
+  it('attaches to the lead that already has that number', async () => {
+    const existing = (
+      await db.query<{ create_lead: string }>(
+        `select add_lead('Imran', '9876500004', null, 'manual', 'Called in') as create_lead;`,
+      )
+    ).rows[0]!.create_lead
+    const id = await addEnquiry('Imran Q', '9876500004')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    expect(lead).toBe(existing)
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_leads where phone_norm = crm_normalize_phone('9876500004');`,
+    )
+    expect(count.rows[0]!.n).toBe(1)
+  })
+
+  it('refuses an enquiry from another studio', async () => {
+    const other = (
+      await db.query<{ id: string }>(
+        `insert into companies (name, owner_user_id)
+         values ('Other Studio', (select user_id from users limit 1)) returning id;`,
+      )
+    ).rows[0]!.id
+    const stray = (
+      await db.query<{ id: string }>(
+        `insert into enquiries (company_id, name) values ('${other}', 'Theirs') returning id;`,
+      )
+    ).rows[0]!.id
+    await expect(db.query(`select convert_enquiry_to_lead('${stray}'::uuid);`)).rejects.toThrow()
+  })
+
+  it('keeps the enquiry when the lead it made is deleted', async () => {
+    const id = await addEnquiry('Priya', '9876500005')
+    const lead = (
+      await db.query<{ convert_enquiry_to_lead: string }>(
+        `select convert_enquiry_to_lead('${id}'::uuid);`,
+      )
+    ).rows[0]!.convert_enquiry_to_lead
+    await db.query(`delete from crm_leads where id = '${lead}';`)
+    const row = await db.query<{ converted_lead_id: string | null }>(
+      `select converted_lead_id from enquiries where id = '${id}';`,
+    )
+    expect(row.rows).toHaveLength(1)
+    expect(row.rows[0]!.converted_lead_id).toBeNull()
+  })
+})
+
+describe('migrations re-apply cleanly (idempotency)', () => {
+  it('policies and triggers survive a second run of their files', async () => {
+    const db = await freshDb()
+    // These files used to create policies/triggers unconditionally, so a
+    // manual re-run died halfway with "already exists".
+    for (const f of [
+      '0038_shoot_details.sql',
+      '0039_deliverable_sets.sql',
+      '0041_team_terms.sql',
+      '0043_enquiries.sql',
+    ]) {
+      await db.exec(mig(f))
+    }
+    const policies = await db.query<{ tablename: string; n: number }>(
+      `select tablename, count(*)::int as n from pg_policies
+        where tablename in ('shoot_presets', 'deliverable_sets')
+        group by tablename order by tablename;`,
+    )
+    expect(policies.rows).toEqual([
+      { tablename: 'deliverable_sets', n: 2 },
+      { tablename: 'shoot_presets', n: 2 },
+    ])
   })
 })

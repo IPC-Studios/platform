@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Search, Users, X } from 'lucide-react'
+import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Pencil, Search, Users, X } from 'lucide-react'
 import type { CrmLead, InboxColumn, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useBulkPatch, useCrmPrefs, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useUpdateCrmPrefs, useWorkflows } from '../api'
+import { useBulkPatch, useCrmPrefs, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useUpdateCrmPrefs, useUpdateView, useWorkflows } from '../api'
 import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
 import { isSaveable, takeLocalViews, toLeadQuery, toSavedQuery } from '../views'
@@ -35,10 +35,13 @@ export function InboxTab({
 }) {
   const { data: views } = useSavedViews()
   const saveView = useSaveView()
+  const updateView = useUpdateView()
   const deleteView = useDeleteView()
   const [naming, setNaming] = useState(false)
   const [viewName, setViewName] = useState('')
   const [viewScope, setViewScope] = useState<SavedViewVisibility>('private')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const [dismissed, setDismissed] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [losing, setLosing] = useState(false)
@@ -199,21 +202,66 @@ export function InboxTab({
           <span className="flex flex-wrap items-center gap-1">
             {(views ?? []).map((v) => {
               const mine = v.user_id === myId
-              const removable = mine || !!session?.is_owner
+              const canManage = mine || !!session?.is_owner
               const scope = `${SCOPE_LABEL[v.visibility]}${!mine && v.owner_name ? ` · by ${v.owner_name}` : ''}`
               return (
                 <span key={v.id} className="flex items-center gap-1 rounded-full border border-border py-1 pl-2.5 pr-1 text-xs" title={scope}>
                   {v.visibility === 'everyone' ? <Globe className="size-3" /> : v.visibility === 'team' ? <Users className="size-3" /> : <Bookmark className="size-3" />}
-                  <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
-                    {v.name}
-                  </button>
-                  {removable ? (
-                    <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
-                      <X className="size-3" />
-                      <span className="sr-only">Delete {v.name}</span>
-                    </button>
+                  {renamingId === v.id ? (
+                    <span className="flex items-center gap-1">
+                      <Input
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        className="h-6 w-32 px-1.5 py-0 text-xs"
+                        autoFocus
+                        aria-label="View name"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setRenamingId(null)
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-1.5 text-xs"
+                        disabled={!renameValue.trim() || updateView.isPending}
+                        onClick={() =>
+                          updateView.mutate({ id: v.id, patch: { name: renameValue.trim() } }, { onSuccess: () => setRenamingId(null) })
+                        }
+                      >
+                        Save
+                      </Button>
+                      <button type="button" onClick={() => setRenamingId(null)} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground">
+                        <X className="size-3" />
+                        <span className="sr-only">Cancel rename</span>
+                      </button>
+                    </span>
                   ) : (
-                    <span className="w-1" />
+                    <>
+                      <button type="button" onClick={() => onQuery(toLeadQuery(v.query))} className="hover:underline">
+                        {v.name}
+                      </button>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenameValue(v.name)
+                            setRenamingId(v.id)
+                          }}
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="size-3" />
+                          <span className="sr-only">Rename {v.name}</span>
+                        </button>
+                      )}
+                      {canManage ? (
+                        <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
+                          <X className="size-3" />
+                          <span className="sr-only">Delete {v.name}</span>
+                        </button>
+                      ) : (
+                        <span className="w-1" />
+                      )}
+                    </>
                   )}
                 </span>
               )
@@ -325,6 +373,8 @@ export function InboxTab({
             aria-label="Move to stage"
             onChange={(e) => {
               const v = e.target.value as LeadStatus | ''
+              // Lost needs its reason up front — the API refuses it without
+              // one, so ask here instead of failing the whole batch after.
               if (v === 'lost') setLosing(true)
               else if (v) runBulk({ status: v })
             }}

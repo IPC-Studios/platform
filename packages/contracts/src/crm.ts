@@ -74,26 +74,35 @@ export const leadsQuery = z.object({
 })
 export type LeadsQuery = z.infer<typeof leadsQuery>
 
-export const updateLeadRequest = z.object({
-  name: z.string().trim().max(160).nullable().optional(),
-  phone: z.string().trim().max(30).nullable().optional(),
-  email: z.string().trim().max(200).nullable().optional(),
-  status: leadStatus.optional(),
-  assigned_to: uuid.nullable().optional(),
-  notes: z.string().max(4000).nullable().optional(),
-  follow_up_at: isoDateTime.nullable().optional(),
-  is_hot: z.boolean().optional(),
-  is_archived: z.boolean().optional(),
-  deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
-  probability: z.number().int().min(0).max(100).nullable().optional(),
-  lost_reason: z.string().trim().min(3).max(500).nullable().optional(),
-  lost_competitor: z.string().trim().max(120).nullable().optional(),
-  title: z.string().trim().max(160).nullable().optional(),
-  close_date: isoDate.nullable().optional(),
-  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
-  contact_id: uuid.nullable().optional(),
-  crm_company_id: uuid.nullable().optional(),
-})
+/** A move to lost is only valid with its reason — mirrors the DB trigger. */
+const lostNeedsReason = (v: { status?: string | undefined; lost_reason?: string | null | undefined }): boolean =>
+  v.status !== 'lost' || (typeof v.lost_reason === 'string' && v.lost_reason.length > 0)
+
+export const updateLeadRequest = z
+  .object({
+    name: z.string().trim().max(160).nullable().optional(),
+    phone: z.string().trim().max(30).nullable().optional(),
+    email: z.string().trim().max(200).nullable().optional(),
+    status: leadStatus.optional(),
+    assigned_to: uuid.nullable().optional(),
+    notes: z.string().max(4000).nullable().optional(),
+    follow_up_at: isoDateTime.nullable().optional(),
+    is_hot: z.boolean().optional(),
+    is_archived: z.boolean().optional(),
+    deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
+    probability: z.number().int().min(0).max(100).nullable().optional(),
+    lost_reason: z.string().trim().min(3).max(500).nullable().optional(),
+    lost_competitor: z.string().trim().max(120).nullable().optional(),
+    title: z.string().trim().max(160).nullable().optional(),
+    close_date: isoDate.nullable().optional(),
+    currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+    contact_id: uuid.nullable().optional(),
+    crm_company_id: uuid.nullable().optional(),
+  })
+  .refine(lostNeedsReason, {
+    message: 'Tell us why it was lost (3+ chars).',
+    path: ['lost_reason'],
+  })
 export type UpdateLeadRequest = z.infer<typeof updateLeadRequest>
 
 /** Public webhook body (Meta / web form). */
@@ -208,7 +217,11 @@ export const bulkLeadPatch = z.object({
       probability: z.number().int().min(0).max(100).nullable().optional(),
       close_date: isoDate.nullable().optional(),
     })
-    .refine((p) => Object.keys(p).length > 0, 'Nothing to change.'),
+    .refine((p) => Object.keys(p).length > 0, 'Nothing to change.')
+    .refine(lostNeedsReason, {
+      message: 'Tell us why it was lost (3+ chars).',
+      path: ['lost_reason'],
+    }),
 })
 export type BulkLeadPatch = z.infer<typeof bulkLeadPatch>
 
@@ -603,11 +616,12 @@ export type SavedViewVisibility = z.infer<typeof savedViewVisibility>
 
 export const savedView = z.object({
   id: uuid,
+  /** Creator — the UI only offers rename/delete on your own. */
+  user_id: uuid,
   name: z.string(),
   query: savedViewQuery,
   /** private = mine only; team / everyone = shared with the studio. */
   visibility: savedViewVisibility.default('private'),
-  user_id: uuid,
   owner_name: z.string().nullable().default(null),
   created_at: isoDateTime,
 })
@@ -620,11 +634,13 @@ export const createSavedViewRequest = z.object({
 })
 export type CreateSavedViewRequest = z.infer<typeof createSavedViewRequest>
 
-export const updateSavedViewRequest = z.object({
-  name: z.string().trim().min(1).max(80).optional(),
-  query: savedViewQuery.optional(),
-  visibility: savedViewVisibility.optional(),
-})
+export const updateSavedViewRequest = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    query: savedViewQuery.optional(),
+    visibility: savedViewVisibility.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to change.')
 export type UpdateSavedViewRequest = z.infer<typeof updateSavedViewRequest>
 
 // ── settings ──────────────────────────────────────────────────

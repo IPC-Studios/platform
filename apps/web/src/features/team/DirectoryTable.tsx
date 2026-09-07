@@ -202,8 +202,23 @@ export function DirectoryTable({
               <td className="px-4 py-2">
                 <StatusBadge tone={ROLE_TONE[m.role] ?? 'neutral'}>{humanize(m.role)}</StatusBadge>
               </td>
-              <td className="px-4 py-2 text-muted-foreground">
-                {m.role_names.length ? m.role_names.join(', ') : '—'}
+              {/* Chips rather than a comma list: three roles run together read
+                  as one long job title at a glance. */}
+              <td className="px-4 py-2">
+                {m.role_names.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {m.role_names.map((name) => (
+                      <span
+                        key={name}
+                        className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-xs"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </td>
               <td className="px-4 py-2 text-muted-foreground">{engagementLabel(m.engagement_type)}</td>
               <td className="px-4 py-2">

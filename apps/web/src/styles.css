@@ -28,23 +28,35 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* Quick-link tones. Named by hue, not by meaning: they exist to make three
+     header shortcuts tellable apart at a glance, and every one of them is a
+     neutral destination — none is a status. */
+  --color-tone-blue: var(--tone-blue);
+  --color-tone-blue-soft: var(--tone-blue-soft);
+  --color-tone-green: var(--tone-green);
+  --color-tone-green-soft: var(--tone-green-soft);
+  --color-tone-violet: var(--tone-violet);
+  --color-tone-violet-soft: var(--tone-violet-soft);
   /* The whole corner scale, derived from one number so a theme can change
      every corner in the app at once.
 
-     `rounded-sm` inner chips, `rounded-md` controls (buttons, inputs),
+     `rounded-sm` inner chips, `rounded-md` inputs and small controls,
      `rounded-lg` surfaces (cards, panels, dialogs), `rounded-full` pills.
      There is deliberately no --radius-xl: `rounded-xl` is a Tailwind default
      that does NOT read --radius, so a panel using it silently opts out of the
      theme and sits ~2px rounder than the card beside it. Use rounded-lg. */
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
 }
 
 /* ── Layer 2: semantic tokens (oklch). Tenant tokens (Layer 3) are
    written onto :root at runtime by ThemeProvider. ───────────────── */
 :root {
-  --radius: 0.625rem;
+  /* The corner scale. 1rem reads as the soft, modern radius the product is
+     designed around: cards and dialogs at 16px, controls a touch tighter.
+     Every rounded-* utility below derives from this one number. */
+  --radius: 1rem;
   /* Page sits a shade below white so cards and the sidebar read as surfaces. */
   --background: oklch(0.979 0.004 285);
   --foreground: oklch(0.21 0.006 285);
@@ -71,6 +83,12 @@
   --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.21 0.006 285);
   --sidebar-accent: oklch(0.97 0.001 286);
+  --tone-blue: oklch(0.47 0.17 268);
+  --tone-blue-soft: oklch(0.96 0.03 268);
+  --tone-green: oklch(0.48 0.12 160);
+  --tone-green-soft: oklch(0.96 0.04 160);
+  --tone-violet: oklch(0.5 0.19 300);
+  --tone-violet-soft: oklch(0.96 0.035 300);
 }
 
 .dark {
@@ -96,6 +114,14 @@
   --sidebar: oklch(0.21 0.006 285);
   --sidebar-foreground: oklch(0.98 0 0);
   --sidebar-accent: oklch(0.27 0.006 286);
+  /* Dark flips the pair: the text lightens, the fill darkens, so the pills
+     keep their hue without glowing off a near-black bar. */
+  --tone-blue: oklch(0.82 0.11 268);
+  --tone-blue-soft: oklch(0.3 0.07 268);
+  --tone-green: oklch(0.82 0.11 160);
+  --tone-green-soft: oklch(0.29 0.06 160);
+  --tone-violet: oklch(0.83 0.11 300);
+  --tone-violet-soft: oklch(0.31 0.07 300);
 }
 
 * {
@@ -329,6 +355,57 @@ body {
   }
   .ipc-dialog[data-state='open'] {
     animation: ipc-dialog-enter 180ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  /* Anchored to the trigger, so it grows out of the top-right corner rather
+     than appearing whole. Positioned with `absolute`, not `translate`, so a
+     `transform` here has nothing to clobber. */
+  @keyframes ipc-menu-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .ipc-menu {
+    transform-origin: top right;
+    animation: ipc-menu-enter 150ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  /* A menu hanging off the LEFT edge of its trigger has to grow from that
+     corner, or it reads as sliding sideways out of nowhere. */
+  .ipc-menu-left {
+    transform-origin: top left;
+  }
+
+  /* A row that has just been added to a list it is already showing. It rises
+     the last few pixels into place rather than appearing at full size, which
+     is what separates "this is new" from "the page redrew". */
+  @keyframes ipc-card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .card-enter {
+    animation: ipc-card-enter 220ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  /* Chips are pressed, not clicked: the finger should feel the give. */
+  .press {
+    transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+  }
+  .press:active:not(:disabled) {
+    transform: scale(0.96);
   }
 
   @keyframes ipc-skeleton-pulse {

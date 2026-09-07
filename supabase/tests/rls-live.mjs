@@ -95,6 +95,38 @@ check("B: cannot fetch A's client by id (404)", bGet.status === 404)
 const anon = await api('/clients')
 check('anon: rejected without a token', anon.status === 401)
 
+// Malformed uuid filters are caller errors (422), never cast-error 500s.
+const badUuid = await api('/team-terms/sends?shoot_id=nope', { token: a.token })
+check('sends: malformed uuid filter is 422', badUuid.status === 422)
+
+// The enquiry inbox pages instead of truncating at a fixed cap.
+for (let i = 0; i < 3; i++) {
+  await api('/enquiries', { token: a.token, method: 'POST', body: { name: `Paged ${i} ${rand()}` } })
+}
+const eqPage1 = await api('/enquiries?limit=2', { token: a.token })
+const eqIds1 = new Set((eqPage1.json.items ?? []).map((e) => e.id))
+check(
+  'enquiries: first page carries a cursor',
+  eqPage1.status === 200 && eqIds1.size === 2 && !!eqPage1.json.next_cursor,
+)
+const eqPage2 = await api(`/enquiries?limit=2&cursor=${encodeURIComponent(eqPage1.json.next_cursor)}`, {
+  token: a.token,
+})
+const eqIds2 = new Set((eqPage2.json.items ?? []).map((e) => e.id))
+const overlap = [...eqIds2].some((id) => eqIds1.has(id))
+check(
+  'enquiries: second page continues without overlap',
+  eqPage2.status === 200 && eqIds2.size === 1 && !overlap && !eqPage2.json.next_cursor,
+)
+
+// Numeric query params must survive driver serialization (regression: custom
+// pg serializers once returned numbers unchanged and every LIMIT query died
+// with ERR_INVALID_ARG_TYPE in production while string-only routes stayed up).
+const auditPage = await api('/settings/audit?limit=1', { token: a.token })
+check('audit: numeric limit param works (200)', auditPage.status === 200)
+const cronHistory = await api('/cron/runs?limit=1', { token: a.token })
+check('cron: numeric limit param works (200)', cronHistory.status === 200)
+
 // ── refresh + sign-out ────────────────────────────────────────
 const rotated = await api('/auth/refresh', { method: 'POST', body: { refresh_token: a.refresh } })
 check(

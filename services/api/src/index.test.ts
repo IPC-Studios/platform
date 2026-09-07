@@ -18,6 +18,31 @@ describe('api app', () => {
     expect(res.status).toBe(404)
   })
 
+  it('POST /health/client-errors accepts a small report and rejects junk', async () => {
+    const env = { ENVIRONMENT: 'test' }
+    const good = await app.request('/health/client-errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'error', message: 'boom', url: 'https://app.example/crm' }),
+    }, env)
+    expect(good.status).toBe(200)
+    expect(await good.json()).toEqual({ ok: true })
+
+    const empty = await app.request('/health/client-errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'error', message: '   ' }),
+    }, env)
+    expect(empty.status).toBe(422)
+
+    const huge = await app.request('/health/client-errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'error', message: 'x'.repeat(501) }),
+    }, env)
+    expect(huge.status).toBe(422)
+  })
+
   it('the Meta handshake refuses a wrong verify token and answers the right one', async () => {
     const env = { ENVIRONMENT: 'test', META_VERIFY_TOKEN: 'shh' }
     const bad = await app.request('/webhooks/meta?hub.mode=subscribe&hub.verify_token=nope&hub.challenge=123', {}, env)

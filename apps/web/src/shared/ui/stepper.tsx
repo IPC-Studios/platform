@@ -51,8 +51,11 @@ export function Stepper<T extends string>({
               className={cn(
                 'flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-medium transition-colors',
                 active && 'bg-primary text-primary-foreground',
-                !active && bad && 'text-destructive hover:bg-destructive/10',
-                !active && !bad && reachable && 'text-foreground hover:bg-accent',
+                !active && bad && 'bg-destructive/10 text-destructive hover:bg-destructive/15',
+                // A finished step reads as finished at a glance, so the one
+                // that still needs you is the only thing left standing out.
+                !active && !bad && done && 'bg-success/10 text-success hover:bg-success/15',
+                !active && !bad && !done && reachable && 'text-foreground hover:bg-accent',
                 !active && !reachable && 'text-muted-foreground',
               )}
             >
@@ -60,8 +63,8 @@ export function Stepper<T extends string>({
                 className={cn(
                   'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
                   active && 'bg-primary-foreground/20 text-primary-foreground',
-                  !active && bad && 'bg-destructive/15 text-destructive',
-                  !active && !bad && done && 'bg-primary/15 text-primary',
+                  !active && bad && 'bg-destructive/20 text-destructive',
+                  !active && !bad && done && 'bg-success/20 text-success',
                   !active && !bad && !done && 'bg-muted text-muted-foreground',
                 )}
               >

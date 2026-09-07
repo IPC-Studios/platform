@@ -124,13 +124,19 @@ HMAC verification is runtime-agnostic; `RAZORPAY_WEBHOOK_SECRET` must match.
 ## Operating notes
 
 - **Logs**: `docker compose logs -f api` / `... db`
-- **Backups**: `docker compose exec db pg_dump -U postgres ipc > backup.sql`
-- **Migrations**: applied automatically by the `migrate` service on every deploy
-  (see above). Roll back by restoring the pre-deploy `pg_dump`.
+- **Backups**: the `backup` service dumps nightly (02:30 UTC by default) into the
+  `db_backups` volume and, once `BACKUP_S3_*` is set in `.env`, copies each dump
+  off the box. It reports unhealthy if backups go stale. Restore drill and
+  commands: see `docs/RUNBOOK.md` → "Backups & restore".
+- **Migrations**: the `migrate` service runs bootstrap + pending migrations on every
+  deploy (idempotent, tracked in `schema_migrations`); an already-migrated DB is
+  baselined on first run so nothing re-applies. New migration files ship
+  automatically — no manual `psql`. Roll back by restoring the pre-deploy dump.
 - **Cron**: the `cron` service POSTs `/cron/reminders` hourly with `x-cron-secret`
   (idempotent, supports `?dry=1`). History at Settings → System or `GET /cron/runs`.
 - **Auth**: 30-minute HS256 access token + 30-day rotating refresh token, email
-  verification, password reset and change-password. Rotating `JWT_SECRET` signs
+  verification, password reset and change-password (all three need
+  `RESEND_API_KEY` + `EMAIL_FROM` + `APP_URL`). Rotating `JWT_SECRET` signs
   everyone out.
 - **Rate limiting**: in-process, bounded, one bucket per client address as
   resolved by `CLIENT_IP_HEADER` (behind Coolify/Traefik keep the default

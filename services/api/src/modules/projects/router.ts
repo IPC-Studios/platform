@@ -2,10 +2,12 @@ import { Hono } from 'hono'
 import {
   createProjectRequest,
   deliverableInput,
+  deliverableSet,
   paymentInput,
   projectDetail,
   projectListItem,
   projectTrackingRow,
+  saveDeliverableSetRequest,
   updateProjectRequest,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
@@ -25,9 +27,16 @@ export const projectsRouter = new Hono<AppEnv>()
       withUser(
         c.env,
         c.get('auth').userId,
+        // The money is rolled up here rather than fetched per row: the list
+        // shows received and pending on every project, and doing that from the
+        // client would be one request per project.
         (sql) => sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost, p.total_cost, p.created_at,
-                 cl.name as client_name
+                 cl.name as client_name, cl.phone as client_phone,
+                 coalesce(
+                   (select sum(rp.amount) from received_payments rp where rp.project_id = p.id),
+                   0
+                 ) as received
           from projects p
           left join clients cl on cl.id = p.client_id
           order by p.created_at desc`,
@@ -136,6 +145,53 @@ export const projectsRouter = new Hono<AppEnv>()
     return c.json({ id }, 201)
   })
 
+  // Declared above /:id so "deliverable-sets" is never read as a project id.
+  .get('/deliverable-sets', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.sets.list', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`select id, name, items from deliverable_sets order by name asc`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load your saved sets.')
+    return c.json(deliverableSet.array().parse(rows))
+  })
+
+  .post('/deliverable-sets', requireAction('projects', 'edit'), async (c) => {
+    const parsed = saveDeliverableSetRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the set and give it at least one item.')
+    const auth = c.get('auth')
+    const row = await attempt(c, 'projects.sets.save', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        // Saving under a name that exists replaces it — a studio revising
+        // "Premium" means the package changed, not that there are two of them.
+        const rows = await sql`
+          insert into deliverable_sets ${sql({
+            company_id: auth.companyId,
+            name: parsed.data.name,
+            items: sql.json(parsed.data.items),
+          })}
+          on conflict (company_id, name) do update set items = excluded.items
+          returning id, name, items`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not save the set.')
+    return c.json(deliverableSet.parse(row), 201)
+  })
+
+  .delete('/deliverable-sets/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'projects.sets.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from deliverable_sets where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete the set.')
+    if (!rows.length) fail(404, 'That set was not found.')
+    return c.body(null, 204)
+  })
+
   .get('/:id', requireAction('projects', 'view'), async (c) => {
     const id = uuidParam(c)
     const row = await attempt(c, 'projects.get', () =>
@@ -143,6 +199,7 @@ export const projectsRouter = new Hono<AppEnv>()
         const rows = await sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost,
                  p.additional_deliverables_cost, p.total_cost, p.show_quotation, p.created_at,
+                 cl.name as client_name, cl.phone as client_phone,
                  coalesce((
                    select jsonb_agg(to_jsonb(d) order by d.created_at)
                    from deliverables d where d.project_id = p.id
@@ -154,6 +211,7 @@ export const projectsRouter = new Hono<AppEnv>()
                    from received_payments rp where rp.project_id = p.id
                  ), '[]'::jsonb) as payments
           from projects p
+          left join clients cl on cl.id = p.client_id
           where p.id = ${id}`
         return rows[0] ?? null
       }),
@@ -177,6 +235,43 @@ export const projectsRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not update the project.')
     if (!rows.length) fail(404, 'That project was not found.')
     await audit(c, { action: 'project.update', entityType: 'project', entityId: id, after: parsed.data })
+    return c.body(null, 204)
+  })
+
+    /**
+     * Delete a project outright — shoots, deliverables and tasks go with it.
+     *
+     * Refused once money has been recorded against it, and once a quotation
+     * has gone to the client. Both are records of what the studio agreed to,
+     * and a studio that wants either off the board wants the project
+     * cancelled, not erased; the UI says so and offers that instead.
+     */
+  .delete('/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const outcome = await attempt(c, 'projects.delete', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+          const paid = await sql<{ n: number }[]>`
+            select count(*)::int as n from received_payments where project_id = ${id}`
+          if ((paid[0]?.n ?? 0) > 0) return 'has_payments' as const
+          // Quotations are snapshots the client may already hold; deleting
+          // the project would cascade-erase agreed evidence.
+          const quoted = await sql<{ n: number }[]>`
+            select count(*)::int as n from project_quotations where project_id = ${id}`
+          if ((quoted[0]?.n ?? 0) > 0) return 'has_quotations' as const
+          const rows = await sql<{ id: string }[]>`
+            delete from projects where id = ${id} returning id`
+          return rows.length ? ('deleted' as const) : ('missing' as const)
+        }),
+      )
+      if (!outcome) fail(400, 'We could not delete this project.')
+      if (outcome === 'has_payments') {
+        fail(409, 'This project has payments recorded against it. Cancel it instead of deleting.')
+      }
+      if (outcome === 'has_quotations') {
+        fail(409, 'This project has quotations the client has seen. Cancel it instead of deleting.')
+      }
+    if (outcome === 'missing') fail(404, 'That project was not found.')
+    await audit(c, { action: 'project.delete', entityType: 'project', entityId: id })
     return c.body(null, 204)
   })
 

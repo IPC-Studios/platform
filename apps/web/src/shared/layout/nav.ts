@@ -17,6 +17,7 @@ import {
   Wallet,
   TrendingUp,
   Contact,
+  Inbox,
   Bell,
   Megaphone,
   Users,
@@ -116,6 +117,7 @@ export const NAV: NavEntry[] = [
     icon: Contact,
     match: '/clients',
     children: [
+      leaf('Enquiries', '/enquiries', Inbox, { module: 'crm' }),
       leaf('CRM', '/follow-ups', Bell, { module: 'crm' }),
       leaf('Contacts', '/crm/contacts', Users, { module: 'crm' }),
       leaf('Companies', '/crm/companies', Building2, { module: 'crm' }),
@@ -191,6 +193,40 @@ export function navDestinations(
   for (const e of filterNav(NAV, role, access, isPlatformAdmin)) {
     if (e.kind === 'leaf') out.push(e)
     else out.push(...e.children)
+  }
+  return out
+}
+
+/** The hue a header shortcut wears. Cosmetic only — see --tone-* in styles.css. */
+export type QuickTone = 'blue' | 'green' | 'violet'
+
+export interface QuickLink extends NavLeaf {
+  tone: QuickTone
+}
+
+/**
+ * The handful of destinations that earn a one-click pill in the header.
+ *
+ * Only the path and the hue live here: the label and icon are read back out of
+ * NAV, so a pill can never drift from the sidebar row it shadows, and a
+ * destination that gets renamed or re-iconed is renamed in both places at
+ * once. A path with no NAV entry — or one this account cannot reach — drops
+ * out rather than rendering a pill that 403s.
+ */
+const QUICK_TONES: { to: string; tone: QuickTone }[] = [
+  { to: '/team-allocation', tone: 'blue' },
+  { to: '/projects', tone: 'green' },
+  { to: '/project-tracking', tone: 'violet' },
+]
+
+export function quickLinks(role: string, access: Access, isPlatformAdmin: boolean): QuickLink[] {
+  const reachable = new Map(
+    navDestinations(role, access, isPlatformAdmin).map((l) => [l.to, l] as const),
+  )
+  const out: QuickLink[] = []
+  for (const { to, tone } of QUICK_TONES) {
+    const leaf = reachable.get(to)
+    if (leaf) out.push({ ...leaf, tone })
   }
   return out
 }

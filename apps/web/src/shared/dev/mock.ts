@@ -106,6 +106,8 @@ const projectDetail: ProjectDetail = {
   name: 'Sharma Wedding',
   status: 'active',
   client_id: CLIENT.sharma,
+  client_name: 'Sharma Family',
+  client_phone: '9876543210',
   package_cost: 185000,
   additional_deliverables_cost: 42000,
   total_cost: 227000,
@@ -171,6 +173,12 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/clients') return atStage(clients, 'partial')
   if (method === 'GET' && path === '/projects') return atStage(projects, 'partial')
   if (method === 'GET' && path === '/projects/tracking') return atStage(trackingRows, 'partial')
+  // Above the catch-all below, which would answer this with a project detail.
+  if (method === 'GET' && path === '/projects/deliverable-sets')
+    return atStage(deliverableSetsFx, 'partial')
+  if (method === 'POST' && path === '/projects/deliverable-sets')
+    return { id: uid(0xd5), ...(body as object) }
+  if (method === 'DELETE' && path.startsWith('/projects/deliverable-sets/')) return {}
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
     return atStage(boardTasks, 'full')
@@ -179,6 +187,21 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/tasks/bundles') return { id: uid(0xd8) }
   if (method === 'DELETE' && path.startsWith('/tasks/bundles/')) return {}
   if (method === 'POST' && /\/tasks\/bundles\/[^/]+\/apply$/.test(path)) return { created: 4 }
+  if (method === 'GET' && path === '/shoots/services') return atStage(servicesFx, 'partial')
+  if (method === 'GET' && path.startsWith('/shoots/presets')) {
+    // The real endpoint filters on ?kind=; a mock that ignores it would show
+    // edit-room presets in the shoot menu and hide the difference.
+    const kind = new URLSearchParams(path.split('?')[1] ?? '').get('kind')
+    return atStage(
+      shootPresetsFx.filter((p) => !kind || p.kind === kind),
+      'partial',
+    )
+  }
+  // Echo what was sent: a preset that comes back under someone else's name
+  // makes the save look like it saved the wrong thing.
+  if (method === 'POST' && path === '/shoots/presets')
+    return { id: uid(0x5d), ...(body as object) }
+  if (method === 'DELETE' && path.startsWith('/shoots/presets/')) return {}
   if (method === 'GET' && (path === '/shoots' || path.startsWith('/shoots?'))) return shootsFx
   if (method === 'POST' && path === '/shoots') return { id: uid(0x5c) }
   if (method === 'PATCH' && path.startsWith('/shoots/')) return {}
@@ -189,9 +212,44 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'GET' && (path === '/enquiries' || path.startsWith('/enquiries?')))
+    return atStage(enquiriesFx, 'partial').length
+      ? { items: enquiriesFx, summary: enquirySummaryFx }
+      : { items: [], summary: { total_count: 0, open_count: 0, new_count: 0, reviewed_count: 0, contacted_count: 0, converted_count: 0, closed_count: 0 } }
+  if (method === 'POST' && path === '/enquiries') return { id: uid(0xe1) }
+  if (method === 'PATCH' && path.startsWith('/enquiries/')) return { ok: true }
+  if (method === 'DELETE' && path.startsWith('/enquiries/')) return { ok: true }
+  if (method === 'POST' && /^\/enquiries\/[^/]+\/convert$/.test(path)) return { lead_id: uid(0xe9) }
+  if (method === 'POST' && path === '/documents/quotations')
+    return { link: 'http://localhost:5173/quotation?token=demo-quote' }
+  if (method === 'POST' && path === '/documents/receipts')
+    return { link: 'http://localhost:5173/receipt?token=demo-receipt' }
+  if (method === 'GET' && path.startsWith('/public/quotation/')) return publicQuotationFx
+  if (method === 'POST' && /^\/public\/quotation\/[^/]+\/respond$/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/public/receipt/')) return publicReceiptFx
+  if (method === 'GET' && path.startsWith('/public/delivery/')) return publicDeliveryFx
+  if (method === 'GET' && path.startsWith('/public/team-terms/')) return publicTeamTermsFx
+  if (method === 'POST' && /^\/public\/team-terms\/[^/]+\/ack$/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/team-terms/templates'))
+    return path.includes('archived=1') ? [] : atStage(teamTermsFx, 'partial')
+  if (method === 'POST' && path === '/team-terms/templates') return { id: uid(0xb9) }
+  if (method === 'PATCH' && path.startsWith('/team-terms/templates/')) return { ok: true }
+  if (method === 'POST' && /\/team-terms\/templates\/[^/]+\/archive/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/team-terms/sends')) return atStage(teamTermsSendsFx, 'full')
+  if (method === 'POST' && path === '/team-terms/sends')
+    return {
+      send_id: uid(0xba),
+      link: 'http://localhost:5173/team-terms?token=demo-token',
+      expires_at: '2026-12-31T00:00:00Z',
+      email: 'skipped' as const,
+    }
+  if (method === 'POST' && /\/team-terms\/sends\/[^/]+\/revoke/.test(path)) return { ok: true }
+  if (method === 'GET' && path === '/team/role-library') return roleLibraryFx
   if (method === 'GET' && path === '/team/roles') return atStage(employeeRoles, 'partial')
+  // Echoes the request so a role added from the library comes back under the
+  // name that was tapped, not a placeholder.
   if (method === 'POST' && path === '/team/roles')
-    return { id: uid(0xfa), type_name: 'New Role', role_code: 'new_role', member_count: 0 }
+    return { id: uid(0xfa), stage: null, member_count: 0, ...(body as object) }
   if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/team/roles/')) return { ok: true }
   if (method === 'PATCH' && /^\/team\/members\/[^/]+\/roles$/.test(path)) return { ok: true }
   if (method === 'POST' && path === '/team/members')
@@ -295,7 +353,6 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PUT' && path === '/crm/prefs') return { ...crmPrefsFx, ...(body as Record<string, unknown>) }
   if (method === 'GET' && path.startsWith('/public/quote/')) return publicQuoteFx
   if (method === 'POST' && path.includes('/public/quote/')) return { ok: true }
-  if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
   if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
     return atStage(dealLeads(), 'partial')
   if (method === 'GET' && /^\/crm\/leads\/[^/]+\/events$/.test(path)) return crmEventsFx
@@ -332,6 +389,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/crm/views')
     return { ...crmViewsFx[0], id: uid(0xcb), ...(body as Record<string, unknown>) }
   if (method === 'DELETE' && path.startsWith('/crm/views/')) return {}
+  if (method === 'PATCH' && path.startsWith('/crm/views/')) return {}
   if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60 }
   if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, hot_score: 60, ...(body as Record<string, unknown>) }
   if (method === 'GET' && path === '/crm/cadences') return crmCadencesFx
@@ -922,33 +980,262 @@ const bundlesFx = [
   },
 ]
 
+const deliverableSetsFx = [
+  {
+    id: uid(0x78),
+    name: 'House standard',
+    items: [
+      { title: 'Edited Photos', is_additional_charge: false, additional_charge_amount: 0, show_on_quotation: true },
+      { title: 'Wedding Teaser', is_additional_charge: false, additional_charge_amount: 0, show_on_quotation: true },
+      { title: 'Drone Shots', is_additional_charge: true, additional_charge_amount: 15000, show_on_quotation: true },
+    ],
+  },
+]
+
+const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
+
+const enquiriesFx = [
+  {
+    id: uid(0xe2),
+    name: 'Meera Iyer',
+    phone: '9812000001',
+    email: 'meera@example.com',
+    message: 'Wedding in December, looking for candid plus a film.',
+    source: 'website',
+    enquiry_status: 'new' as const,
+    assigned_to: null,
+    assigned_to_name: null,
+    converted_lead_id: null,
+    created_at: '2026-09-05T09:10:00Z',
+  },
+  {
+    id: uid(0xe3),
+    name: 'Arjun Nair',
+    phone: '9812000002',
+    email: null,
+    message: 'Asked about pre-wedding packages in Goa.',
+    source: 'instagram',
+    enquiry_status: 'contacted' as const,
+    assigned_to: uid(0x3),
+    assigned_to_name: 'Rahul Sharma',
+    converted_lead_id: null,
+    created_at: '2026-09-03T14:20:00Z',
+  },
+  {
+    id: uid(0xe4),
+    name: 'Kavya Reddy',
+    phone: '9812000003',
+    email: 'kavya@example.com',
+    message: null,
+    source: 'referral',
+    enquiry_status: 'converted' as const,
+    assigned_to: uid(0x3),
+    assigned_to_name: 'Rahul Sharma',
+    converted_lead_id: uid(0xe9),
+    created_at: '2026-08-28T11:00:00Z',
+  },
+]
+
+const enquirySummaryFx = {
+  total_count: 3,
+  open_count: 2,
+  new_count: 1,
+  reviewed_count: 0,
+  contacted_count: 1,
+  converted_count: 1,
+  closed_count: 0,
+}
+
+const publicQuotationFx = {
+  snapshot: {
+    items: [
+      { title: 'Traditional Photography', chargeable: false, amount: 0 },
+      { title: 'Candid Photography', chargeable: false, amount: 0 },
+      { title: 'Wedding Album', chargeable: false, amount: 0 },
+      { title: 'Drone Shots', chargeable: true, amount: 15000 },
+    ],
+    package_cost: 150000,
+    add_ons: 15000,
+    total: 165000,
+    project_name: 'Sharma Wedding',
+  },
+  notes: 'Valid for 30 days. 50% advance confirms the date.',
+  accepted_at: null,
+  accepted_by_name: null,
+  declined_at: null,
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+}
+
+const publicReceiptFx = {
+  amount: 50000,
+  paid_on: '2026-07-20',
+  mode: 'upi',
+  reference: 'UPI/2026/0720',
+  project_name: 'Sharma Wedding',
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+  total_cost: 165000,
+  received_total: 50000,
+}
+
+const publicDeliveryFx = {
+  submission_link: 'https://drive.example/sharma-wedding',
+  notes: 'Full set of edited photographs and the highlight film.',
+  delivered_at: '2026-09-01T10:00:00Z',
+  project_name: 'Sharma Wedding',
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+}
+
+const publicTeamTermsFx = {
+  status: 'viewed' as const,
+  mode: 'acknowledgement_required' as const,
+  recipient_name: 'Anita Desai',
+  role_name: 'Photographer',
+  rendered_body:
+    'Photographer & Cinematographer Undertaking\n\nThis undertaking is executed on 2026-07-20 between Demo Studio, having its office at 12 MG Road, Mumbai (the "Company"), and Anita Desai (the "Team Member"), assigned as Photographer for Engagement shoot under project Sharma Wedding scheduled on 2026-08-10.\n\nConfidential Information\nThe Team Member shall maintain strict confidentiality of all client and project information.\n\nAcknowledgement\nBy acknowledging this document electronically, the Team Member confirms that they have read, understood, and agreed to all terms above.',
+  acknowledged_at: null,
+  acknowledged_by_name: null,
+  expires_at: '2026-09-18T09:00:00Z',
+  shoot_name: 'Engagement shoot',
+  shoot_date: '2026-08-10',
+  project_name: 'Sharma Wedding',
+  company_name: 'Demo Studio',
+}
+
+const teamTermsFx = [
+  {
+    id: uid(0xb1),
+    title: 'Photographer & Cinematographer Undertaking',
+    description: 'For anyone shooting on the day.',
+    body: 'The Team Member is booked as {{role}} for {{shoot_name}} on {{shoot_date}}.',
+    mode: 'acknowledgement_required' as const,
+    validity_days: 60,
+    category: 'production' as const,
+    version: 2,
+    is_active: true,
+    archived_at: null,
+    role_ids: [ROLE.photographer],
+    send_count: 3,
+  },
+  {
+    id: uid(0xb2),
+    title: 'Shoot Day Call Sheet',
+    description: 'Reporting time and dress code. Nothing to sign.',
+    body: 'Report by {{reporting_time}} at {{shoot_name}}.',
+    mode: 'send_only' as const,
+    validity_days: null,
+    category: 'general' as const,
+    version: 1,
+    is_active: true,
+    archived_at: null,
+    role_ids: [],
+    send_count: 0,
+  },
+]
+
+const teamTermsSendsFx = [
+  {
+    id: uid(0xb5),
+    shoot_id: uid(0x61),
+    shoot_name: 'Engagement shoot',
+    shoot_date: '2026-08-10',
+    project_id: PROJ.p1,
+    user_id: uid(0x3),
+    role_name: 'Photographer',
+    template_id: uid(0xb1),
+    template_title: 'Photographer & Cinematographer Undertaking',
+    template_version: 2,
+    mode: 'acknowledgement_required' as const,
+    recipient_name: 'Rahul Sharma',
+    recipient_email: 'rahul@demostudio.in',
+    recipient_phone: null,
+    status: 'acknowledged' as const,
+    sent_via: 'email',
+    sent_at: '2026-07-20T09:00:00Z',
+    viewed_at: '2026-07-20T10:15:00Z',
+    acknowledged_at: '2026-07-20T10:18:00Z',
+    acknowledged_by_name: 'Rahul Sharma',
+    expires_at: '2026-09-18T09:00:00Z',
+    created_at: '2026-07-20T09:00:00Z',
+  },
+]
+
+const servicesFx = [
+  { id: uid(0x71), name: 'Photographer' },
+  { id: uid(0x72), name: 'Cinematographer' },
+  { id: uid(0x73), name: 'Drone Pilot' },
+  { id: uid(0x74), name: 'Candid Photographer' },
+  { id: uid(0x75), name: 'Light Assistant' },
+]
+
+const shootPresetsFx = [
+  {
+    id: uid(0x76),
+    kind: 'shoot' as const,
+    name: 'Wedding day (full crew)',
+    payload: {
+      requirements: [
+        { name: 'Photographer', quantity: 2 },
+        { name: 'Cinematographer', quantity: 2 },
+        { name: 'Drone Pilot', quantity: 1 },
+      ],
+      internal_work: ['Wedding Day Edited Photos', 'Wedding Day Reel', 'Data Sorting'],
+    },
+  },
+  {
+    id: uid(0x77),
+    kind: 'internal_work' as const,
+    name: 'Standard edit room',
+    payload: { requirements: [], internal_work: ['Edited Photos', 'Reel', 'Data Sorting'] },
+  },
+]
+
+/** The shoot day, as a plain date — the booking calendar groups on it. */
+const shootDay = (n: number) => daysFromNow(n).slice(0, 10)
+
 const shootsFx = [
   {
     id: uid(0x61),
     name: 'Engagement shoot',
     project_id: PROJ.p1,
     project_name: 'Sharma Wedding',
-    shoot_date: '2026-08-10',
+    client_name: 'Priya Sharma',
+    shoot_date: shootDay(3),
     location: 'Bandra, Mumbai',
     status: 'confirmed',
+    requirements: [
+      { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
+      { service_id: uid(0x72), name: 'Cinematographer', quantity: 1 },
+    ],
   },
   {
     id: uid(0x62),
     name: 'Wedding day',
     project_id: PROJ.p1,
     project_name: 'Sharma Wedding',
-    shoot_date: '2026-08-22',
+    client_name: 'Priya Sharma',
+    shoot_date: shootDay(9),
     location: 'Taj Lands End',
     status: 'planned',
+    requirements: [
+      { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
+      { service_id: uid(0x73), name: 'Drone Pilot', quantity: 1 },
+    ],
   },
+  // No requirements on purpose: the booking screen has to say so rather than
+  // showing a shoot that looks fully staffed because nothing was asked for.
   {
     id: uid(0x63),
     name: 'Product set A',
     project_id: PROJ.p3,
     project_name: 'Nova Product Shoot',
-    shoot_date: '2026-07-01',
+    client_name: 'Nova Retail',
+    shoot_date: shootDay(-4),
     location: 'Studio',
     status: 'completed',
+    requirements: [],
   },
 ]
 
@@ -963,12 +1250,38 @@ const companyFx = {
   invoice_gst_number: '27ABCDE1234F1Z5',
 }
 
-const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
 
 const employeeRoles = [
-  { id: ROLE.photographer, type_name: 'Photographer', role_code: 'photographer', member_count: 2 },
-  { id: ROLE.editor, type_name: 'Editor', role_code: 'editor', member_count: 1 },
-  { id: ROLE.drone, type_name: 'Drone Operator', role_code: 'drone_operator', member_count: 1 },
+  {
+    id: ROLE.photographer,
+    type_name: 'Photographer',
+    role_code: 'photographer',
+    stage: 'production' as const,
+    member_count: 2,
+  },
+  // Unstaged on purpose: this is the shape of a role saved before the stage
+  // column existed, and the page has to file it by name.
+  { id: ROLE.editor, type_name: 'Editor', role_code: 'editor', stage: null, member_count: 1 },
+  {
+    id: ROLE.drone,
+    type_name: 'Drone Operator',
+    role_code: 'drone_operator',
+    stage: 'production' as const,
+    member_count: 1,
+  },
+]
+
+const roleLibraryFx = [
+  { id: uid(0xa1), type_name: 'Client Coordinator', role_code: 'client_coordinator', stage: 'pre' as const },
+  { id: uid(0xa2), type_name: 'Creative Director', role_code: 'creative_director', stage: 'pre' as const },
+  { id: uid(0xa3), type_name: 'Candid Photographer', role_code: 'candid_photographer', stage: 'production' as const },
+  { id: uid(0xa4), type_name: 'Cinematographer', role_code: 'cinematographer', stage: 'production' as const },
+  { id: uid(0xa5), type_name: 'Drone Operator', role_code: 'drone_operator', stage: 'production' as const },
+  { id: uid(0xa6), type_name: 'Lighting Technician', role_code: 'lighting_technician', stage: 'production' as const },
+  { id: uid(0xa7), type_name: 'Same Day Video Editor', role_code: 'same_day_video_editor', stage: 'post' as const },
+  { id: uid(0xa8), type_name: 'Album Designer', role_code: 'album_designer', stage: 'post' as const },
+  { id: uid(0xa9), type_name: 'Data Manager', role_code: 'data_manager', stage: 'post' as const },
+  { id: uid(0xaa), type_name: 'Operations Manager', role_code: 'operations_manager', stage: 'other' as const },
 ]
 
 /** One of each shape the directory has to render: owner, staff, freelancer, no-login. */
@@ -1105,26 +1418,28 @@ const trackingRows = [
   },
 ]
 
+// Booked against the shoots above by id and role name, which is what the
+// booking screen counts: the engagement day is one candid short of its two.
 const slots = [
   {
     id: uid(0x51),
     user_id: uid(0xe1),
-    user_name: 'Rahul (Photographer)',
-    shoot_id: null,
-    service_name: 'Wedding day',
-    start_at: '2026-07-01T04:30:00Z',
-    end_at: '2026-07-01T16:30:00Z',
+    user_name: 'Rahul Verma',
+    shoot_id: uid(0x61),
+    service_name: 'Candid Photographer',
+    start_at: daysFromNow(3, 10),
+    end_at: daysFromNow(3, 22),
     status: 'booked',
     estimated_cost: 8000,
   },
   {
     id: uid(0x52),
     user_id: uid(0xe2),
-    user_name: 'Anita (Cinematographer)',
-    shoot_id: null,
-    service_name: 'Reception',
-    start_at: '2026-07-02T12:00:00Z',
-    end_at: '2026-07-02T18:00:00Z',
+    user_name: 'Anita Rao',
+    shoot_id: uid(0x61),
+    service_name: 'Cinematographer',
+    start_at: daysFromNow(3, 10),
+    end_at: daysFromNow(3, 22),
     status: 'booked',
     estimated_cost: 10000,
   },
@@ -1183,8 +1498,12 @@ function fakeProject(
     status,
     client_id: CLIENT.sharma,
     client_name,
+    client_phone: '9876543210',
     package_cost: pkg,
     total_cost: total,
+    // Part paid, so the list's received and pending columns have something to
+    // show rather than a wall of zeroes.
+    received: Math.round(total * 0.4),
     created_at: '2026-06-01T10:00:00Z',
   }
 }
@@ -1604,8 +1923,10 @@ const auditFx = {
 const crmViewsFx = [
   {
     id: uid(0xca),
+    user_id: uid(1),
     name: 'My overdue',
     query: { search: '', filters: ['overdue'], status: 'all', assignee: 'all' },
+    visibility: 'private',
     created_at: '2026-08-01T09:00:00Z',
   },
 ]

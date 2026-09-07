@@ -1,7 +1,10 @@
 import {
+  deliverableDueDate,
+  deliverableRuleForTitle,
   computeProjectTotals,
-  deliverableEstimatedDate,
+  internalLeadDaysForTitle,
   type DeliverableForTotal,
+  type DueBasis,
 } from '@ipc/domain'
 import type { CreateProjectRequest, CreateShootRequest, DeliverableInput } from '@ipc/contracts'
 
@@ -32,18 +35,41 @@ export const STEP_HINTS: Record<WizardStep, string> = {
   shoots: 'The days you are shooting. Deliverable dates follow these.',
   deliverables: 'What the client receives, and what costs extra.',
   billing: 'The package price and anything already paid.',
-  review: 'Check it over, then create.',
+  review: 'Confirm everything before creating the project.',
+}
+
+export interface ShootRequirementDraft {
+  name: string
+  /** Kept as text so a half-typed "1" never becomes NaN mid-keystroke. */
+  quantity: string
 }
 
 export interface ShootDraft {
   name: string
   shoot_date: string
+  /** "HH:MM" as the browser time input gives it; blank when the day is loose. */
+  start_time: string
+  /** City / Venue as it should print — the map link is a separate field. */
   location: string
+  map_link: string
   status: 'planned' | 'confirmed'
+  requirements: ShootRequirementDraft[]
 }
 
 export interface DeliverableDraft {
   title: string
+  /** The brief for whoever picks the work up. Never printed for the client. */
+  description: string
+  /**
+   * The client-facing promise: this many days after the basis below. Separate
+   * from `lead_days`, which is production's clock — "45 days after the wedding"
+   * and "7 days after the footage lands" are different sentences, and a studio
+   * says both.
+   */
+  due_days: string
+  due_basis: DueBasis
+  /** Only read when the basis is 'custom'. */
+  custom_date: string
   is_additional_charge: boolean
   additional_charge_amount: string
   visibility_scope: 'client' | 'internal'
@@ -90,12 +116,93 @@ export const EMPTY_DRAFT: ProjectDraft = {
 export const newShoot = (): ShootDraft => ({
   name: '',
   shoot_date: '',
+  start_time: '',
   location: '',
+  map_link: '',
   status: 'planned',
+  requirements: [],
 })
+
+export const newRequirement = (): ShootRequirementDraft => ({ name: '', quantity: '1' })
+
+/**
+ * Every shoot day a studio books, alphabetical so a 17-row list can be
+ * skimmed rather than read. This is the searchable list behind "Add shoot";
+ * anything not on it is still typed by hand, and nothing here is enforced —
+ * a shoot's name is free text all the way to the API.
+ */
+export const SHOOT_TYPES = [
+  'Birthday',
+  'Cocktail',
+  'Couple Shoot',
+  'Engagement',
+  'Haldi',
+  'Haldi Bride',
+  'Haldi Groom',
+  'Kirtan',
+  'Mahuratam',
+  'Mehendi',
+  'Pre-Wedding Shoot',
+  'Reception',
+  'Ring Ceremony',
+  'Roka',
+  'Sangeet',
+  'Tilak',
+  'Wedding Day',
+] as const
+
+/**
+ * The six that earn a chip beside the button. The full list lives one click
+ * away — a row of seventeen chips is a wall, not a shortcut.
+ */
+export const QUICK_SHOOTS = [
+  'Engagement',
+  'Haldi',
+  'Mehendi',
+  'Wedding Day',
+  'Reception',
+  'Couple Shoot',
+] as const
+
+/** What "Apply preset" lays down — the spine of a standard wedding booking. */
+export const SHOOT_PRESET = ['Haldi', 'Mehendi', 'Wedding Day', 'Reception'] as const
+
+/**
+ * Filter the type list for the search box: case-insensitive, matches anywhere
+ * in the name so "haldi" finds all three Haldis and "shoot" finds the couple
+ * and pre-wedding ones.
+ */
+export function matchShootTypes(query: string): string[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...SHOOT_TYPES]
+  return SHOOT_TYPES.filter((t) => t.toLowerCase().includes(q))
+}
+
+/**
+ * Append named shoots, skipping any name already on the list.
+ *
+ * The skip is what makes the preset safe to press twice. It compares trimmed
+ * and case-folded: a day typed by hand as "haldi" is the day the chip would
+ * otherwise add again.
+ */
+export function withShoots(existing: ShootDraft[], names: readonly string[]): ShootDraft[] {
+  const taken = new Set(existing.map((s) => s.name.trim().toLowerCase()))
+  const added: ShootDraft[] = []
+  for (const name of names) {
+    const key = name.trim().toLowerCase()
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    added.push({ ...newShoot(), name })
+  }
+  return added.length ? [...existing, ...added] : existing
+}
 
 export const newDeliverable = (): DeliverableDraft => ({
   title: '',
+  description: '',
+  due_days: '',
+  due_basis: 'after_wedding_day',
+  custom_date: '',
   is_additional_charge: false,
   additional_charge_amount: '',
   visibility_scope: 'client',
@@ -118,13 +225,25 @@ const days = (v: string): number | undefined => {
   return v.trim() === '' || Number.isNaN(n) ? undefined : Math.max(0, Math.trunc(n))
 }
 
-/** The date a deliverable lands on, given the draft's shoots. Null = unknown. */
+/** Today as "YYYY-MM-DD", for a basis counted from the project itself. */
+const todayISO = (): string => {
+  const at = new Date()
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * The date a deliverable lands on. Null = unknown.
+ *
+ * Read off the client promise, not the production clock: this is the date that
+ * goes on the quotation, so it has to be the one the studio said out loud.
+ */
 export function estimatedDateFor(draft: ProjectDraft, d: DeliverableDraft): string | null {
-  return deliverableEstimatedDate(
-    d.start_rule,
-    draft.shoots.map((s) => ({ shoot_date: s.shoot_date || null })),
-    days(d.lead_days),
-    d.shoot_index ?? undefined,
+  return deliverableDueDate(
+    d.due_basis,
+    draft.shoots.map((s) => ({ name: s.name, shoot_date: s.shoot_date || null })),
+    days(d.due_days),
+    d.custom_date || null,
+    todayISO(),
   )
 }
 
@@ -222,6 +341,7 @@ export function toProjectRequest(draft: ProjectDraft, clientId: string): CreateP
       return {
         title: d.title.trim(),
         list_key: 'primary',
+        ...(d.description.trim() ? { description: d.description.trim() } : {}),
         is_additional_charge: d.is_additional_charge,
         additional_charge_amount: d.is_additional_charge ? money(d.additional_charge_amount) : 0,
         visibility_scope: d.visibility_scope,
@@ -254,13 +374,286 @@ export function toProjectRequest(draft: ProjectDraft, clientId: string): CreateP
 export function toShootRequests(draft: ProjectDraft, projectId: string): CreateShootRequest[] {
   return draft.shoots
     .filter((s) => s.name.trim())
-    .map((s) => ({
-      project_id: projectId,
-      name: s.name.trim(),
-      status: s.status,
-      ...(s.shoot_date ? { shoot_date: s.shoot_date } : {}),
-      ...(s.location.trim() ? { location: s.location.trim() } : {}),
-    }))
+    .map((s) => {
+      const startAt = shootStartAt(s)
+      return {
+        project_id: projectId,
+        name: s.name.trim(),
+        status: s.status,
+        ...(s.shoot_date ? { shoot_date: s.shoot_date } : {}),
+        ...(startAt ? { start_at: startAt } : {}),
+        ...(s.location.trim() ? { location: s.location.trim() } : {}),
+        ...(s.map_link.trim() ? { map_link: s.map_link.trim() } : {}),
+        requirements: s.requirements
+          .filter((r) => r.name.trim())
+          .map((r) => ({ name: r.name.trim(), quantity: Math.max(1, Number(r.quantity) || 1) })),
+      }
+    })
+}
+
+/**
+ * What is still missing from a shoot, as the card's chips read it.
+ *
+ * Deliberately not errors: a studio can save a project with a shoot that has
+ * no date and no crew yet — the chips are the reminder, `stepErrors` is the
+ * gate, and only a missing title actually blocks.
+ */
+export function shootIssues(shoot: ShootDraft): string[] {
+  const issues: string[] = []
+  if (!shoot.name.trim() || !shoot.shoot_date) issues.push('Title & date needed')
+  if (shoot.requirements.filter((r) => r.name.trim()).length === 0) issues.push('No requirements')
+  return issues
+}
+
+/**
+ * The edit-room items this kind of day usually needs, offered as chips.
+ *
+ * Derived from the shoot's own name rather than a lookup table, so a studio
+ * that types "Roka Night" gets "Roka Night Edited Photos" without anyone
+ * having listed that ceremony anywhere.
+ */
+export function internalWorkSuggestions(shootName: string): string[] {
+  const name = shootName.trim()
+  return name
+    ? [`${name} Edited Photos`, `${name} Reel`, 'Data Sorting']
+    : ['Edited Photos', 'Reel', 'Data Sorting']
+}
+
+/**
+ * An internal deliverable belonging to one shoot: the team's own list, pinned
+ * to that day so its dates follow the shoot, and off the quotation because a
+ * client is not buying "data sorting" — they are buying the album it feeds.
+ */
+export function newInternalWork(shootIndex: number, title = ''): DeliverableDraft {
+  const rule = deliverableRuleForTitle(title)
+  return {
+    ...newDeliverable(),
+    title,
+    ...(title.trim()
+      ? { due_days: String(rule.due_days), due_basis: rule.due_basis }
+      : {}),
+    lead_days: title.trim() ? String(internalLeadDaysForTitle(title)) : '',
+    visibility_scope: 'internal',
+    show_on_quotation: false,
+    start_rule: 'this_shoot',
+    shoot_index: shootIndex,
+  }
+}
+
+/** The internal work pinned to one shoot, with its index in draft.deliverables. */
+export function internalWorkFor(
+  draft: ProjectDraft,
+  shootIndex: number,
+): { at: number; item: DeliverableDraft }[] {
+  const out: { at: number; item: DeliverableDraft }[] = []
+  draft.deliverables.forEach((item, at) => {
+    if (item.visibility_scope === 'internal' && item.shoot_index === shootIndex) out.push({ at, item })
+  })
+  return out
+}
+
+/**
+ * Drop a shoot without leaving its deliverables pointing at the wrong day.
+ *
+ * `shoot_index` is positional, so removing shoot 0 silently re-aims everything
+ * below it — a teaser dated off the Haldi would start counting from the
+ * Mehendi. Internal work belonged to the shoot and goes with it; anything
+ * client-visible is kept and unpinned, because that is someone's line item and
+ * their money, not ours to delete.
+ */
+export function removeShootAt(draft: ProjectDraft, index: number): Partial<ProjectDraft> {
+  const deliverables: DeliverableDraft[] = []
+  for (const d of draft.deliverables) {
+    if (d.shoot_index === index) {
+      if (d.visibility_scope === 'internal') continue
+      deliverables.push({ ...d, start_rule: 'whole_project', shoot_index: null })
+      continue
+    }
+    deliverables.push(
+      d.shoot_index !== null && d.shoot_index > index ? { ...d, shoot_index: d.shoot_index - 1 } : d,
+    )
+  }
+  return { shoots: draft.shoots.filter((_, i) => i !== index), deliverables }
+}
+
+/**
+ * Date + time as one instant, for `start_at`.
+ *
+ * The studio types a local wall-clock time; the column is a timestamptz, so
+ * the offset has to be resolved here rather than sent as a naive string the
+ * server would have to guess about. No date, or a time the browser cannot
+ * make sense of, means no instant to send.
+ */
+export function shootStartAt(shoot: ShootDraft): string | null {
+  if (!shoot.shoot_date || !shoot.start_time) return null
+  const at = new Date(`${shoot.shoot_date}T${shoot.start_time}`)
+  return Number.isNaN(at.getTime()) ? null : at.toISOString()
+}
+
+/**
+ * The line items a wedding studio actually sells, as chips.
+ *
+ * Ordered the way a quotation reads — film first, then photographs, then the
+ * physical album — rather than alphabetically, because this list is scanned
+ * while talking to a client, not searched.
+ */
+export const QUICK_DELIVERABLES = [
+  'Wedding Teaser',
+  'Full Wedding Film',
+  'Highlight Film',
+  'Instagram Reels Pack',
+  'Wedding Film',
+  'Traditional Video',
+  'Candid Photos',
+  'Edited Photos',
+  'Raw Photos',
+  'Photo Album',
+  'Teaser',
+  'Reel / Short Video',
+  'Drone Shots',
+  'Full Ceremony Video',
+] as const
+
+/**
+ * The three packages nearly every studio starts from, so "Load set" is useful
+ * on day one — before anyone has saved a set of their own. A studio's own sets
+ * come from the server and sit beside these.
+ */
+export const BUILT_IN_SETS: { name: string; titles: string[] }[] = [
+  {
+    name: 'Basic Wedding Package',
+    titles: ['Edited Photos', 'Wedding Teaser', 'Photo Album'],
+  },
+  {
+    name: 'Premium Wedding Package',
+    titles: ['Edited Photos', 'Candid Photos', 'Wedding Teaser', 'Highlight Film', 'Photo Album'],
+  },
+  {
+    name: 'Luxury Wedding Package',
+    titles: [
+      'Edited Photos',
+      'Candid Photos',
+      'Raw Photos',
+      'Wedding Teaser',
+      'Highlight Film',
+      'Full Wedding Film',
+      'Instagram Reels Pack',
+      'Drone Shots',
+      'Photo Album',
+    ],
+  },
+]
+
+/**
+ * Which of the three lists on the Deliverables step a row belongs to.
+ *
+ * Not a stored field: the bucket falls out of the two switches the row already
+ * has, so moving an item between lists is done by the same toggles that decide
+ * what it costs and who sees it — there is no third source of truth to drift.
+ */
+export type DeliverableBucket = 'client' | 'add_on' | 'internal'
+
+export function bucketOf(d: DeliverableDraft): DeliverableBucket {
+  if (d.visibility_scope === 'internal') return 'internal'
+  return d.is_additional_charge ? 'add_on' : 'client'
+}
+
+/** The rows in one bucket, each with its index in draft.deliverables. */
+export function deliverablesIn(
+  draft: ProjectDraft,
+  bucket: DeliverableBucket,
+): { at: number; item: DeliverableDraft }[] {
+  const out: { at: number; item: DeliverableDraft }[] = []
+  draft.deliverables.forEach((item, at) => {
+    if (bucketOf(item) === bucket) out.push({ at, item })
+  })
+  return out
+}
+
+const LEAD_KEY = 'ipc.project.leadDays'
+
+/**
+ * How long "Photo Album" takes, remembered from the last time this studio
+ * quoted one.
+ *
+ * Per-device on purpose: it is a typing shortcut, not a policy. Two people at
+ * the same studio may work to different turnarounds, and neither should
+ * silently rewrite the other's — which is why sets go to the server and this
+ * stays in the browser. Told to the user in as many words on the step.
+ */
+function readLeadMemory(): Record<string, string> {
+  try {
+    const raw = globalThis.localStorage?.getItem(LEAD_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function recallDueDays(title: string): string {
+  const key = title.trim().toLowerCase()
+  return key ? (readLeadMemory()[key] ?? '') : ''
+}
+
+export function rememberDueDays(title: string, dueDays: string): void {
+  const key = title.trim().toLowerCase()
+  const value = dueDays.trim()
+  if (!key || !value) return
+  try {
+    globalThis.localStorage?.setItem(LEAD_KEY, JSON.stringify({ ...readLeadMemory(), [key]: value }))
+  } catch {
+    // A blocked localStorage costs the shortcut, not the deliverable.
+  }
+}
+
+/**
+ * A client line item, timed the way this studio times that thing: what they
+ * used last, else what the trade generally does.
+ */
+export function newClientDeliverable(title = ''): DeliverableDraft {
+  const rule = deliverableRuleForTitle(title)
+  const remembered = recallDueDays(title)
+  return {
+    ...newDeliverable(),
+    title,
+    due_days: remembered || (title.trim() ? String(rule.due_days) : ''),
+    due_basis: rule.due_basis,
+  }
+}
+
+/** An extra billed on top of the package. */
+export function newAddOn(title = ''): DeliverableDraft {
+  return {
+    ...newClientDeliverable(title),
+    is_additional_charge: true,
+  }
+}
+
+/**
+ * Add titles that are not on the list already, so a chip pressed twice and a
+ * set loaded over a half-filled list both do the obvious thing.
+ */
+export function withDeliverables(
+  existing: DeliverableDraft[],
+  items: { title: string; is_additional_charge?: boolean; additional_charge_amount?: number; show_on_quotation?: boolean }[],
+): DeliverableDraft[] {
+  const taken = new Set(existing.map((d) => d.title.trim().toLowerCase()))
+  const added: DeliverableDraft[] = []
+  for (const item of items) {
+    const key = item.title.trim().toLowerCase()
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    added.push({
+      ...newClientDeliverable(item.title.trim()),
+      ...(item.is_additional_charge ? { is_additional_charge: true } : {}),
+      ...(item.additional_charge_amount
+        ? { additional_charge_amount: String(item.additional_charge_amount) }
+        : {}),
+      ...(item.show_on_quotation === false ? { show_on_quotation: false } : {}),
+    })
+  }
+  return added.length ? [...existing, ...added] : existing
 }
 
 /** A draft worth restoring — anything typed beyond the defaults. */
@@ -307,7 +700,18 @@ export function loadDraft(): StoredDraft | null {
     if (!parsed?.draft || typeof parsed.savedAt !== 'string') return null
     // Merge over the defaults: a draft written before a field existed must not
     // come back missing that field.
-    return { draft: { ...EMPTY_DRAFT, ...parsed.draft }, savedAt: parsed.savedAt }
+    // Shoots are nested, so the same merge has to reach one level down: a
+    // draft written before requirements existed comes back without them, and
+    // the card would map over undefined.
+    const draft = { ...EMPTY_DRAFT, ...parsed.draft }
+    return {
+      draft: {
+        ...draft,
+        shoots: draft.shoots.map((s) => ({ ...newShoot(), ...s })),
+        deliverables: draft.deliverables.map((d) => ({ ...newDeliverable(), ...d })),
+      },
+      savedAt: parsed.savedAt,
+    }
   } catch {
     return null
   }

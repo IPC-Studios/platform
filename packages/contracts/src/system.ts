@@ -62,3 +62,20 @@ export const healthBody = z.object({
   db_latency_ms: z.number().nullable(),
 })
 export type HealthBody = z.infer<typeof healthBody>
+
+/**
+ * A crash report from the web app (window.onerror / unhandledrejection).
+ * Public and unauthenticated by necessity — a broken session must still be
+ * reportable — so the shape is tiny, the rate limit is tight, and nothing in
+ * it is trusted beyond the log line.
+ */
+export const clientErrorReport = z.object({
+  kind: z.enum(['error', 'rejection']).default('error'),
+  message: z.string().trim().min(1).max(500),
+  stack: z.string().max(3000).optional(),
+  url: z.string().max(500).optional(),
+})
+export type ClientErrorReport = z.infer<typeof clientErrorReport>
+
+export const clientErrorAck = z.object({ ok: z.literal(true) })
+export type ClientErrorAck = z.infer<typeof clientErrorAck>

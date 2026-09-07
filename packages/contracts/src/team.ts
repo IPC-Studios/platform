@@ -14,11 +14,20 @@ export const memberStatus = z.enum(['active', 'inactive', 'pending'])
 export const assignableRole = z.enum(['admin', 'manager', 'employee'])
 export type AssignableRole = z.infer<typeof assignableRole>
 
+/**
+ * Which part of the job a role belongs to. Display-only: it groups the roles
+ * page and nothing is gated on it, which is why an unstaged role is allowed —
+ * the UI reads a stage off the name when the studio hasn't said.
+ */
+export const productionStage = z.enum(['pre', 'production', 'post', 'other'])
+export type ProductionStage = z.infer<typeof productionStage>
+
 /** A studio's own job roles — Photographer, Editor, Drone Op… */
 export const employeeRole = z.object({
   id: uuid,
   type_name: z.string(),
   role_code: z.string(),
+  stage: productionStage.nullable(),
   member_count: z.number().int(),
 })
 export type EmployeeRole = z.infer<typeof employeeRole>
@@ -31,8 +40,22 @@ export const upsertEmployeeRoleRequest = z.object({
     .min(2)
     .max(40)
     .regex(/^[a-z0-9_]+$/, 'lowercase letters, numbers and underscores only'),
+  stage: productionStage.optional(),
 })
 export type UpsertEmployeeRoleRequest = z.infer<typeof upsertEmployeeRoleRequest>
+
+/**
+ * The catalogue every studio starts from — the roles a photography business
+ * books whoever they are. Platform-owned and read-only: picking one copies it
+ * into the studio's own roles, so renaming it later is their business alone.
+ */
+export const libraryRole = z.object({
+  id: uuid,
+  type_name: z.string(),
+  role_code: z.string(),
+  stage: productionStage,
+})
+export type LibraryRole = z.infer<typeof libraryRole>
 
 export const assignRolesRequest = z.object({ role_ids: z.array(uuid).max(20).default([]) })
 export type AssignRolesRequest = z.infer<typeof assignRolesRequest>

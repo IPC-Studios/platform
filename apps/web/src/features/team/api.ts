@@ -7,6 +7,7 @@ import {
   createInvitationRequest,
   directoryMember,
   employeeRole,
+  libraryRole,
   invitation,
   invitationLink,
   updateMemberRequest,
@@ -24,6 +25,7 @@ import { useAccess } from '@/shared/auth/useAccess'
 
 const directoryList = directoryMember.array()
 const rolesList = employeeRole.array()
+const libraryList = libraryRole.array()
 const invitationsList = invitation.array()
 const ok = z.object({ ok: z.boolean() })
 
@@ -47,6 +49,23 @@ export function useEmployeeRoles() {
     queryFn: () => callApi('/team/roles', { responseSchema: rolesList }),
     enabled: !!session && access.hasModule('team_roles'),
     staleTime: 60_000,
+  })
+}
+
+/**
+ * The platform's catalogue of standard photography roles.
+ *
+ * Read-only and the same for everyone, so it caches long: a studio picks from
+ * it once when setting up and rarely again.
+ */
+export function useRoleLibrary() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['team', 'role-library'],
+    queryFn: () => callApi('/team/role-library', { responseSchema: libraryList }),
+    enabled: !!session && access.hasModule('team_roles'),
+    staleTime: 30 * 60_000,
   })
 }
 

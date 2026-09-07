@@ -226,7 +226,17 @@ export const crmRouter = new Hono<AppEnv>()
     if (result === 'rule') fail(422, 'Tell us why it was lost (3+ chars).')
     if (result === 'missing') fail(404, 'That lead was not found.')
     if (!result) fail(400, 'We could not update the lead.')
-    if (patch.status || patch.assigned_to !== undefined || patch.is_archived !== undefined) {
+    // Money, reason and notes are material to the story; follow-up shuffles
+    // already live in the events trail, so they stay out of the audit log.
+    if (
+      patch.status ||
+      patch.assigned_to !== undefined ||
+      patch.is_archived !== undefined ||
+      patch.lost_reason !== undefined ||
+      patch.deal_value !== undefined ||
+      patch.probability !== undefined ||
+      patch.notes !== undefined
+    ) {
       await audit(c, { action: 'lead.update', entityType: 'crm_lead', entityId: id, before: { status: result.from }, after: patch })
     }
     return c.body(null, 204)

@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { allowedOrigins, isProduction } from './lib/allowed-origins'
 import type { AppEnv } from './context'
 import { errorBoundary } from './middleware/errors'
 import { requestId } from './middleware/request-id'
@@ -26,6 +27,9 @@ import { notificationsRouter } from './modules/notifications/router'
 import { subscriptionRouter } from './modules/subscription/router'
 import { termsRouter, publicTermsRouter } from './modules/terms/router'
 import { publicQuotesRouter } from './modules/crm/quotes'
+import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/router'
+import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
+import { enquiriesRouter } from './modules/enquiries/router'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
 
@@ -40,12 +44,8 @@ app.use('*', securityHeaders)
 app.use('*', errorBoundary)
 // CORS from an env allowlist. Fail-closed in production.
 app.use('*', (c, next) => {
-  const stripSlash = (s: string) => s.replace(/\/+$/, '')
-  const allow = (c.env.ALLOWED_ORIGINS ?? '')
-    .split(',')
-    .map((o) => stripSlash(o.trim()))
-    .filter(Boolean)
-  const isProd = (c.env.ENVIRONMENT ?? '') === 'production'
+  const allow = allowedOrigins(c.env)
+  const isProd = isProduction(c.env)
   if (allow.includes('*') && isProd) {
     console.warn('ALLOWED_ORIGINS contains * in production - denying')
   }
@@ -57,7 +57,7 @@ app.use('*', (c, next) => {
       if (allow.includes('*')) {
         return isProd ? '' : origin || '*'
       }
-      return allow.includes(stripSlash(origin ?? '')) ? origin : ''
+      return allow.includes((origin ?? '').replace(/\/+$/, '')) ? origin : ''
     },
     allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
@@ -98,6 +98,8 @@ app.use('/auth/change-password', rateLimit({ windowMs: 60_000, limit: 10 }))
 app.use('/public/*', rateLimit({ windowMs: 60_000, limit: 30 }))
 app.use('/webhooks/*', rateLimit({ windowMs: 60_000, limit: 60 }))
 app.use('/health', rateLimit({ windowMs: 60_000, limit: 60 }))
+// Crash reports are public by necessity; keep the abuse ceiling low and explicit.
+app.use('/health/client-errors', rateLimit({ windowMs: 60_000, limit: 20 }))
 app.use('/cron/reminders', rateLimit({ windowMs: 60_000, limit: 10 }))
 
 // ── Routers ───────────────────────────────────────────────────
@@ -123,8 +125,13 @@ app.route('/cron', cronRouter)
 app.route('/notifications', notificationsRouter)
 app.route('/subscription', subscriptionRouter)
 app.route('/terms', termsRouter)
+app.route('/team-terms', teamTermsRouter)
 app.route('/public', publicTermsRouter)
+app.route('/documents', documentsRouter)
+app.route('/enquiries', enquiriesRouter)
 app.route('/public', publicQuotesRouter)
+app.route('/public', publicTeamTermsRouter)
+app.route('/public', publicDocumentsRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
 

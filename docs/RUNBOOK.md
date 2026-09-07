@@ -8,6 +8,10 @@ them. `deploy/.env.example` lists every variable.
 
 | Variable | Where | Notes |
 |---|---|---|
+| `POSTGRES_PASSWORD` | `.env` (db superuser) | Change in Postgres, then `.env`, then `up -d` |
+| `DB_AUTHENTICATOR_PASSWORD` | `.env` (role the API logs in as) | The `migrate` service re-applies it on every deploy |
+| `RESEND_API_KEY` | `.env` | Rotate in Resend → `up -d api` |
+| `BACKUP_S3_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | `.env` | Scoped to the backup bucket; rotate in the storage provider |
 | `JWT_SECRET` | API | HS256 signing key. Rotating it signs everyone out. |
 | `CRON_SECRET` | API + scheduler | Compared in constant time. Rotate both sides together. |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | API | With the key pair set, `/subscription/order` creates a Razorpay order and `/subscription/activate` **requires** the Checkout signature. Without it, activation is only allowed when `ENVIRONMENT` is `development`, `test`, `ci` or `local`. |
@@ -35,6 +39,10 @@ them. `deploy/.env.example` lists every variable.
   swallowed `.catch(() => null)` calls left in the API.
 - The web client shows the id under any failed panel as "Reference: …" — ask
   the user for it.
+- The web app beacons its own crashes (`window.onerror`, unhandled rejections)
+  to `POST /health/client-errors` (public, 20/min, tiny schema, throttled
+  client-side to one per message per minute). They land as `client error` log
+  lines — grep those when a user reports something the API never saw.
 
 ## Audit trail
 
@@ -78,14 +86,19 @@ Every tenant table has `company_id` and an RLS policy scoped to
 member **regardless of plan**; the plan gate lives in `is_current_user_active()`,
 which feature tables use. That is what keeps the subscription page reachable
 when the plan has lapsed — the recovery path must not sit behind the thing it
-recovers from.
+recovers from. The API connects as the unprivileged `authenticator` role and
+`SET ROLE`s to `authenticated` per request with the caller's id in a GUC, so the
+database — not application code — is what keeps studios apart.
 
 ## DB verification
 
 Migrations are logic-tested against pglite in `supabase/tests/tenancy.test.ts`
-(0001–0036 applied in order; ~130 tests). pglite runs as superuser, so RLS
-*enforcement* is proven on real Postgres by `supabase/tests/rls-live.mjs` and by
-the CI `e2e` job.
+(0001–0039 applied in order). pglite runs as superuser, so RLS *enforcement* is
+proven on real Postgres by `supabase/tests/rls-live.mjs` and by the CI `e2e`
+job, which registers two throwaway studios over HTTP and asserts studio A
+cannot read studio B's company, clients or users.
+
+Run it against any environment:
 
 ```bash
 API_URL=https://api.yourstudio.in bun supabase/tests/rls-live.mjs
@@ -108,6 +121,47 @@ survive a refresh). `apps/web/public/_headers` sets HSTS, frame denial and a
 CSP that permits only the app's own scripts plus Razorpay Checkout. Its
 `connect-src` is `https:` because the build cannot template the API origin —
 tighten it to `'self' https://api.<your-domain>` once known.
+
+## Backups & restore
+
+The `backup` service (`deploy/backup/`) runs `pg_dump -Fc` once at container
+start and then daily at `BACKUP_AT_UTC` (default 02:30 UTC). Each dump is
+verified with `pg_restore --list` before it counts as a success; local copies are
+pruned after `BACKUP_KEEP_DAYS` (7).
+
+**Off-box copies are opt-in and you want them on.** Set `BACKUP_S3_BUCKET` and
+the rest of the `BACKUP_S3_*` block in `.env` (any S3-compatible bucket — R2, B2,
+S3, MinIO) and each dump is uploaded with rclone and pruned after
+`BACKUP_OFFSITE_KEEP_DAYS` (30). Without it every backup sits on the same disk as
+the database it is protecting.
+
+The container goes **unhealthy** if there has been no successful local backup in
+26h (or no off-box copy in 72h, when configured), so a backup path that quietly
+breaks shows up in `docker compose ps` and fails the next deploy's `--wait`.
+
+```bash
+docker compose logs backup                       # what it has been doing
+docker compose run --rm backup once              # take one right now
+docker compose run --rm backup restore list      # what exists, here + off-box
+```
+
+### Restore
+
+Destructive — it drops and recreates the database, so stop the API first.
+
+```bash
+docker compose stop api cron
+docker compose run --rm -e RESTORE_CONFIRM=yes backup restore latest
+docker compose up -d migrate api cron
+```
+
+Without `RESTORE_CONFIRM=yes` it prints what it would do and stops. Pass a dump
+filename instead of `latest` to pick one; a name that isn't on this box is pulled
+from off-box storage automatically.
+
+**Do a restore drill on a scratch VPS before you need one.** An untested backup
+is a hope. What to check afterwards: `/health` is green, a studio owner can log
+in, and a project's invoices and payments still add up.
 
 ## Incident response
 

@@ -40,6 +40,12 @@ blob-report/
 # Large source archive (kept out of history)
 IPC Studios.zip
 
+# Local DB dumps / screenshots — never commit a database into git history.
+# Root-anchored: deploy/backup/ is the backup SERVICE and must stay tracked.
+/backup/
+*.dump
+*.backup.zip
+
 # Reference material — kept local only, never pushed
 extracted/
 docs-reverse-engineered/

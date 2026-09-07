@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { SendTermsDialog } from '@/features/team-terms/SendTermsDialog'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { humanize } from '@/shared/ui/format'
 import { useProjects } from '@/features/projects/api'
@@ -85,6 +86,11 @@ function Shoots() {
                     </span>
                   )}
                 </div>
+                {canEdit && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <SendTermsDialog shoot={s} />
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

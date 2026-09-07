@@ -29,3 +29,14 @@ export function textParam(c: Context<AppEnv>, key: string, max = 200): string {
   if (!v || v.length > max) fail(404, 'We could not find that record.')
   return v
 }
+
+/**
+ * An optional uuid query filter. A malformed value is the caller's mistake
+ * (422), not a missing row — and never a cast error from Postgres.
+ */
+export function uuidQuery(c: Context<AppEnv>, key: string): string | null {
+  const v = c.req.query(key)
+  if (!v) return null
+  if (!UUID_RE.test(v)) fail(422, 'That filter is not a valid id.')
+  return v
+}

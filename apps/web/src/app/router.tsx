@@ -37,9 +37,15 @@ import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
 import { SettingsPage } from '@/routes/settings'
 import { RolesAccessPage } from '@/routes/settings/roles'
+import { TeamTermsPage } from '@/routes/settings/team-terms'
 import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
 import { QuoteAcceptPage } from '@/routes/quote-accept'
+import { TeamTermsAcknowledgePage } from '@/routes/team-terms-acknowledge'
+import { QuotationPage } from '@/routes/quotation'
+import { EnquiriesPage } from '@/routes/enquiries'
+import { ReceiptPage } from '@/routes/receipt'
+import { DeliveryPage } from '@/routes/delivery'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
@@ -113,6 +119,10 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/accept-invite', AcceptInvitePage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
   publicRoute('/quote/accept', QuoteAcceptPage),
+  publicRoute('/team-terms', TeamTermsAcknowledgePage),
+  publicRoute('/quotation', QuotationPage),
+  publicRoute('/receipt', ReceiptPage),
+  publicRoute('/delivery', DeliveryPage),
 
   renewalLayout.addChildren([
     createRoute({
@@ -156,6 +166,8 @@ const routeTree = rootRoute.addChildren([
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
+  route('/settings/team-terms', TeamTermsPage),
+  route('/enquiries', EnquiriesPage),
   route('/settings/appearance', AppearancePage),
   route('/settings/system', SystemPage),
   route('/platform/studios', PlatformStudiosPage),

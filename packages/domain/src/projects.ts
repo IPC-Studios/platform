@@ -103,3 +103,135 @@ export function deliverableEstimatedDate(
   if (anchor === null || leadDays === undefined) return null
   return addDays(anchor, leadDays)
 }
+
+/**
+ * The other half of the schedule: what a client was promised.
+ *
+ * `start_rule` above answers "when can the edit start" — a production
+ * question, measured from when footage lands. This answers "what did we say
+ * on the quotation", and a studio says it against a milestone: forty-five days
+ * after the wedding day, thirty after the last shoot. The two disagree often
+ * and legitimately, which is why the deliverable carries both.
+ */
+export type DueBasis =
+  | 'after_wedding_day'
+  | 'after_last_shoot'
+  | 'after_project_created'
+  | 'custom'
+
+export const DUE_BASIS_OPTIONS: ReadonlyArray<{ value: DueBasis; label: string }> = [
+  { value: 'after_wedding_day', label: 'After Wedding Day' },
+  { value: 'after_last_shoot', label: 'After Last Shoot' },
+  { value: 'after_project_created', label: 'After Project Created' },
+  { value: 'custom', label: 'Custom Date' },
+]
+
+export interface NamedShootDate extends ShootDate {
+  name: string
+}
+
+/**
+ * The wedding day among the shoots, by name.
+ *
+ * "Wedding Day" exactly first, then anything wedding-ish, because a studio
+ * that typed "Wedding Reception" and nothing else still means that day when
+ * it says "after the wedding".
+ */
+export function findWeddingShoot(
+  shoots: ReadonlyArray<NamedShootDate>,
+): NamedShootDate | null {
+  return (
+    shoots.find((s) => /wedding\s*day/i.test(s.name)) ??
+    shoots.find((s) => /wedding/i.test(s.name)) ??
+    null
+  )
+}
+
+/** The day the promised clock starts. Null when that day is not known yet. */
+export function dueBasisAnchor(
+  basis: DueBasis,
+  shoots: ReadonlyArray<NamedShootDate>,
+  today: string,
+): string | null {
+  if (basis === 'custom') return null
+  if (basis === 'after_project_created') return today
+  if (basis === 'after_wedding_day') return findWeddingShoot(shoots)?.shoot_date ?? null
+  const dated = shoots.map((s) => s.shoot_date).filter((d): d is string => !!d)
+  if (dated.length === 0) return null
+  return dated.reduce((latest, d) => (d > latest ? d : latest))
+}
+
+/**
+ * The promised date. Null when the anchor is unknown — an undated wedding
+ * gives no answer, and a guess would go on a quotation.
+ */
+export function deliverableDueDate(
+  basis: DueBasis,
+  shoots: ReadonlyArray<NamedShootDate>,
+  dueDays: number | undefined,
+  customDate: string | null,
+  today: string,
+): string | null {
+  if (basis === 'custom') return customDate?.trim() ? customDate : null
+  const anchor = dueBasisAnchor(basis, shoots, today)
+  if (anchor === null || dueDays === undefined) return null
+  return addDays(anchor, dueDays)
+}
+
+export interface DeliverableRule {
+  due_days: number
+  due_basis: DueBasis
+}
+
+/**
+ * How long this kind of thing usually takes, by its name.
+ *
+ * A reel is a week and an album is a quarter, and every studio knows it — so
+ * typing the title fills the days rather than making someone look them up.
+ * Longest match first, so "Full Wedding Film" is not read as "wedding film"
+ * and then, worse, as "film".
+ */
+const DELIVERABLE_RULES: ReadonlyArray<readonly [string, DeliverableRule]> = [
+  ['instagram reels pack', { due_days: 14, due_basis: 'after_wedding_day' }],
+  ['full ceremony video', { due_days: 45, due_basis: 'after_wedding_day' }],
+  ['reel / short video', { due_days: 7, due_basis: 'after_wedding_day' }],
+  ['full wedding film', { due_days: 60, due_basis: 'after_wedding_day' }],
+  ['traditional video', { due_days: 60, due_basis: 'after_wedding_day' }],
+  ['cinematic film', { due_days: 60, due_basis: 'after_wedding_day' }],
+  ['highlight film', { due_days: 30, due_basis: 'after_wedding_day' }],
+  ['wedding film', { due_days: 60, due_basis: 'after_wedding_day' }],
+  ['edited photos', { due_days: 30, due_basis: 'after_last_shoot' }],
+  ['candid photos', { due_days: 30, due_basis: 'after_last_shoot' }],
+  ['photo album', { due_days: 90, due_basis: 'after_wedding_day' }],
+  ['drone shots', { due_days: 14, due_basis: 'after_last_shoot' }],
+  ['raw photos', { due_days: 7, due_basis: 'after_last_shoot' }],
+  ['teaser', { due_days: 7, due_basis: 'after_wedding_day' }],
+  ['reel', { due_days: 7, due_basis: 'after_wedding_day' }],
+]
+
+export const DEFAULT_DELIVERABLE_RULE: DeliverableRule = {
+  due_days: 30,
+  due_basis: 'after_wedding_day',
+}
+
+export function deliverableRuleForTitle(title: string): DeliverableRule {
+  const key = title.trim().toLowerCase()
+  if (!key) return DEFAULT_DELIVERABLE_RULE
+  const hit = DELIVERABLE_RULES.find(([name]) => key === name) ??
+    DELIVERABLE_RULES.find(([name]) => key.includes(name))
+  return hit ? hit[1] : DEFAULT_DELIVERABLE_RULE
+}
+
+/**
+ * How soon internal work is due once its data lands, by its name.
+ *
+ * Backing up cards is a day; a film is a month. Same idea as the rule above,
+ * on the production side of the deliverable rather than the client side.
+ */
+export function internalLeadDaysForTitle(title: string): number {
+  const t = title.trim().toLowerCase()
+  if (/raw\s*(photo|foot|video|pic)/.test(t)) return 2
+  if (/(data\s*sort|sorting|data\s*copy|copy\s*data|backup)/.test(t)) return 1
+  if (/(film|long\s*video|full\s*video|cinematic)/.test(t)) return 30
+  return 7
+}
