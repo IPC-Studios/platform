@@ -267,7 +267,9 @@ export const teamTermsRouter = new Hono<AppEnv>()
     )
     if (!issued) fail(400, 'We could not send these terms.')
 
-    const link = `${c.env.APP_URL}/team-terms/${issued.token}`
+    // Query param, not a path: the public page reads `?token=` the same way
+    // the client-terms page has since 0017, and one shape is enough.
+    const link = `${c.env.APP_URL}/team-terms?token=${issued.token}`
     let email: 'sent' | 'skipped' | 'failed' = 'skipped'
     if (d.send_email && d.recipient_email) {
       const ok = await sendTeamTermsEmail(c.env, d.recipient_email, link, {

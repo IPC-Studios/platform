@@ -210,6 +210,22 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'GET' && path.startsWith('/public/team-terms/')) return publicTeamTermsFx
+  if (method === 'POST' && /^\/public\/team-terms\/[^/]+\/ack$/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/team-terms/templates'))
+    return path.includes('archived=1') ? [] : atStage(teamTermsFx, 'partial')
+  if (method === 'POST' && path === '/team-terms/templates') return { id: uid(0xb9) }
+  if (method === 'PATCH' && path.startsWith('/team-terms/templates/')) return { ok: true }
+  if (method === 'POST' && /\/team-terms\/templates\/[^/]+\/archive/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/team-terms/sends')) return atStage(teamTermsSendsFx, 'full')
+  if (method === 'POST' && path === '/team-terms/sends')
+    return {
+      send_id: uid(0xba),
+      link: 'http://localhost:5173/team-terms?token=demo-token',
+      expires_at: '2026-12-31T00:00:00Z',
+      email: 'skipped' as const,
+    }
+  if (method === 'POST' && /\/team-terms\/sends\/[^/]+\/revoke/.test(path)) return { ok: true }
   if (method === 'GET' && path === '/team/role-library') return roleLibraryFx
   if (method === 'GET' && path === '/team/roles') return atStage(employeeRoles, 'partial')
   // Echoes the request so a role added from the library comes back under the
@@ -886,6 +902,82 @@ const deliverableSetsFx = [
   },
 ]
 
+const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
+
+const publicTeamTermsFx = {
+  status: 'viewed' as const,
+  mode: 'acknowledgement_required' as const,
+  recipient_name: 'Anita Desai',
+  role_name: 'Photographer',
+  rendered_body:
+    'Photographer & Cinematographer Undertaking\n\nThis undertaking is executed on 2026-07-20 between Demo Studio, having its office at 12 MG Road, Mumbai (the "Company"), and Anita Desai (the "Team Member"), assigned as Photographer for Engagement shoot under project Sharma Wedding scheduled on 2026-08-10.\n\nConfidential Information\nThe Team Member shall maintain strict confidentiality of all client and project information.\n\nAcknowledgement\nBy acknowledging this document electronically, the Team Member confirms that they have read, understood, and agreed to all terms above.',
+  acknowledged_at: null,
+  acknowledged_by_name: null,
+  expires_at: '2026-09-18T09:00:00Z',
+  shoot_name: 'Engagement shoot',
+  shoot_date: '2026-08-10',
+  project_name: 'Sharma Wedding',
+  company_name: 'Demo Studio',
+}
+
+const teamTermsFx = [
+  {
+    id: uid(0xb1),
+    title: 'Photographer & Cinematographer Undertaking',
+    description: 'For anyone shooting on the day.',
+    body: 'The Team Member is booked as {{role}} for {{shoot_name}} on {{shoot_date}}.',
+    mode: 'acknowledgement_required' as const,
+    validity_days: 60,
+    category: 'production' as const,
+    version: 2,
+    is_active: true,
+    archived_at: null,
+    role_ids: [ROLE.photographer],
+    send_count: 3,
+  },
+  {
+    id: uid(0xb2),
+    title: 'Shoot Day Call Sheet',
+    description: 'Reporting time and dress code. Nothing to sign.',
+    body: 'Report by {{reporting_time}} at {{shoot_name}}.',
+    mode: 'send_only' as const,
+    validity_days: null,
+    category: 'general' as const,
+    version: 1,
+    is_active: true,
+    archived_at: null,
+    role_ids: [],
+    send_count: 0,
+  },
+]
+
+const teamTermsSendsFx = [
+  {
+    id: uid(0xb5),
+    shoot_id: uid(0x61),
+    shoot_name: 'Engagement shoot',
+    shoot_date: '2026-08-10',
+    project_id: PROJ.p1,
+    user_id: uid(0x3),
+    role_name: 'Photographer',
+    template_id: uid(0xb1),
+    template_title: 'Photographer & Cinematographer Undertaking',
+    template_version: 2,
+    mode: 'acknowledgement_required' as const,
+    recipient_name: 'Rahul Sharma',
+    recipient_email: 'rahul@demostudio.in',
+    recipient_phone: null,
+    status: 'acknowledged' as const,
+    sent_via: 'email',
+    sent_at: '2026-07-20T09:00:00Z',
+    viewed_at: '2026-07-20T10:15:00Z',
+    acknowledged_at: '2026-07-20T10:18:00Z',
+    acknowledged_by_name: 'Rahul Sharma',
+    expires_at: '2026-09-18T09:00:00Z',
+    created_at: '2026-07-20T09:00:00Z',
+  },
+]
+
 const servicesFx = [
   { id: uid(0x71), name: 'Photographer' },
   { id: uid(0x72), name: 'Cinematographer' },
@@ -957,7 +1049,6 @@ const companyFx = {
   invoice_gst_number: '27ABCDE1234F1Z5',
 }
 
-const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
 
 const employeeRoles = [
   {

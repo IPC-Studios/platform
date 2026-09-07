@@ -35,8 +35,10 @@ import { EmployeesPage } from '@/routes/employees'
 import { SubscriptionPage } from '@/routes/subscription'
 import { SettingsPage } from '@/routes/settings'
 import { RolesAccessPage } from '@/routes/settings/roles'
+import { TeamTermsPage } from '@/routes/settings/team-terms'
 import { AppearancePage } from '@/routes/settings/appearance'
 import { TermsAcknowledgePage } from '@/routes/terms-acknowledge'
+import { TeamTermsAcknowledgePage } from '@/routes/team-terms-acknowledge'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
@@ -109,6 +111,7 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
+  publicRoute('/team-terms', TeamTermsAcknowledgePage),
 
   renewalLayout.addChildren([
     createRoute({
@@ -150,6 +153,7 @@ const routeTree = rootRoute.addChildren([
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
+  route('/settings/team-terms', TeamTermsPage),
   route('/settings/appearance', AppearancePage),
   route('/settings/system', SystemPage),
   route('/platform/studios', PlatformStudiosPage),
