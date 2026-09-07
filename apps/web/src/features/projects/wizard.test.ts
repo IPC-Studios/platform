@@ -25,8 +25,8 @@ import {
   shootStartAt,
   nextStep,
   prevStep,
-  recallLeadDays,
-  rememberLeadDays,
+  recallDueDays,
+  rememberDueDays,
   stepErrors,
   toProjectRequest,
   toShootRequests,
@@ -140,20 +140,27 @@ describe('estimatedDateFor', () => {
     ],
   })
 
-  it('dates a whole-project deliverable from the last shoot', () => {
-    const d = { ...newDeliverable(), title: 'Album', lead_days: '45' }
+  it('dates a deliverable from the last shoot', () => {
+    const d = { ...newDeliverable(), title: 'Album', due_basis: 'after_last_shoot' as const, due_days: '45' }
     expect(estimatedDateFor(twoShoots, d)).toBe('2027-01-06')
   })
 
-  it('dates a pinned deliverable from its own shoot', () => {
-    const d = { ...newDeliverable(), title: 'Teaser', start_rule: 'this_shoot' as const, shoot_index: 0, lead_days: '7' }
-    expect(estimatedDateFor(twoShoots, d)).toBe('2026-11-27')
+  it('dates one promised off the wedding from the wedding, not the last day', () => {
+    const d = { ...newDeliverable(), title: 'Teaser', due_days: '7' }
+    expect(estimatedDateFor(twoShoots, d)).toBe('2026-11-29')
   })
 
-  it('stays unknown without shoots or without a lead time', () => {
-    const d = { ...newDeliverable(), title: 'Album', lead_days: '45' }
+  // The production clock is a separate field, and moving it must not move what
+  // the client was told.
+  it('ignores the internal lead time', () => {
+    const d = { ...newDeliverable(), title: 'Album', due_days: '45', lead_days: '3' }
+    expect(estimatedDateFor(twoShoots, d)).toBe('2027-01-06')
+  })
+
+  it('stays unknown without shoots or without a day count', () => {
+    const d = { ...newDeliverable(), title: 'Album', due_days: '45' }
     expect(estimatedDateFor(named(), d)).toBeNull()
-    expect(estimatedDateFor(twoShoots, { ...d, lead_days: '' })).toBeNull()
+    expect(estimatedDateFor(twoShoots, { ...d, due_days: '' })).toBeNull()
   })
 })
 
@@ -182,11 +189,11 @@ describe('toProjectRequest', () => {
   it('carries the computed delivery date onto the payload', () => {
     const d = named({
       shoots: [{ ...newShoot(), name: 'Wedding', shoot_date: '2026-11-22' }],
-      deliverables: [{ ...newDeliverable(), title: 'Album', lead_days: '45' }],
+      deliverables: [{ ...newDeliverable(), title: 'Album', due_days: '45', lead_days: '7' }],
     })
     const sent = toProjectRequest(d, 'c1').deliverables[0]!
     expect(sent.estimated_date).toBe('2027-01-06')
-    expect(sent.delivery_days_after_start).toBe(45)
+    expect(sent.delivery_days_after_start).toBe(7)
   })
 
   it('omits optional fields rather than sending blanks', () => {
@@ -484,19 +491,20 @@ describe('lead-time memory', () => {
   beforeEach(() => store.clear())
 
   it('recalls the days last used for a title, however it was cased', () => {
-    rememberLeadDays('Photo Album', '45')
-    expect(recallLeadDays('photo album')).toBe('45')
-    expect(newClientDeliverable('Photo Album').lead_days).toBe('45')
+    rememberDueDays('Photo Album', '45')
+    expect(recallDueDays('photo album')).toBe('45')
+    expect(newClientDeliverable('Photo Album').due_days).toBe('45')
   })
 
   it('has nothing to say about a title it has not seen', () => {
-    expect(recallLeadDays('Drone Shots')).toBe('')
-    expect(newClientDeliverable('Drone Shots').lead_days).toBe('')
+    expect(recallDueDays('Drone Shots')).toBe('')
+    // Falls back to what the trade does for drone work, not to blank.
+    expect(newClientDeliverable('Drone Shots').due_days).toBe('14')
   })
 
   it('ignores a blank on either side rather than storing it', () => {
-    rememberLeadDays('  ', '45')
-    rememberLeadDays('Teaser', '  ')
-    expect(recallLeadDays('Teaser')).toBe('')
+    rememberDueDays('  ', '45')
+    rememberDueDays('Teaser', '  ')
+    expect(recallDueDays('Teaser')).toBe('')
   })
 })

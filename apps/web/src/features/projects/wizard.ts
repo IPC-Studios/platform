@@ -1,7 +1,10 @@
 import {
+  deliverableDueDate,
+  deliverableRuleForTitle,
   computeProjectTotals,
-  deliverableEstimatedDate,
+  internalLeadDaysForTitle,
   type DeliverableForTotal,
+  type DueBasis,
 } from '@ipc/domain'
 import type { CreateProjectRequest, CreateShootRequest, DeliverableInput } from '@ipc/contracts'
 
@@ -55,6 +58,18 @@ export interface ShootDraft {
 
 export interface DeliverableDraft {
   title: string
+  /** The brief for whoever picks the work up. Never printed for the client. */
+  description: string
+  /**
+   * The client-facing promise: this many days after the basis below. Separate
+   * from `lead_days`, which is production's clock — "45 days after the wedding"
+   * and "7 days after the footage lands" are different sentences, and a studio
+   * says both.
+   */
+  due_days: string
+  due_basis: DueBasis
+  /** Only read when the basis is 'custom'. */
+  custom_date: string
   is_additional_charge: boolean
   additional_charge_amount: string
   visibility_scope: 'client' | 'internal'
@@ -184,6 +199,10 @@ export function withShoots(existing: ShootDraft[], names: readonly string[]): Sh
 
 export const newDeliverable = (): DeliverableDraft => ({
   title: '',
+  description: '',
+  due_days: '',
+  due_basis: 'after_wedding_day',
+  custom_date: '',
   is_additional_charge: false,
   additional_charge_amount: '',
   visibility_scope: 'client',
@@ -206,13 +225,25 @@ const days = (v: string): number | undefined => {
   return v.trim() === '' || Number.isNaN(n) ? undefined : Math.max(0, Math.trunc(n))
 }
 
-/** The date a deliverable lands on, given the draft's shoots. Null = unknown. */
+/** Today as "YYYY-MM-DD", for a basis counted from the project itself. */
+const todayISO = (): string => {
+  const at = new Date()
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * The date a deliverable lands on. Null = unknown.
+ *
+ * Read off the client promise, not the production clock: this is the date that
+ * goes on the quotation, so it has to be the one the studio said out loud.
+ */
 export function estimatedDateFor(draft: ProjectDraft, d: DeliverableDraft): string | null {
-  return deliverableEstimatedDate(
-    d.start_rule,
-    draft.shoots.map((s) => ({ shoot_date: s.shoot_date || null })),
-    days(d.lead_days),
-    d.shoot_index ?? undefined,
+  return deliverableDueDate(
+    d.due_basis,
+    draft.shoots.map((s) => ({ name: s.name, shoot_date: s.shoot_date || null })),
+    days(d.due_days),
+    d.custom_date || null,
+    todayISO(),
   )
 }
 
@@ -310,6 +341,7 @@ export function toProjectRequest(draft: ProjectDraft, clientId: string): CreateP
       return {
         title: d.title.trim(),
         list_key: 'primary',
+        ...(d.description.trim() ? { description: d.description.trim() } : {}),
         is_additional_charge: d.is_additional_charge,
         additional_charge_amount: d.is_additional_charge ? money(d.additional_charge_amount) : 0,
         visibility_scope: d.visibility_scope,
@@ -393,9 +425,14 @@ export function internalWorkSuggestions(shootName: string): string[] {
  * client is not buying "data sorting" — they are buying the album it feeds.
  */
 export function newInternalWork(shootIndex: number, title = ''): DeliverableDraft {
+  const rule = deliverableRuleForTitle(title)
   return {
     ...newDeliverable(),
     title,
+    ...(title.trim()
+      ? { due_days: String(rule.due_days), due_basis: rule.due_basis }
+      : {}),
+    lead_days: title.trim() ? String(internalLeadDaysForTitle(title)) : '',
     visibility_scope: 'internal',
     show_on_quotation: false,
     start_rule: 'this_shoot',
@@ -554,14 +591,14 @@ function readLeadMemory(): Record<string, string> {
   }
 }
 
-export function recallLeadDays(title: string): string {
+export function recallDueDays(title: string): string {
   const key = title.trim().toLowerCase()
   return key ? (readLeadMemory()[key] ?? '') : ''
 }
 
-export function rememberLeadDays(title: string, leadDays: string): void {
+export function rememberDueDays(title: string, dueDays: string): void {
   const key = title.trim().toLowerCase()
-  const value = leadDays.trim()
+  const value = dueDays.trim()
   if (!key || !value) return
   try {
     globalThis.localStorage?.setItem(LEAD_KEY, JSON.stringify({ ...readLeadMemory(), [key]: value }))
@@ -570,9 +607,19 @@ export function rememberLeadDays(title: string, leadDays: string): void {
   }
 }
 
-/** A client line item, with the lead time this studio last used for it. */
+/**
+ * A client line item, timed the way this studio times that thing: what they
+ * used last, else what the trade generally does.
+ */
 export function newClientDeliverable(title = ''): DeliverableDraft {
-  return { ...newDeliverable(), title, lead_days: recallLeadDays(title) }
+  const rule = deliverableRuleForTitle(title)
+  const remembered = recallDueDays(title)
+  return {
+    ...newDeliverable(),
+    title,
+    due_days: remembered || (title.trim() ? String(rule.due_days) : ''),
+    due_basis: rule.due_basis,
+  }
 }
 
 /** An extra billed on top of the package. */
@@ -658,7 +705,11 @@ export function loadDraft(): StoredDraft | null {
     // the card would map over undefined.
     const draft = { ...EMPTY_DRAFT, ...parsed.draft }
     return {
-      draft: { ...draft, shoots: draft.shoots.map((s) => ({ ...newShoot(), ...s })) },
+      draft: {
+        ...draft,
+        shoots: draft.shoots.map((s) => ({ ...newShoot(), ...s })),
+        deliverables: draft.deliverables.map((d) => ({ ...newDeliverable(), ...d })),
+      },
       savedAt: parsed.savedAt,
     }
   } catch {
