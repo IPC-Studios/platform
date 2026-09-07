@@ -19,7 +19,7 @@ import { SkeletonCards } from '@/shared/ui/skeleton'
 import { ErrorState } from '@/shared/ui/states'
 import { formatINR } from '@/shared/ui/format'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useActivities, useMoveStage, usePipelines, useUpdateActivity } from '../api'
+import { useActivities, useCrmPrefs, useMoveStage, usePipelines, useUpdateActivity, useUpdateCrmPrefs } from '../api'
 import { taskDueBy } from '@ipc/domain'
 import { Check, ClipboardList } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
@@ -118,15 +118,24 @@ export function PipelineTab({ leads, onOpen }: { leads: readonly CrmLead[]; onOp
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const [pick, setPick] = useState<string | null>(null)
   const [losing, setLosing] = useState<{ leadId: string; stageId: string } | null>(null)
+  // Which pipeline this person works in is remembered; the board used to
+  // snap back to the default on every visit.
+  const prefs = useCrmPrefs()
+  const savePrefs = useUpdateCrmPrefs()
 
   const list = pipelines.data ?? []
-  const current = list.find((p) => p.id === pick) ?? list.find((p) => p.is_default) ?? list[0] ?? null
+  const remembered = list.find((p) => p.id === prefs.data?.pipeline_id) ?? null
+  const current = list.find((p) => p.id === pick) ?? remembered ?? list.find((p) => p.is_default) ?? list[0] ?? null
   const stages = useMemo(() => (current ? sortStages(current.stages) : []), [current])
   const inPipeline = useMemo(
     () => leads.filter((l) => (current ? l.pipeline_id === current.id || (l.pipeline_id === null && current.is_default) : true)),
     [leads, current],
   )
   const total = useMemo(() => inPipeline.reduce((sum, l) => sum + (l.deal_value ?? 0), 0), [inPipeline])
+  const unplaced = useMemo(
+    () => inPipeline.filter((l) => !stages.some((s) => s.id === l.stage_id)),
+    [inPipeline, stages],
+  )
 
   function attemptMove(lead: CrmLead, stage: PipelineStage) {
     if (stage.kind === 'lost') {
@@ -160,7 +169,15 @@ export function PipelineTab({ leads, onOpen }: { leads: readonly CrmLead[]; onOp
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         {list.length > 1 && (
-          <Select value={current.id} onChange={(e) => setPick(e.target.value)} className="w-56" aria-label="Pipeline">
+          <Select
+            value={current.id}
+            onChange={(e) => {
+              setPick(e.target.value)
+              savePrefs.mutate({ pipeline_id: e.target.value })
+            }}
+            className="w-56"
+            aria-label="Pipeline"
+          >
             {list.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -174,6 +191,26 @@ export function PipelineTab({ leads, onOpen }: { leads: readonly CrmLead[]; onOp
           {canEdit ? ' · drag a card to move it' : ''}
         </p>
       </div>
+
+      {unplaced.length > 0 && (
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+          <p className="font-medium">
+            {unplaced.length} deal{unplaced.length === 1 ? '' : 's'} not in a column
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            They sit in another pipeline, or have no stage yet. The totals above count them.
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {unplaced.map((l) => (
+              <li key={l.id}>
+                <button type="button" onClick={() => onOpen(l.id)} className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-accent">
+                  {l.title ?? l.name ?? l.phone ?? 'Unnamed deal'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">

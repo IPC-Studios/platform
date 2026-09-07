@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Pencil, Search, Users, X } from 'lucide-react'
+import { Bookmark, BookmarkPlus, Columns3, Download, Globe, Pencil, Save, Search, Users, X } from 'lucide-react'
 import type { CrmLead, InboxColumn, LeadStatus, SavedViewVisibility } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Input, Select } from '@/shared/ui/input'
@@ -253,6 +253,33 @@ export function InboxTab({
                           <span className="sr-only">Rename {v.name}</span>
                         </button>
                       )}
+                      {canManage && isSaveable(query) && (
+                        <button
+                          type="button"
+                          title={`Save the filters on screen into ${v.name}`}
+                          onClick={() => updateView.mutate({ id: v.id, patch: { query: toSavedQuery(query) } })}
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Save className="size-3" />
+                          <span className="sr-only">Update {v.name} with the current filters</span>
+                        </button>
+                      )}
+                      {canManage && canShare && (
+                        <button
+                          type="button"
+                          title={`Shared with ${SCOPE_LABEL[v.visibility]} — click to change`}
+                          onClick={() =>
+                            updateView.mutate({
+                              id: v.id,
+                              patch: { visibility: v.visibility === 'private' ? 'team' : v.visibility === 'team' ? 'everyone' : 'private' },
+                            })
+                          }
+                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Users className="size-3" />
+                          <span className="sr-only">Change who can see {v.name}</span>
+                        </button>
+                      )}
                       {canManage ? (
                         <button type="button" onClick={() => deleteView.mutate(v.id)} className="rounded-full p-0.5 text-muted-foreground hover:text-destructive">
                           <X className="size-3" />
@@ -408,6 +435,27 @@ export function InboxTab({
           <Button size="sm" variant="outline" disabled={bulk.isPending} onClick={() => runBulk({ is_hot: true })}>
             Mark hot
           </Button>
+          <Select
+            value=""
+            aria-label="Set the follow-up"
+            className="w-40"
+            onChange={(e) => {
+              const days = e.target.value
+              if (!days) return
+              if (days === 'clear') return runBulk({ follow_up_at: null })
+              const at = new Date()
+              at.setDate(at.getDate() + Number(days))
+              at.setHours(10, 0, 0, 0)
+              runBulk({ follow_up_at: at.toISOString() })
+            }}
+          >
+            <option value="">Follow up…</option>
+            <option value="0">Today</option>
+            <option value="1">Tomorrow</option>
+            <option value="3">In 3 days</option>
+            <option value="7">Next week</option>
+            <option value="clear">Clear the date</option>
+          </Select>
           {(workflows.data ?? []).some((w) => w.is_active) && (
             <Select
               value=""
@@ -437,6 +485,11 @@ export function InboxTab({
         </div>
       )}
 
+      {leads.length >= 2000 && (
+        <p className="text-xs text-muted-foreground">
+          Showing the {leads.length.toLocaleString('en-IN')} most recent leads. Older ones are still in reports and on a contact.
+        </p>
+      )}
       <LeadTable leads={rows} now={now} total={leads.length} onOpen={onOpen} selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll} hotScore={settings.data?.hot_score ?? 60} columns={columns} density={density} />
 
       <LostReasonDialog
