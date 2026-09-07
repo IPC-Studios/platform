@@ -51,5 +51,22 @@ export const attendanceDayRow = z.object({
   status: attendanceStatus,
   check_in_at: isoDateTime.nullable(),
   check_out_at: isoDateTime.nullable(),
+  /** Set when an owner or admin corrected the day by hand. */
+  corrected_by: uuid.nullable().default(null),
+  correction_note: z.string().nullable().default(null),
 })
 export type AttendanceDayRow = z.infer<typeof attendanceDayRow>
+
+/** An owner or admin fixing one person's day: forgot to tap in, wrong side of the fence. */
+export const setAttendanceRequest = z
+  .object({
+    status: attendanceStatus,
+    check_in_at: isoDateTime.nullable().optional(),
+    check_out_at: isoDateTime.nullable().optional(),
+    note: z.string().trim().max(300).optional(),
+  })
+  .refine(
+    (v) => !v.check_in_at || !v.check_out_at || new Date(v.check_out_at) >= new Date(v.check_in_at),
+    { message: 'Check-out must be after check-in.', path: ['check_out_at'] },
+  )
+export type SetAttendanceRequest = z.infer<typeof setAttendanceRequest>

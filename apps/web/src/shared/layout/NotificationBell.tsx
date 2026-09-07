@@ -1,26 +1,22 @@
 import { Link } from '@tanstack/react-router'
 import { Bell } from 'lucide-react'
 import { useNotifications, unreadCount } from '@/features/crm/notifications'
-import { useAccess } from '../auth/useAccess'
 import { cn } from '../ui/cn'
 
 /**
  * Alerts, with the count on the bell.
  *
  * The page existed already but nothing pointed at it except a sidebar row, so
- * an unread alert was only ever found by going looking for one. Gated on the
- * same module as that row, so the bell cannot offer a page this account would
- * be bounced out of.
+ * an unread alert was only ever found by going looking for one. Ungated, like
+ * that row: reminders and overdue follow-ups land on whoever owns the work,
+ * not only on the people who can open the CRM.
  *
  * A failed or still-loading fetch shows a plain bell — never a zero, which
  * reads as "checked, nothing there" when nothing has been checked.
  */
 export function NotificationBell() {
-  const access = useAccess()
   const { data } = useNotifications()
   const unread = unreadCount(data)
-
-  if (!access.hasModule('crm')) return null
 
   return (
     <Link

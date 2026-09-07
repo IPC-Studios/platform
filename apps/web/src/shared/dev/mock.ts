@@ -277,7 +277,51 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
-  if (method === 'GET' && path === '/crm/leads') return atStage(leads, 'partial')
+  if (method === 'GET' && (path === '/crm/leads' || path.startsWith('/crm/leads?')))
+    return atStage(leads, 'partial')
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/events$/.test(path)) return crmEventsFx
+  if (method === 'POST' && /^\/crm\/leads\/[^/]+\/send-template$/.test(path))
+    return { url: 'https://wa.me/919876543210?text=Hi', rendered: 'Hi', delivery: 'link' }
+  if (method === 'POST' && path === '/crm/leads/bulk') return { updated: 0, previous: [] }
+  if (method === 'POST' && path === '/crm/leads/bulk/undo') return { restored: 0 }
+  if (method === 'POST' && path === '/crm/leads/merge') return { merged: 1 }
+  if (method === 'POST' && path === '/crm/leads/unmerge') return { restored: 1 }
+  if (method === 'GET' && path === '/crm/duplicates') return []
+  if (method === 'GET' && path === '/crm/templates') return crmTemplatesFx
+  if (method === 'POST' && path === '/crm/templates')
+    return { ...crmTemplatesFx[0], id: uid(0xc8), ...(body as Record<string, unknown>) }
+  if (method === 'DELETE' && path.startsWith('/crm/templates/')) return {}
+  if (method === 'GET' && path === '/crm/automations') return crmAutomationsFx
+  if (method === 'POST' && path === '/crm/automations')
+    return { ...crmAutomationsFx[0], id: uid(0xc9), ...(body as Record<string, unknown>) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/automations/')) return {}
+  if (method === 'GET' && path.startsWith('/crm/stats')) return crmStatsFx
+  if (method === 'GET' && path.startsWith('/crm/team-stats')) return crmTeamStatsFx
+  if (method === 'POST' && path === '/crm/imports/preview') return crmPreviewFx
+  if (method === 'POST' && path === '/crm/imports/commit')
+    return { created: 1, skipped: 0, invalid: 0, ids: [uid(0xbe)] }
+  if (method === 'POST' && path === '/crm/distribution') return { id: uid(0xca) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/distribution/')) return {}
+  if (method === 'GET' && path === '/crm/views') return crmViewsFx
+  if (method === 'POST' && path === '/crm/views')
+    return { ...crmViewsFx[0], id: uid(0xcb), ...(body as Record<string, unknown>) }
+  if (method === 'DELETE' && path.startsWith('/crm/views/')) return {}
+  if (method === 'GET' && path === '/crm/settings') return { sla_hours: 24 }
+  if (method === 'PATCH' && path === '/crm/settings') return { sla_hours: 24, ...(body as Record<string, unknown>) }
+  if (method === 'GET' && path === '/crm/cadences') return crmCadencesFx
+  if (method === 'POST' && path === '/crm/cadences') return { id: uid(0xcc) }
+  if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/crm/cadences/')) return {}
+  if (method === 'GET' && /^\/crm\/leads\/[^/]+\/cadence$/.test(path)) return null
+  if (method === 'POST' && /^\/crm\/leads\/[^/]+\/cadence$/.test(path)) return { next_at: '2026-09-07T04:30:00Z' }
+  if (method === 'DELETE' && /^\/crm\/leads\/[^/]+\/cadence$/.test(path)) return {}
+  if (method === 'POST' && /^\/crm\/leads\/[^/]+\/convert$/.test(path))
+    return { client_id: CLIENT.sharma, project_id: PROJ.p1 }
+  if (method === 'GET' && path.startsWith('/cron/runs')) return cronRunsFx
+  if (method === 'GET' && path.startsWith('/settings/audit')) return auditFx
+  if (method === 'POST' && path === '/auth/change-password')
+    return { access_token: 'mock-token', refresh_token: 'mock-refresh', token_type: 'bearer', expires_in: 1800 }
+  if (method === 'GET' && path === '/shoots/my') return shootsFx
+  if (method === 'PUT' && path.startsWith('/hr/attendance/')) return { id: uid(0xc2) }
   if (method === 'GET' && path === '/crm/distribution') return atStage(distributionFx, 'partial')
   if (method === 'GET' && path === '/crm/sources') return atStage(sourcesFx, 'partial')
   if (method === 'POST' && path === '/crm/sources')
@@ -1156,3 +1200,154 @@ function delv(
     status: 'in_progress',
   }
 }
+
+
+const crmEventsFx = [
+  {
+    id: uid(0xe0),
+    lead_id: uid(0xb1),
+    from_status: null,
+    to_status: 'new',
+    actor_id: null,
+    actor_name: null,
+    note: 'created',
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]
+
+const crmTemplatesFx = [
+  {
+    id: uid(0xc5),
+    name: 'First follow-up',
+    body: 'Hi {{name}}, thanks for reaching out to {{studio}}!',
+    kind: 'whatsapp',
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]
+
+const crmAutomationsFx = [
+  {
+    id: uid(0xc6),
+    name: 'Hot Facebook leads',
+    trigger: 'lead_created',
+    condition: { source: 'facebook' },
+    action: 'mark_hot',
+    action_value: {},
+    is_active: true,
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]
+
+const crmStatsFx = {
+  from: '2026-08-01',
+  to: '2026-08-31',
+  total: 4,
+  overdue: 1,
+  uncontacted: 1,
+  created: 4,
+  won: 1,
+  lost: 0,
+  conversion_rate: 0.25,
+  byStatus: { new: 1, contacted: 1, proposal_sent: 1, converted: 1 },
+  bySource: { facebook: 2, enquiry: 2 },
+}
+
+const crmTeamStatsFx = [
+  {
+    user_id: uid(0xe1),
+    user_name: 'Rahul',
+    open: 2,
+    overdue: 1,
+    due_today: 0,
+    uncontacted: 1,
+    hot: 1,
+    created: 2,
+    won: 1,
+    lost: 0,
+    within_sla: 2,
+    sla_hours: 24,
+    avg_first_response_hours: 3.5,
+  },
+]
+
+const crmPreviewFx = {
+  columns: ['name', 'phone', 'email', 'notes'],
+  rows: [
+    {
+      row: 2,
+      name: 'Priya',
+      phone: '9876543210',
+      email: 'priya@test.in',
+      source: 'manual',
+      notes: 'Interested',
+      valid: true,
+      error: null,
+      phone_norm: '919876543210',
+      is_duplicate: false,
+    },
+  ],
+  total: 1,
+  valid: 1,
+  duplicates: 0,
+}
+
+const cronRunsFx = [
+  {
+    id: uid(0xd9),
+    job_name: 'reminder_cron',
+    started_at: '2026-09-05T08:00:00Z',
+    finished_at: '2026-09-05T08:00:01Z',
+    dry_run: false,
+    summary: { reminders_due: 2, notifications_created: 1 },
+  },
+  {
+    id: uid(0xda),
+    job_name: 'crm_followup_cron',
+    started_at: '2026-09-05T08:00:01Z',
+    finished_at: '2026-09-05T08:00:02Z',
+    dry_run: false,
+    summary: { overdue: 1, notified: 1, rules_applied: 0 },
+  },
+]
+
+const auditFx = {
+  items: [
+    {
+      id: uid(0xdb),
+      actor_user_id: uid(1),
+      actor_name: 'Demo Owner',
+      action: 'company.update',
+      entity_type: 'company',
+      entity_id: uid(0xaa),
+      before: { name: 'Demo' },
+      after: { name: 'Demo Studio' },
+      ip: '127.0.0.1',
+      correlation_id: 'req-demo-1',
+      created_at: '2026-09-05T07:30:00Z',
+    },
+  ],
+  next_cursor: null,
+}
+
+const crmViewsFx = [
+  {
+    id: uid(0xca),
+    name: 'My overdue',
+    query: { search: '', filters: ['overdue'], status: 'all', assignee: 'all' },
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]
+
+const crmCadencesFx = [
+  {
+    id: uid(0xcd),
+    name: 'Wedding enquiry follow-up',
+    is_active: true,
+    steps: [
+      { id: uid(0xce), step_no: 1, day_offset: 0, template_id: null, template_name: null, note: 'Call and confirm the date' },
+      { id: uid(0xcf), step_no: 2, day_offset: 3, template_id: uid(0xc5), template_name: 'First follow-up', note: null },
+    ],
+    active_leads: 1,
+    created_at: '2026-08-01T09:00:00Z',
+  },
+]

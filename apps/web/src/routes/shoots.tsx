@@ -168,7 +168,11 @@ function ShootDialog() {
               <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Venue" />
             </div>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

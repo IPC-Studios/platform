@@ -170,7 +170,11 @@ function BookDialog() {
               This member already has {conflicts.length} booking(s) that overlap this window.
             </p>
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
 
           <div className="mt-2 flex justify-end gap-2">
             <DialogClose asChild>

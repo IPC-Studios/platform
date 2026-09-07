@@ -65,8 +65,13 @@ async function freshDb() {
   await db.exec(mig('0029_lead_sources.sql'))
   await db.exec(mig('0030_attendance_ops.sql'))
   await db.exec(mig('0031_task_bundles.sql'))
-  await db.exec(mig('0032_shoot_details.sql'))
-  await db.exec(mig('0033_deliverable_sets.sql'))
+  await db.exec(mig('0032_crm_v2.sql'))
+  await db.exec(mig('0033_auth_hardening.sql'))
+  await db.exec(mig('0034_plan_gate_and_audit.sql'))
+  await db.exec(mig('0035_crm_v3.sql'))
+  await db.exec(mig('0036_crm_v4.sql'))
+  await db.exec(mig('0038_shoot_details.sql'))
+  await db.exec(mig('0039_deliverable_sets.sql'))
   return db
 }
 
@@ -1842,7 +1847,7 @@ describe('task bundles (0031)', () => {
   })
 })
 
-describe('shoot details (0032)', () => {
+describe('shoot details (0038)', () => {
   let db: PGlite
   beforeAll(async () => {
     db = await freshDb()
@@ -1903,7 +1908,7 @@ describe('shoot details (0032)', () => {
   })
 })
 
-describe('deliverable sets (0033)', () => {
+describe('deliverable sets (0039)', () => {
   let db: PGlite
   beforeAll(async () => {
     db = await freshDb()
@@ -1943,5 +1948,623 @@ describe('deliverable sets (0033)', () => {
     await db.exec(`delete from companies;`)
     const after = await db.query(`select 1 from deliverable_sets;`)
     expect(after.rows).toHaveLength(0)
+  })
+})
+
+describe('plan gate sits on feature access, not identity (0034)', () => {
+  let db: PGlite
+  const owner = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+  const member = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+  let planId: string
+
+  const rotate = async (raw: string) =>
+    (
+      await db.query<{ user_id: string | null; token: string | null }>(
+        `select * from rotate_refresh_token('${raw}');`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@gate.test'),('${member}','member@gate.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Gate Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Member', 'member@gate.test');`,
+    )
+    const p = await db.query<{ id: string }>(
+      `insert into plans (key, name, price, billing_interval) values ('renew','Renew', 1000, 'monthly') returning id;`,
+    )
+    planId = p.rows[0]!.id
+    // Lapse the plan entirely: no expiry, no trial, no grace.
+    await db.exec(
+      `update companies set grandfathered_until = null, plan_expiry = null, grace_until = null
+       where id = get_current_company_id();`,
+    )
+  })
+
+  it('an expired studio still resolves its tenant, but is not "active"', async () => {
+    await asUser(db, owner)
+    const r = await db.query<{ company: string | null; active: boolean; owner: boolean }>(
+      `select get_current_company_id() as company, is_current_user_active() as active, is_current_owner() as owner;`,
+    )
+    expect(r.rows[0]!.company).not.toBeNull()
+    expect(r.rows[0]!.active).toBe(false)
+    expect(r.rows[0]!.owner).toBe(true)
+  })
+
+  it('the owner can start checkout while expired — the recovery path', async () => {
+    await asUser(db, owner)
+    const order = await db.query<{ order_id: string }>(
+      `select * from create_payment_order('${planId}');`,
+    )
+    expect(order.rows[0]!.order_id).toBeTruthy()
+    await db.query(`select * from activate_subscription('${order.rows[0]!.order_id}', 'pay_renew');`)
+    const active = await db.query<{ active: boolean }>(`select is_current_user_active() as active;`)
+    expect(active.rows[0]!.active).toBe(true)
+    // Back to lapsed for the tests below.
+    await db.exec(`update companies set plan_expiry = null where id = get_current_company_id();`)
+  })
+
+  it('get_auth_context reports the lapse so the app can route to renewal', async () => {
+    await asUser(db, owner)
+    const ctx = await db.query<{ plan_gate: string; company_id: string }>(
+      `select * from get_auth_context();`,
+    )
+    expect(ctx.rows[0]!.plan_gate).toBe('expired')
+    expect(ctx.rows[0]!.company_id).toBeTruthy()
+  })
+
+  it('a refresh session survives a lapsed plan', async () => {
+    const raw = (await db.query<{ t: string }>(`select issue_refresh_token('${owner}') as t;`))
+      .rows[0]!.t
+    const r = await rotate(raw)
+    expect(r.user_id).toBe(owner)
+    expect(r.token).not.toBeNull()
+  })
+
+  it('a refresh session does NOT survive a removed member', async () => {
+    const raw = (await db.query<{ t: string }>(`select issue_refresh_token('${member}') as t;`))
+      .rows[0]!.t
+    await db.exec(
+      `update users set deleted_at = now(), status = 'inactive' where user_id = '${member}';`,
+    )
+    const r = await rotate(raw)
+    expect(r.user_id).toBeNull()
+    const live = await db.query<{ n: number }>(
+      `select count(*)::int as n from refresh_tokens where user_id = '${member}' and revoked_at is null;`,
+    )
+    expect(live.rows[0]!.n).toBe(0)
+    // And the identity oracle no longer resolves them at all.
+    await asUser(db, member)
+    const ctx = await db.query(`select * from get_auth_context();`)
+    expect(ctx.rows.length).toBe(0)
+    const company = await db.query<{ c: string | null }>(`select get_current_company_id() as c;`)
+    expect(company.rows[0]!.c).toBeNull()
+  })
+
+  it('audit_log_write stamps the caller and their own studio', async () => {
+    await asUser(db, owner)
+    const id = (
+      await db.query<{ id: string }>(
+        `select audit_log_write('company.update', 'company', 'x', '{"name":"a"}'::jsonb, '{"name":"b"}'::jsonb, '127.0.0.1', 'req-1') as id;`,
+      )
+    ).rows[0]!.id
+    const row = await db.query<{
+      company_id: string
+      actor_user_id: string
+      action: string
+      correlation_id: string
+    }>(`select company_id, actor_user_id, action, correlation_id from audit_logs where id = '${id}';`)
+    expect(row.rows[0]!.actor_user_id).toBe(owner)
+    expect(row.rows[0]!.action).toBe('company.update')
+    expect(row.rows[0]!.correlation_id).toBe('req-1')
+    expect(row.rows[0]!.company_id).toBe(
+      (await db.query<{ c: string }>(`select get_current_company_id() as c;`)).rows[0]!.c,
+    )
+  })
+
+  it('audit_log_write refuses a caller with no studio', async () => {
+    await asUser(db, '99999999-9999-9999-9999-999999999999')
+    await expect(db.query(`select audit_log_write('x', 'y');`)).rejects.toThrow(/no company/i)
+  })
+})
+
+describe('CRM v2 — events, archive, merge, stats (0032 + 0034)', () => {
+  let db: PGlite
+  const owner = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  const events = async (leadId: string) =>
+    (
+      await db.query<{ from_status: string | null; to_status: string | null; note: string | null }>(
+        `select from_status, to_status, note from crm_lead_events where lead_id = '${leadId}' order by created_at;`,
+      )
+    ).rows
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@crm2.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM2 Studio','Owner');`)
+  })
+
+  it('a lead history starts at creation and records every stage move', async () => {
+    const id = await add('Aanya', '9876600001')
+    expect(await events(id)).toEqual([{ from_status: null, to_status: 'new', note: 'created' }])
+    await db.exec(`update crm_leads set status = 'contacted' where id = '${id}';`)
+    const trail = await events(id)
+    expect(trail).toHaveLength(2)
+    expect(trail[1]).toMatchObject({ from_status: 'new', to_status: 'contacted' })
+    const stamped = await db.query<{ stage_changed_at: string | null }>(
+      `select stage_changed_at from crm_leads where id = '${id}';`,
+    )
+    expect(stamped.rows[0]!.stage_changed_at).not.toBeNull()
+  })
+
+  it('archiving stamps archived_at, restoring clears it', async () => {
+    const id = await add('Rahul', '9876600002')
+    await db.exec(`update crm_leads set is_archived = true where id = '${id}';`)
+    let r = await db.query<{ archived_at: string | null }>(
+      `select archived_at from crm_leads where id = '${id}';`,
+    )
+    expect(r.rows[0]!.archived_at).not.toBeNull()
+    await db.exec(`update crm_leads set is_archived = false where id = '${id}';`)
+    r = await db.query<{ archived_at: string | null }>(
+      `select archived_at from crm_leads where id = '${id}';`,
+    )
+    expect(r.rows[0]!.archived_at).toBeNull()
+  })
+
+  it('crm_stats counts only unarchived leads', async () => {
+    const stats = await db.query<{ s: { total: number; byStatus: Record<string, number> } }>(
+      `select crm_stats(30) as s;`,
+    )
+    expect(stats.rows[0]!.s.total).toBe(2)
+    expect(stats.rows[0]!.s.byStatus.contacted).toBe(1)
+  })
+
+  it('merge_leads archives the duplicates and notes it on the survivor', async () => {
+    // Two rows for one number only happen when a typo is corrected later, so
+    // seed the collision directly.
+    const a = await add('Priya', '9876600003')
+    const b = (
+      await db.query<{ id: string }>(
+        `insert into crm_leads (company_id, name, phone, phone_norm, source, notes)
+         values (get_current_company_id(), 'Priya S', '9876600003', crm_normalize_phone('9876600003'), 'manual', 'from the second form')
+         returning id;`,
+      )
+    ).rows[0]!.id
+    const groups = await db.query<{ lead_count: number }>(`select * from crm_duplicate_groups();`)
+    expect(groups.rows[0]!.lead_count).toBe(2)
+
+    const merged = await db.query<{ n: number }>(
+      `select merge_leads('${a}', array['${b}']::uuid[]) as n;`,
+    )
+    expect(merged.rows[0]!.n).toBe(1)
+    const dup = await db.query<{ is_archived: boolean }>(
+      `select is_archived from crm_leads where id = '${b}';`,
+    )
+    expect(dup.rows[0]!.is_archived).toBe(true)
+    const survivor = await db.query<{ notes: string }>(`select notes from crm_leads where id = '${a}';`)
+    expect(survivor.rows[0]!.notes).toContain('from the second form')
+    expect((await db.query(`select * from crm_duplicate_groups();`)).rows).toHaveLength(0)
+  })
+})
+
+describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations (0035)', () => {
+  let db: PGlite
+  const owner = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+  const member = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  const lead = async (id: string) =>
+    (
+      await db.query<{
+        status: string
+        is_archived: boolean
+        merged_into: string | null
+        assigned_to: string | null
+        is_hot: boolean
+        follow_up_at: string | null
+        notes: string | null
+      }>(
+        `select status, is_archived, merged_into, assigned_to, is_hot, follow_up_at, notes from crm_leads where id = '${id}';`,
+      )
+    ).rows[0]!
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm3.test'),('${member}','member@crm3.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM3 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm3.test');`,
+    )
+  })
+
+  it('merge keeps the duplicate status, records merged_into, and unmerge puts it all back', async () => {
+    const a = await add('Priya', '9876700001')
+    const b = (
+      await db.query<{ id: string }>(
+        `insert into crm_leads (company_id, name, phone, phone_norm, source, status, notes)
+         values (get_current_company_id(), 'Priya S', '9876700001', crm_normalize_phone('9876700001'), 'manual', 'qualified', 'second form')
+         returning id;`,
+      )
+    ).rows[0]!.id
+
+    const groups = await db.query<{ leads: { id: string; name: string }[] }>(
+      `select * from crm_duplicate_groups();`,
+    )
+    expect(groups.rows[0]!.leads.map((l) => l.name)).toEqual(['Priya', 'Priya S'])
+
+    await db.query(`select merge_leads('${a}', array['${b}']::uuid[]);`)
+    let dup = await lead(b)
+    expect(dup.is_archived).toBe(true)
+    expect(dup.merged_into).toBe(a)
+    expect(dup.status).toBe('qualified') // not forced to lost
+    expect((await lead(a)).notes).toContain('[merged from')
+
+    const restored = await db.query<{ n: number }>(`select unmerge_leads('${a}') as n;`)
+    expect(restored.rows[0]!.n).toBe(1)
+    dup = await lead(b)
+    expect(dup.is_archived).toBe(false)
+    expect(dup.merged_into).toBeNull()
+    expect((await lead(a)).notes).toBeNull()
+  })
+
+  it('import is one transaction and counts duplicates honestly', async () => {
+    await add('Known', '9876700002')
+    const rows = JSON.stringify([
+      { name: 'Known again', phone: '98767 00002' },
+      { name: 'Fresh', phone: '9876700003', email: 'f@x.in', notes: 'from sheet' },
+      { name: 'Junk', phone: '12' },
+    ])
+    const r = await db.query<{ r: { created: number; skipped: number; invalid: number; ids: string[] } }>(
+      `select crm_import_leads('${rows}'::jsonb, true) as r;`,
+    )
+    expect(r.rows[0]!.r).toMatchObject({ created: 1, skipped: 1, invalid: 1 })
+    expect(r.rows[0]!.r.ids).toHaveLength(1)
+    const fresh = await db.query<{ source_key: string; notes: string }>(
+      `select source_key, notes from crm_leads where id = '${r.rows[0]!.r.ids[0]}';`,
+    )
+    expect(fresh.rows[0]).toEqual({ source_key: 'csv_import', notes: 'from sheet' })
+    // Not skipping inserts beside the existing row, for the duplicates tab.
+    const again = await db.query<{ r: { created: number; skipped: number } }>(
+      `select crm_import_leads('[{"phone":"9876700002"}]'::jsonb, false) as r;`,
+    )
+    expect(again.rows[0]!.r).toMatchObject({ created: 1, skipped: 0 })
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_leads where phone_norm = crm_normalize_phone('9876700002');`,
+    )
+    expect(count.rows[0]!.n).toBe(2)
+  })
+
+  it('bulk patch hands back a snapshot that restores exactly', async () => {
+    const x = await add('Bulk A', '9876700010')
+    const y = await add('Bulk B', '9876700011')
+    const snap = await db.query<{ id: string; status: string; is_hot: boolean; is_archived: boolean }>(
+      `select * from crm_bulk_patch(array['${x}','${y}']::uuid[], '{"status":"proposal_sent","is_hot":true}'::jsonb);`,
+    )
+    expect(snap.rows).toHaveLength(2)
+    expect(snap.rows.every((r) => r.status === 'new' && r.is_hot === false)).toBe(true)
+    expect((await lead(x)).status).toBe('proposal_sent')
+    expect((await lead(x)).is_hot).toBe(true)
+
+    const restored = await db.query<{ n: number }>(
+      `select crm_restore_leads('${JSON.stringify(snap.rows)}'::jsonb) as n;`,
+    )
+    expect(restored.rows[0]!.n).toBe(2)
+    expect((await lead(x)).status).toBe('new')
+    expect((await lead(y)).is_hot).toBe(false)
+  })
+
+  it('bulk patch refuses a status the pipeline does not have', async () => {
+    const x = await add('Bulk C', '9876700012')
+    await expect(
+      db.query(`select * from crm_bulk_patch(array['${x}']::uuid[], '{"status":"won"}'::jsonb);`),
+    ).rejects.toThrow(/unknown status/)
+  })
+
+  it('ranged stats and the team view count the window, not all time', async () => {
+    const w = await add('Won lead', '9876700020')
+    await db.exec(`update crm_leads set assigned_to = '${member}' where id = '${w}';`)
+    await db.exec(`update crm_leads set status = 'converted' where id = '${w}';`)
+    const stats = await db.query<{ s: { won: number; created: number; conversion_rate: number } }>(
+      `select crm_stats(current_date - 7, current_date) as s;`,
+    )
+    expect(stats.rows[0]!.s.won).toBe(1)
+    expect(stats.rows[0]!.s.created).toBeGreaterThan(1)
+    const old = await db.query<{ s: { won: number; created: number } }>(
+      `select crm_stats(current_date - 30, current_date - 8) as s;`,
+    )
+    expect(old.rows[0]!.s).toMatchObject({ won: 0, created: 0 })
+    await expect(db.query(`select crm_stats(current_date, current_date - 1);`)).rejects.toThrow(/range/)
+
+    const team = await db.query<{ user_name: string; won: number; open: number }>(
+      `select * from crm_team_stats(current_date - 7, current_date);`,
+    )
+    const meera = team.rows.find((r) => r.user_name === 'Meera')!
+    expect(meera.won).toBe(1)
+    expect(meera.open).toBe(0)
+  })
+
+  it('a rule fires on arrival, and its own update does not re-fire it', async () => {
+    await db.exec(
+      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
+       values (get_current_company_id(), 'Hot enquiries', 'lead_created', '{"source":"enquiry"}', 'mark_hot', '{}'),
+              (get_current_company_id(), 'Assign Meera', 'lead_created', '{}', 'assign_to', '{"user_id":"${member}"}'),
+              (get_current_company_id(), 'Quote follow-up', 'stage_changed', '{"to_status":"proposal_sent"}', 'set_follow_up_days', '{"days":2}');`,
+    )
+    const id = await add('Auto', '9876700030')
+    const l = await lead(id)
+    expect(l.is_hot).toBe(true)
+    expect(l.assigned_to).toBe(member)
+    const trail = await db.query<{ note: string | null }>(
+      `select note from crm_lead_events where lead_id = '${id}' and note like 'automation:%' order by created_at;`,
+    )
+    expect(trail.rows.map((r) => r.note)).toEqual(['automation: Hot enquiries', 'automation: Assign Meera'])
+
+    await db.exec(`update crm_leads set status = 'proposal_sent' where id = '${id}';`)
+    expect((await lead(id)).follow_up_at).not.toBeNull()
+    // Exactly one application per rule: the nested updates did not loop.
+    const applied = await db.query<{ n: number }>(
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'automation:%';`,
+    )
+    expect(applied.rows[0]!.n).toBe(3)
+  })
+
+  it('the follow-up sweep notifies the owner once a day and records a run', async () => {
+    const id = await add('Late', '9876700040')
+    await db.exec(
+      `update crm_leads set assigned_to = '${member}', follow_up_at = now() - interval '2 days' where id = '${id}';`,
+    )
+    const first = await db.query<{ s: { overdue: number; notified: number } }>(
+      `select run_crm_followup_cron(false) as s;`,
+    )
+    expect(first.rows[0]!.s.overdue).toBeGreaterThanOrEqual(1)
+    expect(first.rows[0]!.s.notified).toBeGreaterThanOrEqual(1)
+    const second = await db.query<{ s: { notified: number } }>(`select run_crm_followup_cron(false) as s;`)
+    expect(second.rows[0]!.s.notified).toBe(0)
+    const runs = await db.query<{ n: number }>(
+      `select count(*)::int as n from cron_runs where job_name = 'crm_followup_cron' and finished_at is not null;`,
+    )
+    expect(runs.rows[0]!.n).toBe(2)
+    const notif = await db.query<{ type: string }>(
+      `select type from notifications where recipient_uid = '${member}' and entity_id = '${id}';`,
+    )
+    expect(notif.rows[0]!.type).toBe('crm_overdue')
+  })
+
+  it('an owner can correct attendance; an employee cannot; a stranger is refused', async () => {
+    await asUser(db, owner)
+    const id = (
+      await db.query<{ id: string }>(
+        `select set_attendance_manual('${member}', current_date, 'present',
+           now() - interval '8 hours', now(), 'Forgot to tap in') as id;`,
+      )
+    ).rows[0]!.id
+    const row = await db.query<{ status: string; corrected_by: string; correction_note: string }>(
+      `select status, corrected_by, correction_note from attendance where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ status: 'present', corrected_by: owner, correction_note: 'Forgot to tap in' })
+    // Correcting again replaces rather than duplicating.
+    await db.query(`select set_attendance_manual('${member}', current_date, 'late', null, null, null);`)
+    const count = await db.query<{ n: number }>(
+      `select count(*)::int as n from attendance where user_id = '${member}' and a_date = current_date;`,
+    )
+    expect(count.rows[0]!.n).toBe(1)
+
+    await expect(
+      db.query(
+        `select set_attendance_manual('${owner}', current_date, 'present', now(), now() - interval '1 hour');`,
+      ),
+    ).rejects.toThrow(/before/)
+    await expect(
+      db.query(
+        `select set_attendance_manual('99999999-9999-9999-9999-999999999999', current_date, 'present');`,
+      ),
+    ).rejects.toThrow(/unknown_member/)
+
+    await asUser(db, member)
+    await expect(
+      db.query(`select set_attendance_manual('${member}', current_date, 'present');`),
+    ).rejects.toThrow(/not allowed/)
+  })
+})
+
+describe('CRM v4 — saved views, SLA, cadences, conversion (0036)', () => {
+  let db: PGlite
+  const owner = '12121212-1212-1212-1212-121212121212'
+  const member = '34343434-3434-3434-3434-343434343434'
+
+  const add = async (name: string, phone: string) =>
+    (
+      await db.query<{ id: string }>(
+        `select add_lead('${name}', '${phone}', null, 'enquiry', null, null) as id;`,
+      )
+    ).rows[0]!.id
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(
+      `insert into auth.users (id, email) values ('${owner}','owner@crm4.test'),('${member}','member@crm4.test');`,
+    )
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('CRM4 Studio','Owner');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', get_current_company_id(), 'employee', 'Meera', 'member@crm4.test');`,
+    )
+  })
+
+  it('a saved view belongs to one person and one name', async () => {
+    await asUser(db, owner)
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query)
+       values (get_current_company_id(), '${owner}', 'My overdue', '{"filters":["overdue"]}');`,
+    )
+    await expect(
+      db.exec(
+        `insert into crm_saved_views (company_id, user_id, name, query)
+         values (get_current_company_id(), '${owner}', 'My overdue', '{}');`,
+      ),
+    ).rejects.toThrow()
+    // Another person may use the same name.
+    await db.exec(
+      `insert into crm_saved_views (company_id, user_id, name, query)
+       values (get_current_company_id(), '${member}', 'My overdue', '{}');`,
+    )
+    const n = await db.query<{ n: number }>(`select count(*)::int as n from crm_saved_views;`)
+    expect(n.rows[0]!.n).toBe(2)
+  })
+
+  it('the SLA target defaults to 24h and follows the settings row', async () => {
+    await asUser(db, owner)
+    expect((await db.query<{ h: number }>(`select crm_sla_hours() as h;`)).rows[0]!.h).toBe(24)
+    await db.exec(`insert into crm_settings (company_id, sla_hours) values (get_current_company_id(), 4);`)
+    expect((await db.query<{ h: number }>(`select crm_sla_hours() as h;`)).rows[0]!.h).toBe(4)
+    await expect(db.exec(`update crm_settings set sla_hours = 0;`)).rejects.toThrow()
+  })
+
+  it('converting a lead creates the client and the project and marks the lead', async () => {
+    await asUser(db, owner)
+    const lead = await add('Aanya Sharma', '9876800001')
+    const r = await db.query<{ client_id: string; project_id: string }>(
+      `select * from convert_lead_to_project('${lead}', null, '{"city":"Mumbai"}'::jsonb,
+         '{"name":"Aanya wedding","package_cost":150000}'::jsonb);`,
+    )
+    const { client_id, project_id } = r.rows[0]!
+    const client = await db.query<{ name: string; phone: string; city: string }>(
+      `select name, phone, city from clients where id = '${client_id}';`,
+    )
+    expect(client.rows[0]).toEqual({ name: 'Aanya Sharma', phone: '9876800001', city: 'Mumbai' })
+    const project = await db.query<{ name: string; package_cost: number; client_id: string }>(
+      `select name, package_cost, client_id from projects where id = '${project_id}';`,
+    )
+    expect(project.rows[0]).toMatchObject({ name: 'Aanya wedding', client_id })
+    expect(Number(project.rows[0]!.package_cost)).toBe(150000)
+    const l = await db.query<{ status: string; converted_project_id: string; converted_at: string | null }>(
+      `select status, converted_project_id, converted_at from crm_leads where id = '${lead}';`,
+    )
+    expect(l.rows[0]!.status).toBe('converted')
+    expect(l.rows[0]!.converted_project_id).toBe(project_id)
+    expect(l.rows[0]!.converted_at).not.toBeNull()
+    // Twice is refused; an existing client is honoured.
+    await expect(db.query(`select * from convert_lead_to_project('${lead}');`)).rejects.toThrow(/already/)
+    const lead2 = await add('Rahul', '9876800002')
+    const r2 = await db.query<{ client_id: string }>(
+      `select * from convert_lead_to_project('${lead2}', '${client_id}', '{}', '{"name":"Second shoot"}');`,
+    )
+    expect(r2.rows[0]!.client_id).toBe(client_id)
+  })
+
+  it('a cadence schedules each step in turn, and stops when the lead closes', async () => {
+    await asUser(db, owner)
+    const cad = (
+      await db.query<{ id: string }>(
+        `insert into crm_cadences (company_id, name) values (get_current_company_id(), 'Wedding follow-up') returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(
+      `insert into crm_cadence_steps (cadence_id, company_id, step_no, day_offset, note)
+       values ('${cad}', get_current_company_id(), 1, 0, 'Call'), ('${cad}', get_current_company_id(), 2, 3, 'Send quote');`,
+    )
+    const lead = await add('Cadence lead', '9876800010')
+    await db.exec(`update crm_leads set assigned_to = '${member}' where id = '${lead}';`)
+    await db.query(`select start_lead_cadence('${lead}', '${cad}');`)
+    let lc = await db.query<{ step_no: number; next_at: string }>(
+      `select step_no, next_at from crm_lead_cadences where lead_id = '${lead}';`,
+    )
+    expect(lc.rows[0]!.step_no).toBe(1)
+    const follow = await db.query<{ f: string }>(`select follow_up_at as f from crm_leads where id = '${lead}';`)
+    expect(new Date(follow.rows[0]!.f).getTime()).toBe(new Date(lc.rows[0]!.next_at).getTime())
+
+    // Make step 1 due and sweep: notification to the owner, moved to step 2.
+    await db.exec(`update crm_lead_cadences set next_at = now() - interval '1 minute' where lead_id = '${lead}';`)
+    const sweep = await db.query<{ s: { cadences: { due: number; advanced: number; completed: number } } }>(
+      `select run_crm_followup_cron(false) as s;`,
+    )
+    expect(sweep.rows[0]!.s.cadences).toMatchObject({ due: 1, advanced: 1, completed: 0 })
+    lc = await db.query<{ step_no: number; next_at: string }>(
+      `select step_no, next_at from crm_lead_cadences where lead_id = '${lead}';`,
+    )
+    expect(lc.rows[0]!.step_no).toBe(2)
+    const notif = await db.query<{ type: string; title: string }>(
+      `select type, title from notifications where recipient_uid = '${member}' and entity_id = '${lead}' and type = 'crm_cadence';`,
+    )
+    expect(notif.rows[0]!.title).toContain('step 1')
+
+    // Final step completes it.
+    await db.exec(`update crm_lead_cadences set next_at = now() - interval '1 minute' where lead_id = '${lead}';`)
+    await db.query(`select run_crm_followup_cron(false);`)
+    const done = await db.query<{ completed_at: string | null }>(
+      `select completed_at from crm_lead_cadences where lead_id = '${lead}';`,
+    )
+    expect(done.rows[0]!.completed_at).not.toBeNull()
+
+    // A lead that closes mid-cadence is taken off it.
+    const lead2 = await add('Closes early', '9876800011')
+    await db.query(`select start_lead_cadence('${lead2}', '${cad}');`)
+    await db.exec(`update crm_leads set status = 'lost' where id = '${lead2}';`)
+    const stopped = await db.query<{ stopped_at: string | null }>(
+      `select stopped_at from crm_lead_cadences where lead_id = '${lead2}';`,
+    )
+    expect(stopped.rows[0]!.stopped_at).not.toBeNull()
+    expect(
+      (await db.query<{ ok: boolean }>(`select stop_lead_cadence('${lead2}') as ok;`)).rows[0]!.ok,
+    ).toBe(false)
+  })
+
+  it('an automation can start a cadence on arrival', async () => {
+    await asUser(db, owner)
+    const cad = (
+      await db.query<{ id: string }>(
+        `select id from crm_cadences where name = 'Wedding follow-up';`,
+      )
+    ).rows[0]!.id
+    await db.exec(
+      `insert into crm_automation_rules (company_id, name, trigger, condition, action, action_value)
+       values (get_current_company_id(), 'Auto cadence', 'lead_created', '{"source":"enquiry"}', 'start_cadence', '{"cadence_id":"${cad}"}');`,
+    )
+    const lead = await add('Auto cadence lead', '9876800020')
+    const lc = await db.query<{ cadence_id: string }>(`select cadence_id from crm_lead_cadences where lead_id = '${lead}';`)
+    expect(lc.rows[0]!.cadence_id).toBe(cad)
+  })
+
+  it('the team view counts first contact within the SLA', async () => {
+    await asUser(db, owner)
+    const fast = await add('Fast', '9876800030')
+    const slow = await add('Slow', '9876800031')
+    await db.exec(`update crm_leads set assigned_to = '${member}' where id in ('${fast}','${slow}');`)
+    await db.exec(`update crm_leads set status = 'contacted' where id = '${fast}';`)
+    // Contacted 10 hours after arrival, against the 4h target set above.
+    await db.exec(
+      `update crm_leads set status = 'contacted', last_contacted_at = created_at + interval '10 hours' where id = '${slow}';`,
+    )
+    const team = await db.query<{ user_name: string; within_sla: number; sla_hours: number }>(
+      `select user_name, within_sla, sla_hours from crm_team_stats(current_date - 7, current_date);`,
+    )
+    const meera = team.rows.find((r) => r.user_name === 'Meera')!
+    expect(meera.sla_hours).toBe(4)
+    expect(meera.within_sla).toBe(1)
   })
 })

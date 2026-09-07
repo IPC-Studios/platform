@@ -13,8 +13,11 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { withUser } from '../../lib/db'
+import { uuidParam } from '../../lib/params'
 import type { TransactionSql } from 'postgres'
+import { withUser } from '../../lib/db'
+import { attempt } from '../../lib/attempt'
+import { audit } from '../../lib/audit'
 
 const list = shootListItem.array()
 const services = serviceOption.array()
@@ -53,47 +56,80 @@ async function saveRequirements(
   }
 }
 
+/** The shared projection, as a fragment the two list queries embed. */
+const selectShoots = (sql: TransactionSql) => sql`
+  select s.id, s.name, s.project_id, s.shoot_date, s.location, s.status,
+         p.name as project_name
+  from shoots s
+  left join projects p on p.id = s.project_id`
+
 export const shootsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
+  // The caller's own shoots: every shoot they hold a booking slot on. Needs no
+  // module gate — RLS on the slots table already scopes what comes back.
+  // Declared before '/' so a query-less GET does not swallow it.
+  .get('/my', async (c) => {
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'shoots.my', () =>
+      withUser(
+        c.env,
+        auth.userId,
+        (sql) => sql`
+          ${selectShoots(sql)}
+          where s.status <> 'cancelled'
+            and exists (
+              select 1 from team_assignment_slots t
+              where t.shoot_id = s.id and t.user_id = ${auth.userId} and t.status <> 'cancelled'
+            )
+          order by s.shoot_date asc nulls last`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load your shoots.')
+    return c.json(list.parse(rows))
+  })
+
   .get('/', requireAction('projects', 'view'), async (c) => {
     const project = c.req.query('project_id')
-    const rows = await withUser(
-      c.env,
-      c.get('auth').userId,
-      (sql) => sql`
-        select s.id, s.name, s.project_id, s.shoot_date, s.location, s.status,
-               p.name as project_name
-        from shoots s
-        left join projects p on p.id = s.project_id
-        where ${project ? sql`s.project_id = ${project}` : sql`true`}
-        order by s.shoot_date asc nulls last`,
-    ).catch(() => null)
+    const rows = await attempt(c, 'shoots.list', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          ${selectShoots(sql)}
+          where ${project ? sql`s.project_id = ${project}` : sql`true`}
+          order by s.shoot_date asc nulls last`,
+      ),
+    )
     if (!rows) fail(400, 'We could not load shoots.')
     return c.json(list.parse(rows))
   })
 
   // Declared above /:id-shaped routes so "services" is never read as an id.
   .get('/services', requireAction('projects', 'view'), async (c) => {
-    const rows = await withUser(
-      c.env,
-      c.get('auth').userId,
-      (sql) => sql`select id, name from services order by name asc`,
-    ).catch(() => null)
+    const rows = await attempt(c, 'shoots.services', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`select id, name from services order by name asc`,
+      ),
+    )
     if (!rows) fail(400, 'We could not load services.')
     return c.json(services.parse(rows))
   })
 
   .get('/presets', requireAction('projects', 'view'), async (c) => {
     const kind = shootPresetKind.safeParse(c.req.query('kind'))
-    const rows = await withUser(
-      c.env,
-      c.get('auth').userId,
-      (sql) => sql`
-        select id, kind, name, payload from shoot_presets
-        where ${kind.success ? sql`kind = ${kind.data}` : sql`true`}
-        order by name asc`,
-    ).catch(() => null)
+    const rows = await attempt(c, 'shoots.presets.list', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          select id, kind, name, payload from shoot_presets
+          where ${kind.success ? sql`kind = ${kind.data}` : sql`true`}
+          order by name asc`,
+      ),
+    )
     if (!rows) fail(400, 'We could not load presets.')
     return c.json(presets.parse(rows))
   })
@@ -102,29 +138,34 @@ export const shootsRouter = new Hono<AppEnv>()
     const parsed = saveShootPresetRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please name the preset.')
     const auth = c.get('auth')
-    const row = await withUser(c.env, auth.userId, async (sql) => {
-      // Saving over a name that exists is what "save preset" means to the
-      // person pressing it — not a second entry with the same label.
-      const rows = await sql`
-        insert into shoot_presets ${sql({
-          company_id: auth.companyId,
-          kind: parsed.data.kind,
-          name: parsed.data.name,
-          payload: sql.json(parsed.data.payload),
-        })}
-        on conflict (company_id, kind, name) do update set payload = excluded.payload
-        returning id, kind, name, payload`
-      return rows[0]
-    }).catch(() => null)
+    const row = await attempt(c, 'shoots.presets.save', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        // Saving over a name that exists is what "save preset" means to the
+        // person pressing it — not a second entry with the same label.
+        const rows = await sql`
+          insert into shoot_presets ${sql({
+            company_id: auth.companyId,
+            kind: parsed.data.kind,
+            name: parsed.data.name,
+            payload: sql.json(parsed.data.payload),
+          })}
+          on conflict (company_id, kind, name) do update set payload = excluded.payload
+          returning id, kind, name, payload`
+        return rows[0] ?? null
+      }),
+    )
     if (!row) fail(400, 'We could not save the preset.')
     return c.json(shootPreset.parse(row), 201)
   })
 
   .delete('/presets/:id', requireAction('projects', 'edit'), async (c) => {
-    const ok = await withUser(c.env, c.get('auth').userId, async (sql) => {
-      await sql`delete from shoot_presets where id = ${c.req.param('id')!}`
-      return true
-    }).catch(() => false)
+    const id = uuidParam(c)
+    const ok = await attempt(c, 'shoots.presets.delete', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`delete from shoot_presets where id = ${id}`
+        return true
+      }),
+    )
     if (!ok) fail(400, 'We could not delete the preset.')
     return c.body(null, 204)
   })
@@ -136,24 +177,35 @@ export const shootsRouter = new Hono<AppEnv>()
     // Requirements live in their own table, so they must come off the row
     // before it is spread into the insert.
     const { requirements = [], ...fields } = parsed.data
-    const row = await withUser(c.env, auth.userId, async (sql) => {
-      const rows = await sql<{ id: string }[]>`
-        insert into shoots ${sql({ ...fields, company_id: auth.companyId })} returning id`
-      const shoot = rows[0]!
-      await saveRequirements(sql, auth.companyId, shoot.id, requirements)
-      return shoot
-    }).catch(() => null)
+    const row = await attempt(c, 'shoots.create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const rows = await sql<{ id: string }[]>`
+          insert into shoots ${sql({ ...fields, company_id: auth.companyId })} returning id`
+        const shoot = rows[0]
+        if (!shoot) return null
+        await saveRequirements(sql, auth.companyId, shoot.id, requirements)
+        return shoot
+      }),
+    )
     if (!row) fail(400, 'We could not create the shoot.')
+    await audit(c, { action: 'shoot.create', entityType: 'shoot', entityId: row.id, after: parsed.data })
     return c.json({ id: row.id }, 201)
   })
 
   .patch('/:id', requireAction('projects', 'edit'), async (c) => {
     const parsed = updateShootRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the shoot details.')
-    const ok = await withUser(c.env, c.get('auth').userId, async (sql) => {
-      await sql`update shoots set ${sql(parsed.data)} where id = ${c.req.param('id')!}`
-      return true
-    }).catch(() => false)
-    if (!ok) fail(400, 'We could not update the shoot.')
+    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'shoots.update', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`update shoots set ${sql(parsed.data)} where id = ${id} returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not update the shoot.')
+    if (!rows.length) fail(404, 'That shoot was not found.')
+    await audit(c, { action: 'shoot.update', entityType: 'shoot', entityId: id, after: parsed.data })
     return c.body(null, 204)
   })

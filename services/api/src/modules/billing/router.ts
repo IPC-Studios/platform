@@ -9,9 +9,12 @@ import {
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
-import { requireModule } from '../../middleware/permissions'
+import { requireAction, requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
+import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
+import { attempt } from '../../lib/attempt'
+import { audit } from '../../lib/audit'
 
 const list = invoiceListItem.array()
 
@@ -20,31 +23,31 @@ export const billingRouter = new Hono<AppEnv>()
   .use('*', requireModule('billing')) // finance gate: owner or a finance profile
 
   .get('/states', async (c) => {
-    const rows = await withUser(
-      c.env,
-      c.get('auth').userId,
-      (sql) => sql`select code, name from state_master order by name`,
-    ).catch(() => null)
+    const rows = await attempt(c, 'billing.states', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`select code, name from state_master order by name`),
+    )
     if (!rows) fail(400, 'We could not load states.')
     return c.json(gstState.array().parse(rows))
   })
 
   .get('/invoices', async (c) => {
-    const rows = await withUser(
-      c.env,
-      c.get('auth').userId,
-      (sql) => sql`
-        select i.id, i.invoice_number, i.invoice_date, i.total, i.balance_due, i.status,
-               cl.name as client_name
-        from invoices i
-        left join clients cl on cl.id = i.client_id
-        order by i.invoice_date desc`,
-    ).catch(() => null)
+    const rows = await attempt(c, 'billing.invoices', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          select i.id, i.invoice_number, i.invoice_date, i.total, i.balance_due, i.status,
+                 cl.name as client_name
+          from invoices i
+          left join clients cl on cl.id = i.client_id
+          order by i.invoice_date desc`,
+      ),
+    )
     if (!rows) fail(400, 'We could not load invoices.')
     return c.json(list.parse(rows))
   })
 
-  .post('/invoices', async (c) => {
+  .post('/invoices', requireAction('billing', 'create'), async (c) => {
     const parsed = createInvoiceRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the invoice details.')
     const req = parsed.data
@@ -66,69 +69,84 @@ export const billingRouter = new Hono<AppEnv>()
       igst: l.igst,
     }))
 
-    const row = await withUser(c.env, c.get('auth').userId, async (sql) => {
-      const rows = await sql<{ id: string; invoice_number: string }[]>`
-        select * from create_invoice(
-          p_client_id => ${req.client_id},
-          p_project_id => ${req.project_id},
-          p_place_of_supply => ${req.place_of_supply},
-          p_invoice_date => ${req.invoice_date ?? null},
-          p_due_date => ${req.due_date ?? null},
-          p_subtotal => ${totals.subtotal},
-          p_discount => ${totals.discount},
-          p_taxable => ${totals.taxable},
-          p_tax => ${totals.tax},
-          p_total => ${totals.total},
-          p_items => ${sql.json(items)},
-          p_notes => ${req.notes ?? null}
-        )`
-      return rows[0]
-    }).catch(() => null)
+    const row = await attempt(c, 'billing.invoice_create', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<{ id: string; invoice_number: string }[]>`
+          select * from create_invoice(
+            p_client_id => ${req.client_id},
+            p_project_id => ${req.project_id},
+            p_place_of_supply => ${req.place_of_supply},
+            p_invoice_date => ${req.invoice_date ?? null},
+            p_due_date => ${req.due_date ?? null},
+            p_subtotal => ${totals.subtotal},
+            p_discount => ${totals.discount},
+            p_taxable => ${totals.taxable},
+            p_tax => ${totals.tax},
+            p_total => ${totals.total},
+            p_items => ${sql.json(items)},
+            p_notes => ${req.notes ?? null}
+          )`
+        return rows[0] ?? null
+      }),
+    )
     if (!row) fail(400, 'We could not create the invoice.')
+    await audit(c, {
+      action: 'invoice.create',
+      entityType: 'invoice',
+      entityId: row.id,
+      after: { invoice_number: row.invoice_number, total: totals.total, client_id: req.client_id },
+    })
     return c.json({ id: row.id, invoice_number: row.invoice_number }, 201)
   })
 
   .get('/invoices/:id', async (c) => {
-    const row = await withUser(c.env, c.get('auth').userId, async (sql) => {
-      const rows = await sql`
-        select i.id, i.invoice_number, i.invoice_date, i.status, i.place_of_supply,
-               i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.created_at,
-               cl.name as client_name,
-               coalesce((
-                 select jsonb_agg(jsonb_build_object(
-                   'id', it.id, 'description', it.description, 'quantity', it.quantity,
-                   'rate', it.rate, 'amount', it.amount, 'gst_rate', it.gst_rate,
-                   'cgst', it.cgst, 'sgst', it.sgst, 'igst', it.igst) order by it.id)
-                 from invoice_items it where it.invoice_id = i.id
-               ), '[]'::jsonb) as items,
-               coalesce((
-                 select jsonb_agg(jsonb_build_object(
-                   'id', pmt.id, 'amount', pmt.amount, 'paid_on', pmt.paid_on, 'mode', pmt.mode)
-                   order by pmt.paid_on)
-                 from invoice_payments pmt where pmt.invoice_id = i.id
-               ), '[]'::jsonb) as payments
-        from invoices i
-        left join clients cl on cl.id = i.client_id
-        where i.id = ${c.req.param('id')!}`
-      return rows[0]
-    }).catch(() => null)
+    const id = uuidParam(c)
+    const row = await attempt(c, 'billing.invoice', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          select i.id, i.invoice_number, i.invoice_date, i.status, i.place_of_supply,
+                 i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.created_at,
+                 cl.name as client_name,
+                 coalesce((
+                   select jsonb_agg(jsonb_build_object(
+                     'id', it.id, 'description', it.description, 'quantity', it.quantity,
+                     'rate', it.rate, 'amount', it.amount, 'gst_rate', it.gst_rate,
+                     'cgst', it.cgst, 'sgst', it.sgst, 'igst', it.igst) order by it.id)
+                   from invoice_items it where it.invoice_id = i.id
+                 ), '[]'::jsonb) as items,
+                 coalesce((
+                   select jsonb_agg(jsonb_build_object(
+                     'id', pmt.id, 'amount', pmt.amount, 'paid_on', pmt.paid_on, 'mode', pmt.mode)
+                     order by pmt.paid_on)
+                   from invoice_payments pmt where pmt.invoice_id = i.id
+                 ), '[]'::jsonb) as payments
+          from invoices i
+          left join clients cl on cl.id = i.client_id
+          where i.id = ${id}`
+        return rows[0] ?? null
+      }),
+    )
     if (!row) fail(404, 'That invoice was not found.')
     return c.json(invoiceDetail.parse(row))
   })
 
-  .post('/invoices/:id/payments', async (c) => {
+  .post('/invoices/:id/payments', requireAction('billing', 'edit'), async (c) => {
     const parsed = recordPaymentRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the payment details.')
     const d = parsed.data
-    const ok = await withUser(c.env, c.get('auth').userId, async (sql) => {
-      await sql`select record_invoice_payment(
-        p_invoice_id => ${c.req.param('id')!},
-        p_amount => ${d.amount},
-        p_paid_on => ${d.paid_on ?? null},
-        p_mode => ${d.mode ?? null},
-        p_reference => ${d.reference ?? null})`
-      return true
-    }).catch(() => false)
+    const id = uuidParam(c)
+    const ok = await attempt(c, 'billing.payment', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`select record_invoice_payment(
+          p_invoice_id => ${id},
+          p_amount => ${d.amount},
+          p_paid_on => ${d.paid_on ?? null},
+          p_mode => ${d.mode ?? null},
+          p_reference => ${d.reference ?? null})`
+        return true
+      }),
+    )
     if (!ok) fail(400, 'We could not record the payment.')
+    await audit(c, { action: 'invoice.payment', entityType: 'invoice', entityId: id, after: d })
     return c.body(null, 204)
   })

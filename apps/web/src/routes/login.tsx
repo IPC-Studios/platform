@@ -14,6 +14,13 @@ import {
 import { callApi, ApiError } from '@/shared/api/client'
 import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 import { setTokens } from '@/shared/auth/token'
+import { markCookieSession } from '@/shared/api/client'
+
+/** Store the pair; an empty refresh token means the API keeps it in its cookie. */
+function rememberSession(pair: { access_token: string; refresh_token: string }) {
+  setTokens(pair)
+  markCookieSession(!pair.refresh_token)
+}
 import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { Button } from '@/shared/ui/button'
@@ -181,7 +188,7 @@ export function LoginPage() {
         setPendingEmail(email) // show the "check your inbox" screen
         return
       }
-      setTokens(
+      rememberSession(
         await callApi('/auth/login', {
           method: 'POST',
           body: payload(),

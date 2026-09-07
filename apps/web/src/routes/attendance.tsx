@@ -8,16 +8,20 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  Pencil,
   RefreshCw,
 } from 'lucide-react'
 import {
   attendanceDayRow,
   attendanceRecord,
+  attendanceStatus,
   companyFence,
+  setAttendanceRequest,
   setFenceRequest,
   z,
   type AttendanceDayRow,
   type CheckInRequest,
+  type SetAttendanceRequest,
   type SetFenceRequest,
 } from '@ipc/contracts'
 import { withinFence } from '@ipc/domain'
@@ -185,6 +189,8 @@ function TeamDashboard() {
   const rows = useMemo(() => data ?? [], [data])
   const shown = useMemo(() => filterRows(rows, filters), [rows, filters])
   const totals = useMemo(() => summarise(rows), [rows])
+  // Only the people who answer for the roster may rewrite a day on it.
+  const canCorrect = !!session?.is_owner || session?.role === 'admin'
 
   function exportCsv() {
     const blob = new Blob([toCsv(shown)], { type: 'text/csv;charset=utf-8' })
@@ -308,12 +314,15 @@ function TeamDashboard() {
             </CardContent>
           </Card>
         ) : (
-          <RosterTable rows={shown} />
+          <RosterTable rows={shown} date={date} canCorrect={canCorrect} />
         )}
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        Absent means no check-in was recorded for the date. Manual correction is not built yet.
+        Absent means no check-in was recorded for the date.
+        {canCorrect
+          ? ' Use Correct on a row to fix a missed or wrong check-in; corrections are recorded in the audit log.'
+          : ''}
       </p>
     </>
   )
@@ -346,7 +355,15 @@ function Tile({
   )
 }
 
-function RosterTable({ rows }: { rows: readonly AttendanceDayRow[] }) {
+function RosterTable({
+  rows,
+  date,
+  canCorrect,
+}: {
+  rows: readonly AttendanceDayRow[]
+  date: string
+  canCorrect: boolean
+}) {
   const isMobile = useIsMobile()
 
   if (isMobile) {
@@ -363,6 +380,16 @@ function RosterTable({ rows }: { rows: readonly AttendanceDayRow[] }) {
               <p className="mt-1 text-sm text-muted-foreground">
                 In {formatTime(r.check_in_at)} · Out {formatTime(r.check_out_at)}
               </p>
+              {r.corrected_by && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Corrected{r.correction_note ? ` · ${r.correction_note}` : ''}
+                </p>
+              )}
+              {canCorrect && (
+                <div className="mt-2">
+                  <CorrectDialog row={r} date={date} />
+                </div>
+              )}
             </div>
           )
         })}
@@ -380,6 +407,7 @@ function RosterTable({ rows }: { rows: readonly AttendanceDayRow[] }) {
             <th className="px-4 py-2 font-medium">Checked in</th>
             <th className="px-4 py-2 font-medium">Checked out</th>
             <th className="px-4 py-2 text-right font-medium">Hours</th>
+            {canCorrect && <th className="px-4 py-2"></th>}
           </tr>
         </thead>
         <tbody>
@@ -399,10 +427,22 @@ function RosterTable({ rows }: { rows: readonly AttendanceDayRow[] }) {
                 </td>
                 <td className="px-4 py-2">
                   <StatusBadge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</StatusBadge>
+                  {r.corrected_by && (
+                    <span className="ml-2 text-xs text-muted-foreground" title={r.correction_note ?? undefined}>
+                      corrected
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-muted-foreground">{formatTime(r.check_in_at)}</td>
                 <td className="px-4 py-2 text-muted-foreground">{formatTime(r.check_out_at)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{hours === null ? '—' : hours}</td>
+                {canCorrect && (
+                  <td className="px-4 py-2 text-right">
+                    <span className="row-actions">
+                      <CorrectDialog row={r} date={date} />
+                    </span>
+                  </td>
+                )}
               </tr>
             )
           })}
@@ -539,7 +579,11 @@ function FenceDialog() {
               Between 20 and 5000. Too tight and GPS drift alone locks people out.
             </p>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
@@ -548,6 +592,133 @@ function FenceDialog() {
             </DialogClose>
             <Button onClick={onSave} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save location'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** A datetime-local value from an ISO string, in the viewer's own timezone. */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
+/**
+ * Owner or admin rewriting one person's day: a missed tap, a check-in from the
+ * wrong side of the fence, a shift that never got closed. Replaces the row for
+ * that date, records who corrected it and why, and lands in the audit log.
+ */
+function CorrectDialog({ row, date }: { row: AttendanceDayRow; date: string }) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [status, setStatus] = useState<SetAttendanceRequest['status']>(row.status)
+  const [checkIn, setCheckIn] = useState(toLocalInput(row.check_in_at))
+  const [checkOut, setCheckOut] = useState(toLocalInput(row.check_out_at))
+  const [note, setNote] = useState(row.correction_note ?? '')
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (input: SetAttendanceRequest) =>
+      callApi(`/hr/attendance/${row.user_id}/${date}`, { method: 'PUT', body: input, responseSchema: idOnly }),
+    onSuccess: () => {
+      toast.success(`Attendance corrected for ${row.name}`)
+      void qc.invalidateQueries({ queryKey: ['hr', 'attendance'] })
+      setOpen(false)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  function onSave() {
+    setError(null)
+    const parsed = setAttendanceRequest.safeParse({
+      status,
+      check_in_at: checkIn ? new Date(checkIn).toISOString() : null,
+      check_out_at: checkOut ? new Date(checkOut).toISOString() : null,
+      ...(note.trim() ? { note: note.trim() } : {}),
+    })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Please check the times.')
+      return
+    }
+    save.mutate(parsed.data)
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (o) {
+          setStatus(row.status)
+          setCheckIn(toLocalInput(row.check_in_at))
+          setCheckOut(toLocalInput(row.check_out_at))
+          setNote(row.correction_note ?? '')
+          setError(null)
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost">
+          <Pencil /> Correct
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title={`Correct ${row.name}`}
+        description={`${date} · the row for this date is replaced with what you enter.`}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="corr-status">Status</Label>
+            <Select
+              id="corr-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as SetAttendanceRequest['status'])}
+            >
+              {attendanceStatus.options.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="corr-in">Checked in</Label>
+              <Input id="corr-in" type="datetime-local" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="corr-out">Checked out</Label>
+              <Input id="corr-out" type="datetime-local" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="corr-note">Why</Label>
+            <Input
+              id="corr-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Forgot to tap in; confirmed with the shoot lead"
+            />
+          </div>
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button onClick={onSave} disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save correction'}
             </Button>
           </div>
         </div>

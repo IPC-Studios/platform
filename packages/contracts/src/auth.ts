@@ -30,14 +30,19 @@ export type LoginRequest = z.infer<typeof loginRequest>
  */
 export const authToken = z.object({
   access_token: z.string(),
+  /** Empty when the API keeps the refresh token in its HttpOnly cookie. */
   refresh_token: z.string(),
   token_type: z.literal('bearer'),
   expires_in: z.number().int().positive(),
 })
 export type AuthToken = z.infer<typeof authToken>
 
-/** Exchange a refresh token for a fresh pair (the old one is spent). */
-export const refreshRequest = z.object({ refresh_token: z.string().min(1) })
+/**
+ * Exchange a refresh token for a fresh pair (the old one is spent). The token
+ * is optional in the body because in cookie mode (AUTH_COOKIE=1) the API reads
+ * it from the HttpOnly cookie instead.
+ */
+export const refreshRequest = z.object({ refresh_token: z.string().min(1).optional() })
 export type RefreshRequest = z.infer<typeof refreshRequest>
 
 /** Sign out this device. The refresh token identifies the session to kill. */
@@ -78,6 +83,21 @@ export const resetPasswordRequest = z.object({
   password: z.string().min(8).max(200),
 })
 export type ResetPasswordRequest = z.infer<typeof resetPasswordRequest>
+
+/**
+ * Change the password while signed in. The current one is the proof it is
+ * really them; every OTHER session is revoked and this device gets a fresh pair.
+ */
+export const changePasswordRequest = z
+  .object({
+    current_password: z.string().min(1).max(200),
+    new_password: z.string().min(8).max(200),
+  })
+  .refine((v) => v.current_password !== v.new_password, {
+    message: 'Choose a password you have not used before.',
+    path: ['new_password'],
+  })
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequest>
 
 /** Plan-gate state resolved for the current company. */
 export const planGate = z.enum(['active', 'grace', 'grandfathered', 'expired'])

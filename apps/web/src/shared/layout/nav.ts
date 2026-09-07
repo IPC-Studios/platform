@@ -133,7 +133,9 @@ export const NAV: NavEntry[] = [
     ],
   },
 
-  leaf('Alerts', '/notifications', Bell, { module: 'crm' }),
+  // Alerts reach everyone: reminders and overdue follow-ups land on whoever
+  // owns them, CRM module or not.
+  leaf('Alerts', '/notifications', Bell),
   leaf('Settings', '/settings/company', Settings, { module: 'settings' }),
 
   {

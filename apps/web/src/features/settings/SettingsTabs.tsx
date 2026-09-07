@@ -8,6 +8,7 @@ const TABS: ReadonlyArray<{ to: string; label: string; module: ModuleKey }> = [
   { to: '/settings/roles', label: 'Roles & Access', module: 'team_roles' },
   { to: '/settings/appearance', label: 'Theme & Branding', module: 'settings' },
   { to: '/settings/subscription', label: 'Subscription', module: 'settings_subscription' },
+  { to: '/settings/system', label: 'System', module: 'settings' },
 ]
 
 /**
@@ -22,11 +23,13 @@ export function SettingsTabs() {
   if (visible.length < 2) return null
 
   return (
-    <div className="mb-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
+    <div role="tablist" aria-label="Settings sections" className="mb-6 flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5">
       {visible.map((t) => (
         <Link
           key={t.to}
           to={t.to}
+          role="tab"
+          aria-selected={pathname === t.to}
           className={cn(
             'whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors',
             pathname === t.to

@@ -46,7 +46,7 @@ export function ClientFormDialog() {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+            <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus aria-invalid={name.trim() === "" ? true : undefined} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">

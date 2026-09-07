@@ -164,3 +164,28 @@ export function useGenerateTasks() {
     (out) => `${out.created} ${out.created === 1 ? 'task' : 'tasks'} generated`,
   )
 }
+
+/** The signed-in person's own tasks — RLS hands employees only what they are on. */
+export function useMyTasks() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['tasks', 'my'],
+    queryFn: () => callApi('/tasks/my', { responseSchema: tasksList }),
+    enabled: !!session,
+    staleTime: 15_000,
+  })
+}
+
+/** Move one of your own tasks; the RPC refuses a task you are not assigned to. */
+export function useUpdateMyTaskStatus() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: TaskStatus }) =>
+      callApi(`/tasks/my/${id}/status`, { method: 'PATCH', body: { status }, responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Task updated')
+      void qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}

@@ -1,3 +1,6 @@
+import type { Env } from '../context'
+import { timingSafeEqual, toHex } from './crypto'
+
 /**
  * Razorpay HMAC-SHA256 signature verification (Web Crypto — Workers-native).
  * For a payment: message = `${order_id}|${payment_id}`.
@@ -17,13 +20,41 @@ export async function verifyRazorpaySignature(
     ['sign'],
   )
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message))
-  const bytes = new Uint8Array(mac)
-  const expected = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-  // Constant-time compare.
-  if (expected.length !== signatureHex.length) return false
-  let diff = 0
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signatureHex.charCodeAt(i)
-  return diff === 0
+  return timingSafeEqual(toHex(mac), signatureHex)
+}
+
+export interface RazorpayOrder {
+  id: string
+  amount: number
+  currency: string
+}
+
+/**
+ * Create an order with Razorpay's Orders API so Checkout has something to
+ * charge against. `amount` is whole rupees; Razorpay wants paise. Throws on
+ * any non-2xx so the caller can decide how to report it — an order that does
+ * not exist at the provider must not be handed to the browser as if it did.
+ */
+export async function createRazorpayOrder(
+  env: Pick<Env, 'RAZORPAY_KEY_ID' | 'RAZORPAY_KEY_SECRET'>,
+  input: { amountRupees: number; receipt: string; notes?: Record<string, string> },
+): Promise<RazorpayOrder> {
+  const auth = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`)
+  const res = await fetch('https://api.razorpay.com/v1/orders', {
+    method: 'POST',
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      amount: Math.round(input.amountRupees * 100),
+      currency: 'INR',
+      receipt: input.receipt,
+      notes: input.notes ?? {},
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`razorpay order failed ${res.status}: ${detail.slice(0, 200)}`)
+  }
+  const body = (await res.json()) as { id?: string; amount?: number; currency?: string }
+  if (!body.id) throw new Error('razorpay order response had no id')
+  return { id: body.id, amount: body.amount ?? 0, currency: body.currency ?? 'INR' }
 }
