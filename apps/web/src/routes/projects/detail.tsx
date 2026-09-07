@@ -9,6 +9,7 @@ import type {
 } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { QuotationLinkDialog } from '@/features/projects/QuotationLinkDialog'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useConfirm } from '@/shared/ui/confirm'
@@ -65,6 +66,7 @@ function ProjectDetail() {
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge tone="info">{humanize(data.status)}</StatusBadge>
+            {canEdit && <QuotationLinkDialog projectId={id} />}
             {canEdit && <EditProjectDialog id={id} name={data.name} status={data.status} packageCost={data.package_cost} />}
           </div>
         }

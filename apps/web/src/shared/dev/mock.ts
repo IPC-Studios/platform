@@ -210,6 +210,14 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
+  if (method === 'POST' && path === '/documents/quotations')
+    return { link: 'http://localhost:5173/quotation?token=demo-quote' }
+  if (method === 'POST' && path === '/documents/receipts')
+    return { link: 'http://localhost:5173/receipt?token=demo-receipt' }
+  if (method === 'GET' && path.startsWith('/public/quotation/')) return publicQuotationFx
+  if (method === 'POST' && /^\/public\/quotation\/[^/]+\/respond$/.test(path)) return { ok: true }
+  if (method === 'GET' && path.startsWith('/public/receipt/')) return publicReceiptFx
+  if (method === 'GET' && path.startsWith('/public/delivery/')) return publicDeliveryFx
   if (method === 'GET' && path.startsWith('/public/team-terms/')) return publicTeamTermsFx
   if (method === 'POST' && /^\/public\/team-terms\/[^/]+\/ack$/.test(path)) return { ok: true }
   if (method === 'GET' && path.startsWith('/team-terms/templates'))
@@ -903,6 +911,48 @@ const deliverableSetsFx = [
 ]
 
 const ROLE = { photographer: uid(0xf1), editor: uid(0xf2), drone: uid(0xf3) }
+
+const publicQuotationFx = {
+  snapshot: {
+    items: [
+      { title: 'Traditional Photography', chargeable: false, amount: 0 },
+      { title: 'Candid Photography', chargeable: false, amount: 0 },
+      { title: 'Wedding Album', chargeable: false, amount: 0 },
+      { title: 'Drone Shots', chargeable: true, amount: 15000 },
+    ],
+    package_cost: 150000,
+    add_ons: 15000,
+    total: 165000,
+    project_name: 'Sharma Wedding',
+  },
+  notes: 'Valid for 30 days. 50% advance confirms the date.',
+  accepted_at: null,
+  accepted_by_name: null,
+  declined_at: null,
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+}
+
+const publicReceiptFx = {
+  amount: 50000,
+  paid_on: '2026-07-20',
+  mode: 'upi',
+  reference: 'UPI/2026/0720',
+  project_name: 'Sharma Wedding',
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+  total_cost: 165000,
+  received_total: 50000,
+}
+
+const publicDeliveryFx = {
+  submission_link: 'https://drive.example/sharma-wedding',
+  notes: 'Full set of edited photographs and the highlight film.',
+  delivered_at: '2026-09-01T10:00:00Z',
+  project_name: 'Sharma Wedding',
+  client_name: 'Sharma Family',
+  company_name: 'Demo Studio',
+}
 
 const publicTeamTermsFx = {
   status: 'viewed' as const,
