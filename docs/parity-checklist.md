@@ -47,9 +47,9 @@ plus endpoints, L = schema + endpoints + several screens.
 
 | # | Area | Original size | Size here | Notes |
 |---|---|---|---|---|
-| 1 | Quotation flow (public page + accept) | 1 route | M | Terms acknowledgement exists; the quotation half does not. |
-| 2 | Receipt (public payment receipt) | 1 route | S | `access_tokens` already supports the link. |
-| 3 | Client delivery page (public) | 1 route | M | Work-submission API exists; the client-facing page does not. |
+| ~~1~~ | ~~Quotation flow~~ | done | | Snapshot, public page, accept/decline with evidence. |
+| ~~2~~ | ~~Payment receipt~~ | done | | Public page, prints. |
+| ~~3~~ | ~~Client delivery page~~ | done | | Public page behind the approved-work token. |
 | 4 | Enquiries | 2 routes, 10 components | L | Distinct from CRM leads in the original. |
 | 5 | Reminders | 1 route, 12 components | M | Cron writes notifications already. |
 | 6 | Personal expenses | 4 routes, 13 components | L | Company expenses exist; per-person ones do not. |
