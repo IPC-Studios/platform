@@ -22,7 +22,7 @@ const TONES: Record<QuickTone, string> = {
  * its own hue so the row is scanned by colour rather than read — which is also
  * why there are three of them and not eight.
  *
- * Hidden below `xl`: on a narrower bar the search field and the account menu are
+ * Hidden below `lg`: on a narrow bar the search field and the account menu are
  * worth more than a shortcut to a page the drawer already lists.
  */
 export function QuickLinks({ className }: { className?: string }) {

@@ -136,18 +136,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
 
           <div className="ml-auto flex items-center gap-2">
-            <QuickLinks className="hidden xl:flex" />
+            <QuickLinks className="hidden lg:flex" />
 
             {/* A shortcut nobody can see is a shortcut nobody uses, so the
-                trigger sits in the bar and names its own key. */}
+                trigger sits in the bar and names its own key.
+
+                Between lg and xl the pills are up and the bar is full, so the
+                field gives back its 16rem and rides as an icon until the
+                label fits again. */}
             <button
               type="button"
               onClick={openCommandPalette}
-              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64"
+              aria-label="Search"
+              className="flex items-center justify-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted sm:w-64 lg:w-9 lg:px-2 xl:w-64 xl:px-2.5"
             >
               <Search className="size-4 shrink-0" aria-hidden />
-              <span className="hidden flex-1 text-left sm:inline">Search…</span>
-              <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline">
+              <span className="hidden flex-1 text-left sm:inline lg:hidden xl:inline">Search…</span>
+              <kbd className="hidden rounded border border-border px-1.5 text-[0.65rem] sm:inline xl:inline lg:hidden">
                 {paletteShortcutHint()}
               </kbd>
             </button>
