@@ -1,12 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
+import { toast } from 'sonner'
 import {
   Briefcase,
+  Check,
+  ExternalLink,
+  MoreHorizontal,
+  FileText,
   CircleCheck,
   Clock,
   Download,
   IndianRupee,
   Lightbulb,
+  PauseCircle,
   Plus,
   Search,
   X,
@@ -26,7 +32,8 @@ import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { downloadCsv, toCsv } from '@/shared/ui/csv'
-import { useProjects } from '@/features/projects/api'
+import { useIssueQuotation, useProjects } from '@/features/projects/api'
+import { cn } from '@/shared/ui/cn'
 
 type Filter = ProjectStatus | 'all'
 
@@ -35,6 +42,14 @@ const STATUS_TONE: Record<ProjectStatus, 'info' | 'success' | 'danger' | 'warnin
   completed: 'success',
   cancelled: 'danger',
   on_hold: 'warning',
+}
+
+/** A glance at the badge should say which way a project is going. */
+const STATUS_ICON: Record<ProjectStatus, typeof Clock> = {
+  active: Clock,
+  completed: CircleCheck,
+  cancelled: X,
+  on_hold: PauseCircle,
 }
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', {
@@ -57,6 +72,7 @@ function ProjectsList() {
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [guide, setGuide] = useState(false)
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const isMobile = useIsMobile()
 
   const rows = useMemo(() => {
@@ -90,12 +106,33 @@ function ProjectsList() {
     [rows],
   )
 
+  /**
+   * Tick some rows and the export narrows to those; tick none and it takes
+   * whatever the filters have left on screen. Either way the button says how
+   * many are going, so nobody has to guess before they press it.
+   */
+  const exporting = useMemo(
+    () => (selected.size ? rows.filter((p) => selected.has(p.id)) : rows),
+    [rows, selected],
+  )
+
+  const allTicked = rows.length > 0 && rows.every((p) => selected.has(p.id))
+  const toggleAll = () =>
+    setSelected(allTicked ? new Set() : new Set(rows.map((p) => p.id)))
+  const toggleOne = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
   const exportCsv = () =>
     downloadCsv(
       'projects.csv',
       toCsv(
         ['Project', 'Client', 'Phone', 'Status', 'Total', 'Received', 'Pending', 'Created'],
-        rows.map((p) => [
+        exporting.map((p) => [
           p.name,
           p.client_name ?? '',
           p.client_phone ?? '',
@@ -120,11 +157,11 @@ function ProjectsList() {
 
       <PageHeader
         title="All Projects"
-        description="Every booked project, who it is for, and what is still owed."
+        description="View and manage all booked projects, client details, shoot status, and delivery progress."
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={exportCsv} disabled={rows.length === 0}>
-              <Download /> Export CSV
+            <Button variant="outline" onClick={exportCsv} disabled={exporting.length === 0}>
+              <Download /> Export ({exporting.length})
             </Button>
             <Button asChild>
               <Link to="/projects/new">
@@ -172,17 +209,18 @@ function ProjectsList() {
                 className="pl-9"
               />
             </div>
-            {(search || filter !== 'all') && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setSearch('')
-                  setFilter('all')
-                }}
-              >
-                <X /> Clear
-              </Button>
-            )}
+            {/* Always offered, even with nothing typed: it also drops the row
+                selection, which is the thing people get stuck with. */}
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSearch('')
+                setFilter('all')
+                setSelected(new Set())
+              }}
+            >
+              <X /> Clear
+            </Button>
           </div>
 
           <FilterTabs<Filter>
@@ -254,6 +292,13 @@ function ProjectsList() {
             <table className="table-sticky w-full text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
+                  <th className="w-10 px-3 py-2.5">
+                    <Tick
+                      checked={allTicked}
+                      onToggle={toggleAll}
+                      label={allTicked ? 'Clear the selection' : 'Select every project listed'}
+                    />
+                  </th>
                   <th className="px-4 py-2.5 font-medium">Project</th>
                   <th className="px-4 py-2.5 font-medium">Client</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
@@ -261,11 +306,17 @@ function ProjectsList() {
                   <th className="px-4 py-2.5 text-right font-medium">Received</th>
                   <th className="px-4 py-2.5 text-right font-medium">Pending</th>
                   <th className="px-4 py-2.5 font-medium">Created</th>
+                  <th className="w-12 px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((p) => (
-                  <Row key={p.id} project={p} />
+                  <Row
+                    key={p.id}
+                    project={p}
+                    ticked={selected.has(p.id)}
+                    onToggle={() => toggleOne(p.id)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -276,10 +327,22 @@ function ProjectsList() {
   )
 }
 
-function Row({ project: p }: { project: ProjectListItem }) {
+function Row({
+  project: p,
+  ticked,
+  onToggle,
+}: {
+  project: ProjectListItem
+  ticked: boolean
+  onToggle: () => void
+}) {
   const pending = Math.max(0, p.total_cost - p.received)
+  const StatusIcon = STATUS_ICON[p.status]
   return (
-    <tr className="border-t border-border hover:bg-muted/30">
+    <tr className={cn('border-t border-border hover:bg-muted/30', ticked && 'bg-primary/5')}>
+      <td className="px-3 py-2.5">
+        <Tick checked={ticked} onToggle={onToggle} label={`Select ${p.name}`} />
+      </td>
       <td className="px-4 py-2.5">
         <Link to="/projects/$id" params={{ id: p.id }} className="font-medium hover:underline">
           {p.name}
@@ -290,7 +353,10 @@ function Row({ project: p }: { project: ProjectListItem }) {
         {p.client_phone && <span className="text-xs"> · {p.client_phone}</span>}
       </td>
       <td className="px-4 py-2.5">
-        <StatusBadge tone={STATUS_TONE[p.status]}>{humanize(p.status)}</StatusBadge>
+        <StatusBadge tone={STATUS_TONE[p.status]}>
+          <StatusIcon className="mr-1 size-3" aria-hidden />
+          {humanize(p.status)}
+        </StatusBadge>
       </td>
       <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatINR(p.total_cost)}</td>
       {/* Zero received reads as neutral, not as good news. */}
@@ -305,6 +371,9 @@ function Row({ project: p }: { project: ProjectListItem }) {
         {formatINR(pending)}
       </td>
       <td className="px-4 py-2.5 text-muted-foreground">{created(p.created_at)}</td>
+      <td className="px-3 py-2.5">
+        <RowMenu project={p} />
+      </td>
     </tr>
   )
 }
@@ -340,6 +409,127 @@ function Figure({
         </p>
         <p className="font-semibold tabular-nums">{value}</p>
       </div>
+    </div>
+  )
+}
+/**
+ * The round tick from the reference, used for both the header and the rows.
+ *
+ * A button rather than a native checkbox: the native control cannot be shaped
+ * like this, and the whole row is clickable anyway, so what matters is that it
+ * announces itself as a checkbox and toggles on Space.
+ */
+function Tick({
+  checked,
+  onToggle,
+  label,
+}: {
+  checked: boolean
+  onToggle: () => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle()
+      }}
+      className={cn(
+        'flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+        checked
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-input hover:border-primary/50',
+      )}
+    >
+      {checked && <Check className="size-3" aria-hidden />}
+    </button>
+  )
+}
+
+/**
+ * The row's overflow menu.
+ *
+ * Only two things belong here: opening the project, and getting the quotation
+ * link without opening it. Deleting a project from a list row is how a studio
+ * loses a wedding by mis-tapping on a phone, so that stays on the project's
+ * own page behind a confirmation.
+ */
+function RowMenu({ project }: { project: ProjectListItem }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const issue = useIssueQuotation()
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={root} className="relative flex justify-end">
+      <button
+        type="button"
+        aria-label={`More for ${project.name}`}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <MoreHorizontal className="size-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="ipc-menu absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
+        >
+          <Link
+            to="/projects/$id"
+            params={{ id: project.id }}
+            role="menuitem"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+          >
+            <ExternalLink className="size-4 shrink-0" aria-hidden />
+            Open project
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={issue.isPending}
+            onClick={() =>
+              issue.mutate(
+                { project_id: project.id, notes: null },
+                {
+                  onSuccess: (r) => {
+                    void navigator.clipboard?.writeText(r.link)
+                    toast.success('Quotation link copied')
+                    setOpen(false)
+                  },
+                },
+              )
+            }
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:opacity-60"
+          >
+            <FileText className="size-4 shrink-0" aria-hidden />
+            {issue.isPending ? 'Preparing…' : 'Copy quotation link'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
