@@ -10,10 +10,13 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Eye,
   MapPin,
   Package,
   Plus,
+  Pencil,
   RotateCcw,
+  Save,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -21,6 +24,7 @@ import {
   UserPlus,
   Users,
   Wallet,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -45,7 +49,12 @@ import { Switch } from '@/shared/ui/switch'
 import { useConfirm } from '@/shared/ui/confirm'
 import { scrollIntoView } from '@/shared/ui/motion'
 import { useClients, useCreateClient } from '@/features/clients/api'
-import { useCreateProject } from '@/features/projects/api'
+import {
+  useCreateProject,
+  useDeleteDeliverableSet,
+  useDeliverableSets,
+  useSaveDeliverableSet,
+} from '@/features/projects/api'
 import {
   useDeleteShootPreset,
   useSaveShootPreset,
@@ -53,7 +62,9 @@ import {
   useShootPresets,
 } from '@/features/shoots/api'
 import {
+  BUILT_IN_SETS,
   EMPTY_DRAFT,
+  QUICK_DELIVERABLES,
   QUICK_SHOOTS,
   SHOOT_PRESET,
   STEP_HINTS,
@@ -61,6 +72,7 @@ import {
   WIZARD_STEPS,
   canSubmit,
   clearDraft,
+  deliverablesIn,
   draftTotals,
   estimatedDateFor,
   isDirty,
@@ -68,13 +80,16 @@ import {
   internalWorkSuggestions,
   loadDraft,
   matchShootTypes,
-  newDeliverable,
+  money,
+  newAddOn,
+  newClientDeliverable,
   newInternalWork,
   newPayment,
   newRequirement,
   newShoot,
   nextStep,
   prevStep,
+  rememberLeadDays,
   removeShootAt,
   saveDraft,
   shootIssues,
@@ -82,6 +97,7 @@ import {
   stepIndex,
   toProjectRequest,
   toShootRequests,
+  withDeliverables,
   withShoots,
   type DeliverableDraft,
   type ProjectDraft,
@@ -292,7 +308,9 @@ function NewProject() {
         <Section title={STEP_LABELS[step]} hint={STEP_HINTS[step]}>
           {step === 'client' && <ClientStep draft={draft} patch={patch} />}
           {step === 'shoots' && <ShootsStep draft={draft} patch={patch} />}
-          {step === 'deliverables' && <DeliverablesStep draft={draft} patch={patch} />}
+          {step === 'deliverables' && (
+            <DeliverablesStep draft={draft} patch={patch} onJump={goTo} />
+          )}
           {step === 'billing' && <BillingStep draft={draft} patch={patch} totals={totals} />}
           {step === 'review' && <ReviewStep draft={draft} totals={totals} errors={errors} onJump={goTo} />}
 
@@ -1342,125 +1360,404 @@ function SavePresetButton({
     </div>
   )
 }
-function DeliverablesStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
-  const set = (i: number, p: Partial<DeliverableDraft>) =>
-    patch({ deliverables: draft.deliverables.map((d, idx) => (idx === i ? { ...d, ...p } : d)) })
+/**
+ * What the client is promised, what costs extra, and what only the team sees —
+ * three lists rather than one, because those are three different conversations
+ * and only the first two ever reach a quotation.
+ *
+ * A row's list is not a stored field: it falls out of the two switches the row
+ * already carries, so turning "Charged on top" on moves an item into add-ons
+ * with no second source of truth to disagree.
+ */
+function DeliverablesStep({
+  draft,
+  patch,
+  onJump,
+}: {
+  draft: ProjectDraft
+  patch: Patch
+  onJump: (step: WizardStep) => void
+}) {
+  const sets = useDeliverableSets()
+  const saveSet = useSaveDeliverableSet()
+  const deleteSet = useDeleteDeliverableSet()
+  const [naming, setNaming] = useState(false)
+  const [setName, setSetName] = useState('')
+
+  const client = deliverablesIn(draft, 'client')
+  const addOns = deliverablesIn(draft, 'add_on')
+  const internal = deliverablesIn(draft, 'internal')
+
+  const add = (items: { title: string }[]) =>
+    patch({ deliverables: withDeliverables(draft.deliverables, items) })
+
+  const saveable = [...client, ...addOns].map(({ item }) => ({
+    title: item.title.trim(),
+    is_additional_charge: item.is_additional_charge,
+    additional_charge_amount: money(item.additional_charge_amount),
+    show_on_quotation: item.show_on_quotation,
+  })).filter((i) => i.title)
 
   return (
-    <RowList
-      items={draft.deliverables}
-      empty="Nothing listed yet. Add the album, the film, the reel — whatever the client is promised."
-      addLabel="Add deliverable"
-      onAdd={() => patch({ deliverables: [...draft.deliverables, newDeliverable()] })}
-    >
-      {draft.deliverables.map((d, i) => {
-        const due = estimatedDateFor(draft, d)
-        return (
-          <div key={i} className="rounded-lg border border-border p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Package className="size-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Deliverable {i + 1}</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="ml-auto"
-                onClick={() => patch({ deliverables: draft.deliverables.filter((_, idx) => idx !== i) })}
+    <div className="flex flex-col gap-5">
+      {/* ── what the client is promised ── */}
+      <SubCard
+        icon={Package}
+        title="Client deliverables"
+        hint="The final items promised to the client, shown on the quotation when enabled."
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => patch({ deliverables: [...draft.deliverables, newClientDeliverable()] })}
+          >
+            <Plus /> Add row
+          </Button>
+        }
+      >
+        <p className="mb-3 flex items-start gap-2 rounded-md bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+          <Eye className="mt-0.5 size-4 shrink-0" aria-hidden />
+          Only items with “Show on quotation” on will appear in the client quotation.
+        </p>
+
+        <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Load set
+            </span>
+            {BUILT_IN_SETS.map((s) => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => add(s.titles.map((title) => ({ title })))}
+                title={s.titles.join(', ')}
+                className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
               >
-                <Trash2 />
-                <span className="sr-only">Remove deliverable {i + 1}</span>
-              </Button>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Title" required>
-                <Input value={d.title} onChange={(e) => set(i, { title: e.target.value })} placeholder="Wedding album" />
-              </Field>
-              <Field label="Starts after">
-                <Select
-                  value={d.start_rule}
-                  onChange={(e) => set(i, { start_rule: e.target.value as DeliverableDraft['start_rule'] })}
+                <Plus className="size-3.5" aria-hidden />
+                {s.name}
+              </button>
+            ))}
+            {(sets.data ?? []).map((s) => (
+              <span
+                key={s.id}
+                className="flex items-center rounded-full border border-border bg-card pr-1 text-sm font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => patch({ deliverables: withDeliverables(draft.deliverables, s.items) })}
+                  title={s.items.map((i) => i.title).join(', ')}
+                  className="flex items-center gap-1 rounded-full px-3 py-1 transition-colors hover:text-primary"
                 >
-                  <option value="whole_project">All shoots are done</option>
-                  <option value="this_shoot">One specific shoot</option>
-                  <option value="specific_shoots">Selected shoots</option>
-                  <option value="no_data">No schedule</option>
-                </Select>
-              </Field>
-
-              {d.start_rule === 'this_shoot' && (
-                <Field label="Which shoot">
-                  <Select
-                    value={d.shoot_index ?? ''}
-                    onChange={(e) => set(i, { shoot_index: e.target.value === '' ? null : Number(e.target.value) })}
-                  >
-                    <option value="">— Pick a shoot —</option>
-                    {draft.shoots.map((s, idx) => (
-                      <option key={idx} value={idx}>
-                        {s.name || `Shoot ${idx + 1}`}
-                        {s.shoot_date ? ` · ${prettyDate(s.shoot_date)}` : ''}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              )}
-
-              {d.start_rule !== 'no_data' && (
-                <Field label="Delivery lead time (days)">
-                  <Input
-                    inputMode="numeric"
-                    value={d.lead_days}
-                    onChange={(e) => set(i, { lead_days: e.target.value })}
-                    placeholder="45"
-                  />
-                </Field>
-              )}
-            </div>
-
-            {d.start_rule !== 'no_data' && (
-              <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CalendarDays className="size-3.5" />
-                {due ? (
-                  <>
-                    Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
-                  </>
-                ) : (
-                  'Estimated delivery appears once the shoot has a date and a lead time.'
-                )}
-              </p>
-            )}
-
-            <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-border pt-4">
-              <Switch
-                className="w-auto"
-                checked={d.is_additional_charge}
-                onChange={(v) => set(i, { is_additional_charge: v })}
-                label="Charged on top of the package"
-              />
-              {d.is_additional_charge && (
-                <Field label="Amount (₹)" required>
-                  <Input
-                    inputMode="numeric"
-                    value={d.additional_charge_amount}
-                    onChange={(e) => set(i, { additional_charge_amount: e.target.value })}
-                    placeholder="15000"
-                    className="w-40"
-                  />
-                </Field>
-              )}
-              <Switch
-                className="w-auto"
-                checked={d.visibility_scope === 'client'}
-                onChange={(v) => set(i, { visibility_scope: v ? 'client' : 'internal' })}
-                label="Visible to the client"
-              />
-            </div>
+                  <Plus className="size-3.5" aria-hidden />
+                  {s.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteSet.mutate(s.id)}
+                  disabled={deleteSet.isPending}
+                  className="rounded-full p-1 text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  <X className="size-3.5" aria-hidden />
+                  <span className="sr-only">Delete set {s.name}</span>
+                </button>
+              </span>
+            ))}
           </div>
-        )
-      })}
-    </RowList>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {naming ? (
+              <>
+                <Input
+                  autoFocus
+                  value={setName}
+                  onChange={(e) => setSetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setNaming(false)
+                    if (e.key !== 'Enter' || !setName.trim()) return
+                    saveSet.mutate(
+                      { name: setName.trim(), items: saveable },
+                      { onSuccess: () => setNaming(false) },
+                    )
+                  }}
+                  placeholder="Name this set"
+                  aria-label="Set name"
+                  className="w-56"
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    saveSet.mutate(
+                      { name: setName.trim(), items: saveable },
+                      { onSuccess: () => setNaming(false) },
+                    )
+                  }
+                  disabled={!setName.trim() || saveSet.isPending}
+                >
+                  Save
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setSetName('')
+                  setNaming(true)
+                }}
+                disabled={saveable.length === 0}
+                title={saveable.length === 0 ? 'Add a deliverable first' : undefined}
+              >
+                <Save /> Save as set
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              Sets are shared with your whole team. Delivery-time memory stays on this device.
+            </span>
+          </div>
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <Sparkles className="size-3.5" aria-hidden />
+            Quick add
+          </span>
+          {QUICK_DELIVERABLES.map((title) => {
+            const already = draft.deliverables.some(
+              (d) => d.title.trim().toLowerCase() === title.toLowerCase(),
+            )
+            return (
+              <button
+                key={title}
+                type="button"
+                onClick={() => add([{ title }])}
+                disabled={already}
+                title={already ? `${title} is already on the list` : undefined}
+                className={cn(
+                  'flex items-center gap-1 rounded-full border border-border px-3 py-1 text-sm font-medium transition-colors',
+                  already
+                    ? 'cursor-not-allowed text-muted-foreground opacity-60'
+                    : 'hover:border-primary hover:bg-primary/10 hover:text-primary',
+                )}
+              >
+                {already ? <Check className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
+                {title}
+              </button>
+            )
+          })}
+        </div>
+
+        {client.length === 0 ? (
+          <Band>
+            No deliverables yet. Tap a Quick add chip above, or load one of your sets.
+          </Band>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {client.map(({ at, item }) => (
+              <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what costs extra ── */}
+      <SubCard
+        icon={Wallet}
+        title="Additional client services"
+        hint="Optional add-ons billed on top of the package. Turn off “Show on quotation” to keep one internal."
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => patch({ deliverables: [...draft.deliverables, newAddOn()] })}
+          >
+            <Plus /> Add row
+          </Button>
+        }
+      >
+        {addOns.length === 0 ? (
+          <Band>Nothing billed separately yet. Use “Add row” to add an extra.</Band>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {addOns.map(({ at, item }) => (
+              <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+            ))}
+          </div>
+        )}
+      </SubCard>
+
+      {/* ── what only the team sees ── */}
+      {internal.length > 0 && (
+        <SubCard
+          icon={Users}
+          title="Internal work"
+          hint="For your team only — never shown on the quotation. Items added inside a shoot are edited there."
+          actions={
+            internal.some(({ item }) => item.shoot_index !== null) ? (
+              <Button size="sm" variant="ghost" onClick={() => onJump('shoots')}>
+                <Pencil /> Edit in Shoots
+              </Button>
+            ) : null
+          }
+        >
+          <div className="flex flex-col gap-2">
+            {internal.map(({ at, item }) =>
+              item.shoot_index === null ? (
+                <DeliverableRow key={at} at={at} item={item} draft={draft} patch={patch} />
+              ) : (
+                <div
+                  key={at}
+                  className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                >
+                  <Package className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="font-medium">{item.title || 'Untitled'}</span>
+                  <span className="text-muted-foreground">
+                    · {draft.shoots[item.shoot_index]?.name?.trim() || `Shoot ${item.shoot_index + 1}`}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+        </SubCard>
+      )}
+    </div>
   )
 }
 
+/**
+ * One deliverable, edited in place.
+ *
+ * The lead time is remembered per title on this device as it is typed, so the
+ * next project that quotes a "Photo Album" starts from the turnaround this
+ * studio actually works to instead of an empty box.
+ */
+function DeliverableRow({
+  at,
+  item,
+  draft,
+  patch,
+}: {
+  at: number
+  item: DeliverableDraft
+  draft: ProjectDraft
+  patch: Patch
+}) {
+  const set = (p: Partial<DeliverableDraft>) =>
+    patch({ deliverables: draft.deliverables.map((d, i) => (i === at ? { ...d, ...p } : d)) })
+  const due = estimatedDateFor(draft, item)
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Package className="size-4 text-muted-foreground" />
+        <span className="text-sm font-medium">{item.title.trim() || 'Untitled deliverable'}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto"
+          onClick={() => patch({ deliverables: draft.deliverables.filter((_, i) => i !== at) })}
+        >
+          <Trash2 />
+          <span className="sr-only">Remove {item.title.trim() || 'this deliverable'}</span>
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Title" required>
+          <Input
+            value={item.title}
+            onChange={(e) => set({ title: e.target.value })}
+            placeholder="Wedding album"
+          />
+        </Field>
+        <Field label="Starts after">
+          <Select
+            value={item.start_rule}
+            onChange={(e) => set({ start_rule: e.target.value as DeliverableDraft['start_rule'] })}
+          >
+            <option value="whole_project">All shoots are done</option>
+            <option value="this_shoot">One specific shoot</option>
+            <option value="specific_shoots">Selected shoots</option>
+            <option value="no_data">No schedule</option>
+          </Select>
+        </Field>
+
+        {item.start_rule === 'this_shoot' && (
+          <Field label="Which shoot">
+            <Select
+              value={item.shoot_index ?? ''}
+              onChange={(e) => set({ shoot_index: e.target.value === '' ? null : Number(e.target.value) })}
+            >
+              <option value="">— Pick a shoot —</option>
+              {draft.shoots.map((s, idx) => (
+                <option key={idx} value={idx}>
+                  {s.name || `Shoot ${idx + 1}`}
+                  {s.shoot_date ? ` · ${prettyDate(s.shoot_date)}` : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        {item.start_rule !== 'no_data' && (
+          <Field label="Delivery lead time (days)">
+            <Input
+              inputMode="numeric"
+              value={item.lead_days}
+              onChange={(e) => set({ lead_days: e.target.value })}
+              onBlur={(e) => rememberLeadDays(item.title, e.target.value)}
+              placeholder="45"
+            />
+          </Field>
+        )}
+      </div>
+
+      {item.start_rule !== 'no_data' && (
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CalendarDays className="size-3.5" />
+          {due ? (
+            <>
+              Estimated delivery <span className="font-medium text-foreground">{prettyDate(due)}</span>
+            </>
+          ) : (
+            'Estimated delivery appears once the shoot has a date and a lead time.'
+          )}
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-border pt-4">
+        <Switch
+          className="w-auto"
+          checked={item.is_additional_charge}
+          onChange={(v) => set({ is_additional_charge: v })}
+          label="Charged on top of the package"
+        />
+        {item.is_additional_charge && (
+          <Field label="Amount (₹)" required>
+            <Input
+              inputMode="numeric"
+              value={item.additional_charge_amount}
+              onChange={(e) => set({ additional_charge_amount: e.target.value })}
+              placeholder="15000"
+              className="w-40"
+            />
+          </Field>
+        )}
+        <Switch
+          className="w-auto"
+          checked={item.show_on_quotation}
+          onChange={(v) => set({ show_on_quotation: v })}
+          label="Show on quotation"
+        />
+        <Switch
+          className="w-auto"
+          checked={item.visibility_scope === 'client'}
+          onChange={(v) => set({ visibility_scope: v ? 'client' : 'internal' })}
+          label="Visible to the client"
+        />
+      </div>
+    </div>
+  )
+}
 function BillingStep({
   draft,
   patch,

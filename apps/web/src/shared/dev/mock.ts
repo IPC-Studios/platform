@@ -171,6 +171,12 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/clients') return atStage(clients, 'partial')
   if (method === 'GET' && path === '/projects') return atStage(projects, 'partial')
   if (method === 'GET' && path === '/projects/tracking') return atStage(trackingRows, 'partial')
+  // Above the catch-all below, which would answer this with a project detail.
+  if (method === 'GET' && path === '/projects/deliverable-sets')
+    return atStage(deliverableSetsFx, 'partial')
+  if (method === 'POST' && path === '/projects/deliverable-sets')
+    return { id: uid(0xd5), ...(body as object) }
+  if (method === 'DELETE' && path.startsWith('/projects/deliverable-sets/')) return {}
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
     return atStage(boardTasks, 'full')
@@ -817,6 +823,18 @@ const bundlesFx = [
     items: [
       { id: uid(0xd71), title: 'Confirm call sheet', priority: 'urgent', sort_order: 0 },
       { id: uid(0xd72), title: 'Charge batteries and format cards', priority: 'high', sort_order: 1 },
+    ],
+  },
+]
+
+const deliverableSetsFx = [
+  {
+    id: uid(0x78),
+    name: 'House standard',
+    items: [
+      { title: 'Edited Photos', is_additional_charge: false, additional_charge_amount: 0, show_on_quotation: true },
+      { title: 'Wedding Teaser', is_additional_charge: false, additional_charge_amount: 0, show_on_quotation: true },
+      { title: 'Drone Shots', is_additional_charge: true, additional_charge_amount: 15000, show_on_quotation: true },
     ],
   },
 ]
