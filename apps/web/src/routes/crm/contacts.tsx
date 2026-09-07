@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import { Archive, ArchiveRestore, Mail, Phone, Plus, Search, Users } from 'lucide-react'
 import { createContactRequest, type ContactLifecycle, type CrmContact, type CrmLead } from '@ipc/contracts'
+import { describeActivity } from '@ipc/domain'
 import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -17,7 +18,7 @@ import { formatINR } from '@/shared/ui/format'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useMembers } from '@/features/allocation/api'
-import { useContacts, useCreateContact, useCrmCompanies, useDealsFor, useUpdateContact } from '@/features/crm/api'
+import { useActivities, useContact, useContacts, useCreateContact, useCrmCompanies, useDealsFor, useLogActivity, useUpdateContact } from '@/features/crm/api'
 import { LeadDrawer } from '@/features/crm/LeadDrawer'
 import { leadStageLabel, STAGE_TONE } from '@/features/crm/tabs/shared'
 
@@ -72,7 +73,13 @@ function Contacts() {
   }, [q])
 
   const rows = data ?? []
-  const open = rows.find((c) => c.id === openId) ?? null
+  // The list is filtered, capped and hides archived rows, so a link from a
+  // deal would open nothing whenever the contact was not on screen. Fetch
+  // the one that is missing rather than shrugging.
+  const fromList = rows.find((c) => c.id === openId) ?? null
+  const fetched = useContact(fromList ? null : openId)
+  const open = fromList ?? fetched.data ?? null
+  const missing = !!openId && !open && !fetched.isLoading
 
   return (
     <>
@@ -167,6 +174,15 @@ function Contacts() {
         )}
       </div>
 
+      {missing && (
+        <Dialog open onOpenChange={() => setOpenId(null)}>
+          <DialogContent title="Contact not found" description="It may have been merged away or deleted.">
+            <div className="flex justify-end">
+              <Button onClick={() => setOpenId(null)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       {open && <ContactDrawer contact={open} onClose={() => setOpenId(null)} />}
     </>
   )
@@ -207,6 +223,7 @@ function ContactDrawer({ contact, onClose }: { contact: CrmContact; onClose: () 
               </Button>
             )}
             {contact.is_archived && <StatusBadge tone="neutral">Archived</StatusBadge>}
+            {contact.source && <StatusBadge tone="neutral">via {contact.source}</StatusBadge>}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -269,6 +286,8 @@ function ContactDrawer({ contact, onClose }: { contact: CrmContact; onClose: () 
             )}
           </div>
 
+          <ContactActivity contactId={contact.id} canEdit={canEdit} />
+
           <div className="rounded-lg border border-border p-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Deals</p>
             {deals.isLoading ? (
@@ -306,6 +325,67 @@ function ContactDrawer({ contact, onClose }: { contact: CrmContact; onClose: () 
   )
 }
 
+const activityWhen = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/**
+ * What has passed between the studio and this person, across every deal.
+ * Activities have always been allowed to hang off a contact rather than a
+ * deal; nothing in the product could see one, or make one.
+ */
+function ContactActivity({ contactId, canEdit }: { contactId: string; canEdit: boolean }) {
+  const { data, isLoading } = useActivities({ contactId })
+  const log = useLogActivity()
+  const [note, setNote] = useState('')
+  const rows = data ?? []
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity</p>
+      {isLoading ? (
+        <SkeletonList rows={2} columns={2} />
+      ) : rows.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">Nothing logged against this person yet.</p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {rows.slice(0, 15).map((a) => (
+            <li key={a.id} className="text-xs text-muted-foreground">
+              <span className="tabular-nums">{activityWhen.format(new Date(a.started_at ?? a.created_at))}</span>
+              {' — '}
+              {describeActivity(a)}
+              {a.lead_name ? ` · ${a.lead_name}` : ''}
+              {a.actor_name ? ` · ${a.actor_name}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <div className="mt-2 flex items-center gap-2">
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note about this person"
+            aria-label="Note about this person"
+            className="h-8 text-sm"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!note.trim() || log.isPending}
+            onClick={() =>
+              log.mutate(
+                { contact_id: contactId, type: 'note', direction: 'none', subject: note.trim(), started_at: new Date().toISOString() },
+                { onSuccess: () => setNote('') },
+              )
+            }
+          >
+            Add
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function DealRow({ deal, onOpen }: { deal: CrmLead; onOpen: () => void }) {
   return (
     <li>
@@ -330,6 +410,7 @@ export function Field({ label, id, children }: { label: string; id: string; chil
 type NewField = 'name' | 'phone' | 'email'
 const NEW_LABELS: Record<NewField, string> = { name: 'Name', phone: 'Phone', email: 'Email' }
 
+
 function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
   const create = useCreateContact()
   const access = useAccess()
@@ -337,6 +418,10 @@ function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [lifecycle, setLifecycle] = useState<ContactLifecycle>('lead')
+  const [companyId, setCompanyId] = useState('')
+  const [notes, setNotes] = useState('')
+  const { data: companies } = useCrmCompanies()
   const [errors, setErrors] = useState<FieldErrors<NewField>>({})
   if (!access.hasAction('crm', 'create')) return null
 
@@ -346,6 +431,9 @@ function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
       name: name.trim(),
       ...(phone.trim() ? { phone: phone.trim() } : {}),
       ...(email.trim() ? { email: email.trim() } : {}),
+      lifecycle,
+      ...(companyId ? { crm_company_id: companyId } : {}),
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
     }
     const found = fieldErrors<NewField>(createContactRequest, body, { labels: NEW_LABELS })
     setErrors(found)
@@ -356,6 +444,9 @@ function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
         setName('')
         setPhone('')
         setEmail('')
+        setLifecycle('lead')
+        setCompanyId('')
+        setNotes('')
         onAdded(c.id)
       },
     })
@@ -384,6 +475,37 @@ function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
               {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
             </Field>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Lifecycle" id="nc-life">
+              <Select id="nc-life" value={lifecycle} onChange={(e) => setLifecycle(e.target.value as ContactLifecycle)}>
+                {LIFECYCLES.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    {l.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Company" id="nc-company">
+              <Select id="nc-company" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                <option value="">None</option>
+                {(companies ?? []).map((co) => (
+                  <option key={co.id} value={co.id}>
+                    {co.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Notes" id="nc-notes">
+            <textarea
+              id="nc-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              placeholder="What they are after, how they found you."
+            />
+          </Field>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

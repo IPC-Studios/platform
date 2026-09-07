@@ -17,7 +17,7 @@ import { formatINR } from '@/shared/ui/format'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useMembers } from '@/features/allocation/api'
-import { useContacts, useCreateCrmCompany, useCrmCompanies, useDealsFor, useUpdateCrmCompany } from '@/features/crm/api'
+import { useContacts, useCreateCrmCompany, useCrmCompanies, useCrmCompany, useDealsFor, useUpdateCrmCompany } from '@/features/crm/api'
 import { LeadDrawer } from '@/features/crm/LeadDrawer'
 import { DealRow, Field } from './contacts'
 
@@ -45,7 +45,11 @@ function Companies() {
   const { data, isLoading, isError, error, refetch } = useCrmCompanies(showArchived)
   const isMobile = useIsMobile()
   const rows = data ?? []
-  const open = rows.find((c) => c.id === openId) ?? null
+  // A link from a deal can name a company the list is not showing.
+  const fromList = rows.find((c) => c.id === openId) ?? null
+  const fetched = useCrmCompany(fromList ? null : openId)
+  const open = fromList ?? fetched.data ?? null
+  const missing = !!openId && !open && !fetched.isLoading
 
   return (
     <>
@@ -125,6 +129,15 @@ function Companies() {
         )}
       </div>
 
+      {missing && (
+        <Dialog open onOpenChange={() => setOpenId(null)}>
+          <DialogContent title="Company not found" description="It may have been deleted.">
+            <div className="flex justify-end">
+              <Button onClick={() => setOpenId(null)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       {open && <CompanyDrawer company={open} onClose={() => setOpenId(null)} />}
     </>
   )
@@ -185,6 +198,19 @@ function CompanyDrawer({ company, onClose }: { company: CrmCompany; onClose: () 
             </Field>
             <Field label="City" id="co-city">
               <Input id="co-city" defaultValue={company.city ?? ''} disabled={!canEdit} onBlur={text('city')} />
+            </Field>
+            <Field label="Notes" id="co-notes">
+              <textarea
+                id="co-notes"
+                defaultValue={company.notes ?? ''}
+                disabled={!canEdit}
+                rows={2}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                onBlur={(e) => {
+                  const v = e.target.value.trim() || null
+                  if (v !== company.notes) patch({ notes: v })
+                }}
+              />
             </Field>
             <Field label="Owner" id="co-owner">
               <Select id="co-owner" value={company.owner_id ?? ''} disabled={!canEdit || update.isPending} onChange={(e) => patch({ owner_id: e.target.value || null })}>
@@ -263,6 +289,7 @@ function NewCompanyDialog({ onAdded }: { onAdded: (id: string) => void }) {
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
   const [city, setCity] = useState('')
+  const [notes, setNotes] = useState('')
   const [errors, setErrors] = useState<FieldErrors<NewField>>({})
   if (!access.hasAction('crm', 'create')) return null
 
@@ -272,6 +299,7 @@ function NewCompanyDialog({ onAdded }: { onAdded: (id: string) => void }) {
       name: name.trim(),
       ...(domain.trim() ? { domain: domain.trim() } : {}),
       ...(city.trim() ? { city: city.trim() } : {}),
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
     }
     const found = fieldErrors<NewField>(createCrmCompanyRequest, body, { labels: NEW_LABELS })
     setErrors(found)
@@ -282,6 +310,7 @@ function NewCompanyDialog({ onAdded }: { onAdded: (id: string) => void }) {
         setName('')
         setDomain('')
         setCity('')
+        setNotes('')
         onAdded(c.id)
       },
     })
@@ -308,6 +337,15 @@ function NewCompanyDialog({ onAdded }: { onAdded: (id: string) => void }) {
               <Input id="ncp-city" value={city} onChange={(e) => setCity(e.target.value)} aria-invalid={!!errors.city} />
             </Field>
           </div>
+          <Field label="Notes" id="ncp-notes">
+            <textarea
+              id="ncp-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+          </Field>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

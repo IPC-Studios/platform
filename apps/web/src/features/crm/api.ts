@@ -561,6 +561,16 @@ export function useCrmCompanies(includeArchived = false) {
   )
 }
 
+/** One company by id, for a link that arrives from somewhere else. */
+export function useCrmCompany(id: string | null) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['crm', 'company', id],
+    queryFn: () => callApi(`/crm/companies/${id}`, { responseSchema: crmCompany }),
+    enabled: !!session && !!id,
+  })
+}
+
 export function useCreateCrmCompany() {
   return useCrmMutation(
     (input: CreateCrmCompanyRequest) => callApi('/crm/companies', { method: 'POST', body: input, responseSchema: crmCompany }),
