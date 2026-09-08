@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 import {
+  createServiceRequest,
   createShootRequest,
   saveShootPresetRequest,
   serviceOption,
   shootListItem,
   shootPreset,
   shootPresetKind,
+  updateServiceRequest,
   updateShootRequest,
   type ShootRequirementInput,
 } from '@ipc/contracts'
@@ -126,6 +128,60 @@ export const shootsRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not load services.')
     return c.json(services.parse(rows))
+  })
+
+  .post('/services', requireAction('projects', 'edit'), async (c) => {
+    const parsed = createServiceRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the service.')
+    const auth = c.get('auth')
+    const row = await attempt(
+      c,
+      'shoots.services.create',
+      () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const rows = await sql`
+            insert into services ${sql({ company_id: auth.companyId, name: parsed.data.name })}
+            returning id, name`
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (row === 'taken') fail(409, 'A service with this name already exists.')
+    if (!row) fail(400, 'We could not add this service.')
+    await audit(c, { action: 'service.create', entityType: 'service', entityId: row.id, after: parsed.data })
+    return c.json(serviceOption.parse(row), 201)
+  })
+
+  .patch('/services/:id', requireAction('projects', 'edit'), async (c) => {
+    const parsed = updateServiceRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the service.')
+    const id = uuidParam(c)
+    const row = await attempt(
+      c,
+      'shoots.services.update',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const rows = await sql`update services set name = ${parsed.data.name} where id = ${id} returning id, name`
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (row === 'taken') fail(409, 'A service with this name already exists.')
+    if (!row) fail(404, 'That service was not found.')
+    await audit(c, { action: 'service.update', entityType: 'service', entityId: id, after: parsed.data })
+    return c.json(serviceOption.parse(row))
+  })
+
+  .delete('/services/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'shoots.services.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from services where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this service.')
+    if (!rows.length) fail(404, 'That service was not found.')
+    await audit(c, { action: 'service.delete', entityType: 'service', entityId: id })
+    return c.body(null, 204)
   })
 
   .get('/presets', requireAction('projects', 'view'), async (c) => {

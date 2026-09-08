@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { client, createClientRequest, type CreateClientRequest } from '@ipc/contracts'
+import { z, client, createClientRequest, type CreateClientRequest } from '@ipc/contracts'
+
+const noContent = z.unknown()
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
@@ -29,6 +31,34 @@ export function useCreateClient() {
       }),
     onSuccess: () => {
       toast.success('Client added')
+      void qc.invalidateQueries({ queryKey: ['clients'] })
+    },
+  })
+}
+
+/** Same endpoint shape whether this is the first save or the fifth. */
+export function useUpdateClient(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: Partial<CreateClientRequest>) =>
+      callApi(`/clients/${id}`, {
+        method: 'PATCH',
+        body: input,
+        responseSchema: client,
+      }),
+    onSuccess: () => {
+      toast.success('Client updated')
+      void qc.invalidateQueries({ queryKey: ['clients'] })
+    },
+  })
+}
+
+export function useDeleteClient() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/clients/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    onSuccess: () => {
+      toast.success('Client deleted')
       void qc.invalidateQueries({ queryKey: ['clients'] })
     },
   })

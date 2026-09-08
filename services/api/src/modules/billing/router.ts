@@ -106,9 +106,9 @@ export const billingRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'billing.invoice', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
-          select i.id, i.invoice_number, i.invoice_date, i.status, i.place_of_supply,
-                 i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.created_at,
-                 cl.name as client_name,
+          select i.id, i.invoice_number, i.invoice_date, i.due_date, i.status, i.place_of_supply,
+                 i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.notes, i.created_at,
+                 cl.name as client_name, cl.gstin as client_gstin, cl.address as client_address,
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
                      'id', it.id, 'description', it.description, 'quantity', it.quantity,

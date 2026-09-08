@@ -14,6 +14,7 @@ export const referralCampaign = z.object({
   id: uuid,
   company_id: uuid,
   name: z.string(),
+  slug: z.string(),
   description: z.string().nullable(),
   reward_type: referralRewardType,
   reward_value: money,
@@ -69,6 +70,17 @@ export const referralSubmissionList = z.object({
   next_cursor: isoDateTime.nullable().default(null),
 })
 export type ReferralSubmissionList = z.infer<typeof referralSubmissionList>
+
+export const publicReferralCampaign = z.object({
+  campaign_id: uuid,
+  name: z.string(),
+  description: z.string().nullable(),
+  reward_type: referralRewardType,
+  reward_value: money,
+  reward_description: z.string().nullable(),
+  studio_name: z.string().nullable(),
+})
+export type PublicReferralCampaign = z.infer<typeof publicReferralCampaign>
 
 export const submitReferralRequest = z.object({
   referrer_name: z.string().trim().max(160).nullish(),

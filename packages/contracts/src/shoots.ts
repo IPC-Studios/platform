@@ -41,6 +41,12 @@ export type ShootListItem = z.infer<typeof shootListItem>
 export const serviceOption = z.object({ id: uuid, name: z.string() })
 export type ServiceOption = z.infer<typeof serviceOption>
 
+export const createServiceRequest = z.object({ name: z.string().trim().min(1).max(120) })
+export type CreateServiceRequest = z.infer<typeof createServiceRequest>
+
+export const updateServiceRequest = createServiceRequest
+export type UpdateServiceRequest = z.infer<typeof updateServiceRequest>
+
 /**
  * A map link is a link. Storing an address here instead would put the driver's
  * pin and the printed address in the same field, and lose one of them.

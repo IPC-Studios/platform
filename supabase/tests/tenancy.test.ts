@@ -98,6 +98,9 @@ async function freshDb() {
   await db.exec(mig('0062_activity_log.sql'))
   await db.exec(mig('0063_security_fixes.sql'))
   await db.exec(mig('0064_gopo_gst_fixes.sql'))
+  await db.exec(mig('0065_client_fields.sql'))
+  await db.exec(mig('0066_crm_lead_event_fields.sql'))
+  await db.exec(mig('0067_referral_slug.sql'))
   return db
 }
 
@@ -4218,5 +4221,79 @@ describe('registration defers to a live invitation', () => {
     for (const e of ['expired@s.test', 'revoked@s.test', 'accepted@s.test', 'nobody@s.test']) {
       expect((await pending(e)).rows).toHaveLength(0)
     }
+  })
+})
+
+/**
+ * Lovable-parity additions: client relation/GSTIN, lead event fields, and the
+ * referral slug + public lookup. Each of these landed alongside a UI change,
+ * so this proves the SQL side independent of what the frontend sends.
+ */
+describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a client can carry a relation tag and a GSTIN', async () => {
+    const r = await db.query<{ id: string }>(
+      `insert into clients (company_id, name, relation, gstin)
+       values (get_current_company_id(), 'Acme', 'Referral', '27ABCDE1234F1Z5')
+       returning id;`,
+    )
+    const row = await db.query<{ relation: string; gstin: string }>(
+      `select relation, gstin from clients where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ relation: 'Referral', gstin: '27ABCDE1234F1Z5' })
+  })
+
+  it('a lead can carry an event type, date and location', async () => {
+    const r = await db.query<{ id: string }>(
+      `insert into crm_leads (company_id, phone, phone_norm, event_type, event_date, event_location)
+       values (get_current_company_id(), '9000000000', '9000000000', 'Wedding', '2026-12-14', 'Taj Palace, Jaipur')
+       returning id;`,
+    )
+    const row = await db.query<{ event_type: string; event_date: string; event_location: string }>(
+      `select event_type, event_date, event_location from crm_leads where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]!.event_type).toBe('Wedding')
+    expect(row.rows[0]!.event_location).toBe('Taj Palace, Jaipur')
+  })
+
+  it('generate_referral_slug is readable, unique, and stable to look up', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const a = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Wedding Referral', generate_referral_slug('Wedding Referral')) returning slug;`,
+    )
+    const b = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Wedding Referral', generate_referral_slug('Wedding Referral')) returning slug;`,
+    )
+    expect(a.rows[0]!.slug).not.toBe(b.rows[0]!.slug)
+    expect(a.rows[0]!.slug).toMatch(/^wedding-referral-/)
+
+    const lookup = await db.query<{ v: { name: string; campaign_id: string } }>(
+      `select get_public_referral_campaign('${a.rows[0]!.slug}') as v;`,
+    )
+    expect(lookup.rows[0]!.v.name).toBe('Wedding Referral')
+  })
+
+  it('an ended campaign is not reachable through the public lookup', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const made = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug, status)
+       values ('${co}', 'Old Promo', generate_referral_slug('Old Promo'), 'ended') returning slug;`,
+    )
+    const lookup = await db.query<{ v: unknown }>(`select get_public_referral_campaign('${made.rows[0]!.slug}') as v;`)
+    expect(lookup.rows[0]!.v).toBeNull()
+  })
+
+  it('the service catalog rejects a duplicate name per company', async () => {
+    await db.exec(`insert into services (company_id, name) values (get_current_company_id(), 'Wedding Photography');`)
+    await expect(
+      db.exec(`insert into services (company_id, name) values (get_current_company_id(), 'Wedding Photography');`),
+    ).rejects.toThrow()
   })
 })

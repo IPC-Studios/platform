@@ -18,6 +18,8 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { monthlySeries } from '@/shared/ui/chart-geometry'
 import { useInvoices, useStates, useCreateInvoice, useRecordPayment } from '@/features/billing/api'
+import { useClients } from '@/features/clients/api'
+import { useProjects } from '@/features/projects/api'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
 const GST_SLABS: GstSlab[] = [0, 5, 12, 18, 28]
@@ -150,15 +152,28 @@ function Billing() {
 
 type Line = InvoiceLineInput
 
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
 function NewInvoiceDialog() {
   const create = useCreateInvoice()
   const { data: states } = useStates()
+  const { data: clients } = useClients()
+  const { data: projects } = useProjects()
   const [open, setOpen] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [projectId, setProjectId] = useState('')
   const [place, setPlace] = useState('27')
   const [intra, setIntra] = useState(true)
+  const [invoiceDate, setInvoiceDate] = useState(todayISO())
+  const [dueDate, setDueDate] = useState('')
   const [discount, setDiscount] = useState(0)
+  const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, rate: 0, gst_rate: 18 }])
   const [error, setError] = useState<string | null>(null)
+
+  // Only this client's projects, so picking a project can't silently bill
+  // someone else's job to the wrong client.
+  const clientProjects = (projects ?? []).filter((p) => !clientId || p.client_id === clientId)
 
   const totals = useMemo(
     () =>
@@ -178,15 +193,23 @@ function NewInvoiceDialog() {
     setError(null)
     try {
       const body: CreateInvoiceRequest = {
-        client_id: null,
-        project_id: null,
+        client_id: clientId || null,
+        project_id: projectId || null,
         place_of_supply: place,
         intra_state: intra,
+        invoice_date: invoiceDate || undefined,
+        due_date: dueDate || undefined,
         discount,
+        notes: notes.trim() || undefined,
         lines: lines.filter((l) => l.description.trim()),
       }
       await create.mutateAsync(body)
       setOpen(false)
+      setClientId('')
+      setProjectId('')
+      setDueDate('')
+      setNotes('')
+      setInvoiceDate(todayISO())
       setLines([{ description: '', quantity: 1, rate: 0, gst_rate: 18 }])
       setDiscount(0)
     } catch (err) {
@@ -203,6 +226,51 @@ function NewInvoiceDialog() {
       </DialogTrigger>
       <DialogContent title="New invoice" description="GST is computed automatically." className="max-w-2xl">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>
+                Client <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={clientId}
+                onChange={(e) => {
+                  setClientId(e.target.value)
+                  setProjectId('')
+                }}
+                aria-invalid={!clientId}
+              >
+                <option value="">Select a client…</option>
+                {(clients ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Project (optional)</Label>
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={!clientId}>
+                <option value="">Not linked to a project</option>
+                {clientProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Invoice date</Label>
+              <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Due date (optional)</Label>
+              <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} min={invoiceDate || undefined} />
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Place of supply</Label>
@@ -258,6 +326,17 @@ function NewInvoiceDialog() {
             </div>
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <Label>Notes (optional)</Label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Shown on the invoice, below the line items."
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+            />
+          </div>
+
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}
@@ -269,7 +348,7 @@ function NewInvoiceDialog() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={create.isPending || totals.total <= 0}>
+            <Button type="submit" disabled={create.isPending || totals.total <= 0 || !clientId}>
               {create.isPending ? 'Creating…' : 'Create invoice'}
             </Button>
           </div>

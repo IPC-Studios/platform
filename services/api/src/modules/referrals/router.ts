@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import {
   createReferralCampaignRequest,
+  publicReferralCampaign,
   referralCampaignList,
   referralSubmissionList,
   submitReferralRequest,
@@ -29,7 +30,7 @@ export const referralsRouter = new Hono<AppEnv>()
     const rows = await attempt(c, 'referrals.campaigns', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const campaigns = await sql`
-          select id, company_id, name, description, reward_type, reward_value,
+          select id, company_id, name, slug, description, reward_type, reward_value,
                  reward_description, status, created_at
             from referral_campaigns
            where company_id = ${c.get('auth').companyId}
@@ -54,16 +55,16 @@ export const referralsRouter = new Hono<AppEnv>()
     const d = parsed.data
     const rows = await attempt(c, 'referrals.campaign_create', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const made = await sql<{ id: string }[]>`
-          insert into referral_campaigns (company_id, name, description, reward_type, reward_value, reward_description, created_by)
-          values (${auth.companyId}, ${d.name}, ${d.description ?? null}, ${d.reward_type}, ${d.reward_value}, ${d.reward_description ?? null}, ${auth.userId})
-          returning id`
+        const made = await sql<{ id: string; slug: string }[]>`
+          insert into referral_campaigns (company_id, name, description, reward_type, reward_value, reward_description, created_by, slug)
+          values (${auth.companyId}, ${d.name}, ${d.description ?? null}, ${d.reward_type}, ${d.reward_value}, ${d.reward_description ?? null}, ${auth.userId}, generate_referral_slug(${d.name}))
+          returning id, slug`
         return made
       }),
     )
     if (!rows?.[0]) fail(400, 'We could not create this campaign.')
     await audit(c, { action: 'referral_campaign.create', entityType: 'referral_campaign', entityId: rows[0].id, after: d })
-    return c.json({ id: rows[0].id }, 201)
+    return c.json({ id: rows[0].id, slug: rows[0].slug }, 201)
   })
 
   .patch('/:id', requireAction('referrals', 'edit'), async (c) => {
@@ -171,6 +172,19 @@ export const referralsRouter = new Hono<AppEnv>()
 
 // ── Public route (no auth) ─────────────────────────────────
 const publicReferralsRouter = new Hono<AppEnv>()
+
+publicReferralsRouter.get('/referrals/campaign/:slug', async (c) => {
+  const slug = c.req.param('slug')
+  const row = await attempt(c, 'referrals.public_campaign', () =>
+    withService(c.env, async (sql) => {
+      const rows = await sql<{ get_public_referral_campaign: unknown }[]>`
+        select get_public_referral_campaign(${slug}) as get_public_referral_campaign`
+      return rows[0]?.get_public_referral_campaign ?? null
+    }),
+  )
+  if (!row) fail(404, 'This referral link is no longer active.')
+  return c.json(publicReferralCampaign.parse(row))
+})
 
 publicReferralsRouter.post('/referrals/submit', async (c) => {
   const parsed = submitReferralRequest.safeParse(await c.req.json().catch(() => ({})))

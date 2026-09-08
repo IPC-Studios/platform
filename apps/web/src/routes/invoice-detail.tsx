@@ -71,6 +71,7 @@ function InvoiceDoc() {
             <p className="text-lg font-semibold">TAX INVOICE</p>
             <p className="text-sm">{data.invoice_number}</p>
             <p className="text-sm text-muted-foreground">{data.invoice_date}</p>
+            {data.due_date && <p className="text-xs text-muted-foreground">Due {data.due_date}</p>}
             <StatusBadge tone={TONE[data.status]}>{humanize(data.status)}</StatusBadge>
           </div>
         </div>
@@ -79,6 +80,8 @@ function InvoiceDoc() {
         <div className="py-4">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Bill to</p>
           <p className="font-medium">{data.client_name ?? '—'}</p>
+          {data.client_address && <p className="text-sm text-muted-foreground">{data.client_address}</p>}
+          {data.client_gstin && <p className="text-sm text-muted-foreground">GSTIN {data.client_gstin}</p>}
         </div>
 
         {/* Items */}
@@ -139,6 +142,10 @@ function InvoiceDoc() {
           <span className="text-muted-foreground">Amount in words: </span>
           {amountInWords(data.total)} only
         </p>
+
+        {data.notes && (
+          <p className="mt-3 whitespace-pre-line text-sm text-muted-foreground">{data.notes}</p>
+        )}
       </div>
 
       {/* Print styles */}

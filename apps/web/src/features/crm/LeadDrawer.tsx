@@ -295,6 +295,23 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-type">Event type</Label>
+              <Input id="lead-event-type" defaultValue={lead.event_type ?? ''} placeholder="Wedding, Pre-wedding…" disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.event_type) patch({ event_type: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-date">Event date</Label>
+              <Input id="lead-event-date" type="date" defaultValue={lead.event_date ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value || null; if (v !== lead.event_date) patch({ event_date: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-location">Venue / location</Label>
+              <Input id="lead-event-location" defaultValue={lead.event_location ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.event_location) patch({ event_location: v }) }} />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-value">Deal value (₹)</Label>
               <Input id="lead-value" type="number" min={0} defaultValue={lead.deal_value ?? ''} placeholder="0" disabled={!canEdit}
                 onBlur={(e)=>{ const v = e.target.value ? Number(e.target.value) : null; if (v !== lead.deal_value) patch({ deal_value: v })}} />

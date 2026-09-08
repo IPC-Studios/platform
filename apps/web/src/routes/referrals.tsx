@@ -16,7 +16,8 @@ import {
   useUpdateSubmissionStatus,
 } from '@/features/referrals/api'
 import { type CreateReferralCampaignRequest } from '@ipc/contracts'
-import { Plus, Trash2, ExternalLink, Trophy, Users, TrendingUp, Target } from 'lucide-react'
+import { toast } from 'sonner'
+import { Plus, Trash2, ExternalLink, Copy, Trophy, Users, TrendingUp, Target } from 'lucide-react'
 
 function ReferralsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -120,6 +121,18 @@ function ReferralsContent() {
                 </p>
               </div>
               <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Copy the link to share with a client"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(`${window.location.origin}/refer/${campaign.slug}`)
+                    toast.success('Referral link copied')
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(campaign)}>
                   <ExternalLink className="h-4 w-4" />
                 </Button>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2 } from 'lucide-react'
+import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2, Pencil } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -18,6 +18,7 @@ import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
 import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
+import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
 
 const when = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -63,6 +64,7 @@ function System() {
       {session?.is_owner ? (
         <>
           <CustomLookups />
+          <Services />
           <AuditLog />
           <CronRuns />
         </>
@@ -336,6 +338,97 @@ function CustomLookups() {
                   </Button>
                 </li>
               ))}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** The service catalog shoots and the project wizard suggest from — a studio's own vocabulary for what it books. */
+function Services() {
+  const { data: items, isLoading } = useServices()
+  const create = useCreateService()
+  const update = useUpdateService()
+  const del = useDeleteService()
+  const [newName, setNewName] = useState('')
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
+
+  function handleAdd() {
+    if (!newName.trim()) return
+    create.mutate(newName.trim(), { onSuccess: () => setNewName('') })
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Services
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Reusable service catalog suggested when scheduling a shoot — Wedding Photography, Pre-wedding, and so on.
+        </p>
+
+        <div className="mt-4 flex gap-2">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="e.g. Wedding Photography"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+          <Button size="sm" onClick={handleAdd} disabled={!newName.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="mt-4">
+          {isLoading ? (
+            <SkeletonList rows={4} columns={2} />
+          ) : !items || items.length === 0 ? (
+            <EmptyState title="No services yet" description="Add your first service above." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((s) =>
+                editing?.id === s.id ? (
+                  <li key={s.id} className="flex items-center gap-2 py-2">
+                    <Input
+                      value={editing.name}
+                      onChange={(e) => setEditing({ id: s.id, name: e.target.value })}
+                      className="h-8"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => update.mutate({ id: s.id, name: editing.name.trim() }, { onSuccess: () => setEditing(null) })}
+                      disabled={!editing.name.trim() || update.isPending}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={s.id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="font-medium">{s.name}</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing({ id: s.id, name: s.name })}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(s.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ),
+              )}
             </ul>
           )}
         </div>

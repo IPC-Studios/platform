@@ -10,6 +10,10 @@ export const client = z.object({
   alternate_phone: z.string().nullable(),
   address: z.string().nullable(),
   city: z.string().nullable(),
+  /** Free-text tag — Referral, Repeat, Vendor — used for segmentation, not an enum. */
+  relation: z.string().nullable(),
+  /** For a compliant B2B tax invoice; absent for most retail/individual clients. */
+  gstin: z.string().nullable(),
   notes: z.string().nullable(),
   created_at: isoDateTime,
 })
@@ -22,6 +26,8 @@ export const createClientRequest = z.object({
   alternate_phone: z.string().trim().max(20).optional(),
   address: z.string().trim().max(400).optional(),
   city: z.string().trim().max(120).optional(),
+  relation: z.string().trim().max(60).optional(),
+  gstin: z.string().trim().max(20).optional(),
   notes: z.string().trim().max(2000).optional(),
 })
 export type CreateClientRequest = z.infer<typeof createClientRequest>
