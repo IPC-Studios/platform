@@ -32,7 +32,7 @@ export const financialsRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, project_id, category, description, amount, expense_date, gst_treatment, is_fixed_overhead
+          select id, project_id, category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead
           from expenses order by expense_date desc`,
       ),
     )
@@ -48,7 +48,7 @@ export const financialsRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           insert into expenses ${sql({ ...parsed.data, company_id: auth.companyId, created_by: auth.userId })}
-          returning id, project_id, category, description, amount, expense_date, gst_treatment, is_fixed_overhead`
+          returning id, project_id, category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead`
         return rows[0] ?? null
       }),
     )

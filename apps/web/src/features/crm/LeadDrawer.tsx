@@ -310,6 +310,18 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                 onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.event_location) patch({ event_location: v }) }} />
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-city">City</Label>
+              <Input id="lead-city" defaultValue={lead.city ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.city) patch({ city: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-alt-phone">Alternate phone</Label>
+              <Input id="lead-alt-phone" defaultValue={lead.alternate_phone ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.alternate_phone) patch({ alternate_phone: v }) }} />
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-value">Deal value (₹)</Label>

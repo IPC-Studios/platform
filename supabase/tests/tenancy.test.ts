@@ -103,6 +103,8 @@ async function freshDb() {
   await db.exec(mig('0067_referral_slug.sql'))
   await db.exec(mig('0068_work_submission_reminders.sql'))
   await db.exec(mig('0069_employee_compensation.sql'))
+  await db.exec(mig('0070_overhead_allocation.sql'))
+  await db.exec(mig('0071_crm_lead_contact_fields.sql'))
   return db
 }
 
@@ -4515,5 +4517,100 @@ describe('Lovable parity: employee compensation structure', () => {
     await expect(
       db.exec(`update users set payout_type = 'whenever_i_feel_like_it' where user_id = '${OWNER}';`),
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * Round 2 of the Lovable parity pass: fixed-overhead allocation, invoice/
+ * quote numbering exposure, expense GST fields, and the lead fields found on
+ * a second read of the old lead form.
+ */
+describe('Lovable parity round 2: overhead allocation and company settings', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a company-wide fixed-overhead expense is split equally across every active project', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into clients (company_id, name) values ('${co}', 'Acme');
+      insert into projects (company_id, client_id, name, package_cost, status) values
+        ('${co}', (select id from clients limit 1), 'Wedding A', 1000, 'active'),
+        ('${co}', (select id from clients limit 1), 'Wedding B', 1000, 'active'),
+        ('${co}', (select id from clients limit 1), 'Cancelled shoot', 1000, 'cancelled');
+      insert into expenses (company_id, project_id, category, amount, is_fixed_overhead)
+        values ('${co}', null, 'Rent', 1000, true);
+    `)
+    const rows = await db.query<{ name: string; project_expenses: string }>(
+      `select name, project_expenses from project_financials where company_id = '${co}' order by name;`,
+    )
+    const byName = Object.fromEntries(rows.rows.map((r) => [r.name, Number(r.project_expenses)]))
+    expect(byName['Wedding A']).toBe(500)
+    expect(byName['Wedding B']).toBe(500)
+    // Cancelled projects don't absorb overhead, and their own direct expenses stay untouched (none here).
+    expect(byName['Cancelled shoot']).toBe(0)
+  })
+
+  it('a project-linked expense is unaffected by the overhead split', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const proj = (await db.query<{ id: string }>(`select id from projects where name = 'Wedding A';`)).rows[0]!.id
+    await db.exec(`insert into expenses (company_id, project_id, category, amount) values ('${co}', '${proj}', 'Venue deposit', 200);`)
+    const row = await db.query<{ project_expenses: string }>(
+      `select project_expenses from project_financials where project_id = '${proj}';`,
+    )
+    // 200 direct + 500 overhead share from the previous test's fixture.
+    expect(Number(row.rows[0]!.project_expenses)).toBe(700)
+  })
+
+  it('a company with no fixed-overhead expenses allocates nothing extra', async () => {
+    const db2 = await freshDb()
+    await db2.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner2@s.test');`)
+    await asUser(db2, OWNER)
+    await db2.query(`select register_company_and_admin('Studio 2','Owner');`)
+    const co2 = (await db2.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db2.exec(`
+      insert into clients (company_id, name) values ('${co2}', 'Client');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co2}', (select id from clients limit 1), 'Solo project', 1000, 'active');
+    `)
+    const row = await db2.query<{ project_expenses: string }>(`select project_expenses from project_financials where company_id = '${co2}';`)
+    expect(Number(row.rows[0]!.project_expenses)).toBe(0)
+  })
+
+  it('invoice/quote numbering and the logo default correctly and can be changed', async () => {
+    const before = await db.query<{ invoice_number_prefix: string; invoice_next_number: number; quote_number_prefix: string }>(
+      `select invoice_number_prefix, invoice_next_number, quote_number_prefix from companies where id = get_current_company_id();`,
+    )
+    expect(before.rows[0]).toEqual({ invoice_number_prefix: 'INV-', invoice_next_number: 1, quote_number_prefix: 'Q-' })
+    await db.exec(`update companies set invoice_number_prefix = 'IPC-', avatar_url = 'https://example.com/logo.png' where id = get_current_company_id();`)
+    const after = await db.query<{ invoice_number_prefix: string; avatar_url: string }>(
+      `select invoice_number_prefix, avatar_url from companies where id = get_current_company_id();`,
+    )
+    expect(after.rows[0]).toEqual({ invoice_number_prefix: 'IPC-', avatar_url: 'https://example.com/logo.png' })
+  })
+
+  it('an expense can carry a GST rate now that the form exposes it', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into expenses (company_id, category, amount, gst_treatment, gst_rate) values ('${co}', 'Software', 5000, 'gst_applicable', 18);`)
+    const row = await db.query<{ gst_treatment: string; gst_rate: string }>(
+      `select gst_treatment, gst_rate from expenses where category = 'Software';`,
+    )
+    expect(row.rows[0]).toEqual({ gst_treatment: 'gst_applicable', gst_rate: '18.00' })
+  })
+
+  it('a lead carries an alternate phone and a city', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into crm_leads (company_id, phone, phone_norm, alternate_phone, city)
+        values ('${co}', '9000000001', '9000000001', '9000000002', 'Mumbai');
+    `)
+    const row = await db.query<{ alternate_phone: string; city: string }>(
+      `select alternate_phone, city from crm_leads where phone = '9000000001';`,
+    )
+    expect(row.rows[0]).toEqual({ alternate_phone: '9000000002', city: 'Mumbai' })
   })
 })

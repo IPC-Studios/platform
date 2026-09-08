@@ -335,6 +335,11 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
       website: data.website ?? '',
       city: data.city ?? '',
       state: data.state ?? '',
+      avatar_url: data.avatar_url ?? '',
+      invoice_number_prefix: data.invoice_number_prefix,
+      invoice_next_number: data.invoice_next_number,
+      quote_number_prefix: data.quote_number_prefix,
+      quote_next_number: data.quote_next_number,
     })
   }, [data])
 
@@ -386,6 +391,14 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
               placeholder="ipcstudios.in"
             />
           </Field>
+          <Field label="Logo URL" hint="Shown on invoices and quotes.">
+            <Input
+              value={form.avatar_url ?? ''}
+              onChange={(e) => set({ avatar_url: e.target.value })}
+              disabled={readOnly}
+              placeholder="https://…/logo.png"
+            />
+          </Field>
           <Field label="City">
             <Input
               value={form.city ?? ''}
@@ -401,6 +414,50 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
             />
           </Field>
         </div>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-sm font-medium">Invoice &amp; quote numbering</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            The next document takes this prefix and number. Only change the number to correct a mistake.
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Field label="Invoice prefix">
+              <Input
+                value={form.invoice_number_prefix ?? ''}
+                onChange={(e) => set({ invoice_number_prefix: e.target.value })}
+                disabled={readOnly}
+                placeholder="INV-"
+              />
+            </Field>
+            <Field label="Next invoice number">
+              <Input
+                type="number"
+                min={1}
+                value={form.invoice_next_number ?? 1}
+                onChange={(e) => set({ invoice_next_number: Number(e.target.value) })}
+                disabled={readOnly}
+              />
+            </Field>
+            <Field label="Quote prefix">
+              <Input
+                value={form.quote_number_prefix ?? ''}
+                onChange={(e) => set({ quote_number_prefix: e.target.value })}
+                disabled={readOnly}
+                placeholder="Q-"
+              />
+            </Field>
+            <Field label="Next quote number">
+              <Input
+                type="number"
+                min={1}
+                value={form.quote_next_number ?? 1}
+                onChange={(e) => set({ quote_next_number: Number(e.target.value) })}
+                disabled={readOnly}
+              />
+            </Field>
+          </div>
+        </div>
+
         {!readOnly && (
           <div className="flex justify-end">
             <Button type="submit" disabled={save.isPending}>

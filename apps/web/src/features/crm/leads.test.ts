@@ -47,6 +47,8 @@ const lead = (name: string, over: Partial<CrmLead> = {}): CrmLead => ({
   event_type: null,
   event_date: null,
   event_location: null,
+  alternate_phone: null,
+  city: null,
   currency: 'INR',
   score: 0,
   created_at: '2026-08-20T10:00:00Z',

@@ -1,12 +1,15 @@
 import { useState, type FormEvent } from 'react'
 import { Plus, Wallet } from 'lucide-react'
 import type { CreateExpenseRequest } from '@ipc/contracts'
+
+const todayISO = () => new Date().toISOString().slice(0, 10)
+const GST_RATES = [0, 5, 12, 18, 28]
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
-import { Input, Label } from '@/shared/ui/input'
+import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
@@ -16,6 +19,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { groupBy, monthlySeries } from '@/shared/ui/chart-geometry'
 import { useExpenses, useCreateExpense } from '@/features/financials/api'
+import { useProjects } from '@/features/projects/api'
 
 export function CompanyExpensesPage() {
   return (
@@ -133,31 +137,49 @@ function Expenses() {
 
 function AddExpenseDialog() {
   const create = useCreateExpense()
+  const { data: projects } = useProjects()
   const [open, setOpen] = useState(false)
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState(0)
+  const [expenseDate, setExpenseDate] = useState(todayISO())
+  const [projectId, setProjectId] = useState('')
   const [overhead, setOverhead] = useState(false)
+  const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>('non_gst')
+  const [gstRate, setGstRate] = useState(18)
   const [error, setError] = useState<string | null>(null)
+
+  function reset() {
+    setCategory('')
+    setDescription('')
+    setAmount(0)
+    setExpenseDate(todayISO())
+    setProjectId('')
+    setOverhead(false)
+    setGstTreatment('non_gst')
+    setGstRate(18)
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
       const body: CreateExpenseRequest = {
-        project_id: null,
+        // A fixed-overhead expense is shared across every project (see
+        // Settings → Financials); pinning it to one project too would count
+        // it twice.
+        project_id: overhead ? null : projectId || null,
         amount,
+        expense_date: expenseDate,
         is_fixed_overhead: overhead,
-        gst_treatment: 'non_gst',
+        gst_treatment: gstTreatment,
+        ...(gstTreatment === 'gst_applicable' ? { gst_rate: gstRate } : {}),
         ...(category.trim() ? { category: category.trim() } : {}),
         ...(description.trim() ? { description: description.trim() } : {}),
       }
       await create.mutateAsync(body)
       setOpen(false)
-      setCategory('')
-      setDescription('')
-      setAmount(0)
-      setOverhead(false)
+      reset()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add the expense.')
     }
@@ -186,10 +208,61 @@ function AddExpenseDialog() {
             <Label>Description</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Date</Label>
+              <Input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Project</Label>
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={overhead}>
+                <option value="">{overhead ? 'Shared across all projects' : 'Not linked to a project'}</option>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={overhead} onChange={(e) => setOverhead(e.target.checked)} />
-            Fixed overhead (allocated across projects)
+            <input
+              type="checkbox"
+              checked={overhead}
+              onChange={(e) => {
+                setOverhead(e.target.checked)
+                if (e.target.checked) setProjectId('')
+              }}
+            />
+            Fixed overhead (shared equally across every active project)
           </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>GST treatment</Label>
+              <Select value={gstTreatment} onChange={(e) => setGstTreatment(e.target.value as CreateExpenseRequest['gst_treatment'])}>
+                <option value="non_gst">No GST</option>
+                <option value="gst_applicable">GST applicable</option>
+                <option value="exempt">Exempt</option>
+                <option value="reverse_charge">Reverse charge</option>
+              </Select>
+            </div>
+            {gstTreatment === 'gst_applicable' && (
+              <div className="flex flex-col gap-1.5">
+                <Label>GST rate</Label>
+                <Select value={gstRate} onChange={(e) => setGstRate(Number(e.target.value))}>
+                  {GST_RATES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}%
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+          </div>
+
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}

@@ -9,6 +9,12 @@ export const companyProfile = z.object({
   country: z.string().nullable(),
   website: z.string().nullable(),
   invoice_gst_number: z.string().nullable(),
+  /** Shown on the invoice/quote header; a plain URL, not an upload. */
+  avatar_url: z.string().nullable(),
+  invoice_number_prefix: z.string(),
+  invoice_next_number: z.number().int(),
+  quote_number_prefix: z.string(),
+  quote_next_number: z.number().int(),
 })
 export type CompanyProfile = z.infer<typeof companyProfile>
 
@@ -21,6 +27,11 @@ export const updateCompanyRequest = z.object({
   country: z.string().trim().max(80).optional(),
   website: z.string().trim().max(200).optional(),
   invoice_gst_number: z.string().trim().max(20).optional(),
+  avatar_url: z.string().trim().max(500).optional(),
+  invoice_number_prefix: z.string().trim().min(1).max(20).optional(),
+  invoice_next_number: z.number().int().min(1).optional(),
+  quote_number_prefix: z.string().trim().min(1).max(20).optional(),
+  quote_next_number: z.number().int().min(1).optional(),
 })
 export type UpdateCompanyRequest = z.infer<typeof updateCompanyRequest>
 

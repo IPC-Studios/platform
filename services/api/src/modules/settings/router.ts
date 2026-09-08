@@ -17,7 +17,21 @@ import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 
-const COMPANY_COLUMNS = ['name', 'legal_name', 'display_name', 'city', 'state', 'country', 'website', 'invoice_gst_number']
+const COMPANY_COLUMNS = [
+  'name',
+  'legal_name',
+  'display_name',
+  'city',
+  'state',
+  'country',
+  'website',
+  'invoice_gst_number',
+  'avatar_url',
+  'invoice_number_prefix',
+  'invoice_next_number',
+  'quote_number_prefix',
+  'quote_next_number',
+]
 
 export const settingsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)

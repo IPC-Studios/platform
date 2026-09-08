@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { uuid, isoDate, money } from './shared/primitives'
+import { uuid, isoDate, money, gstRate } from './shared/primitives'
 
 export const gstTreatment = z.enum(['non_gst', 'gst_applicable', 'exempt', 'reverse_charge'])
 
@@ -11,6 +11,7 @@ export const expense = z.object({
   amount: money,
   expense_date: isoDate,
   gst_treatment: gstTreatment,
+  gst_rate: gstRate.nullable(),
   is_fixed_overhead: z.boolean(),
 })
 export type Expense = z.infer<typeof expense>
@@ -22,6 +23,7 @@ export const createExpenseRequest = z.object({
   amount: money,
   expense_date: isoDate.optional(),
   gst_treatment: gstTreatment.default('non_gst'),
+  gst_rate: gstRate.optional(),
   is_fixed_overhead: z.boolean().default(false),
 })
 export type CreateExpenseRequest = z.infer<typeof createExpenseRequest>

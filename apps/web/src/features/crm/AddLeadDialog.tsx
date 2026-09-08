@@ -47,6 +47,8 @@ export function AddLeadDialog({
   const [eventType, setEventType] = useState('')
   const [eventDate, setEventDate] = useState('')
   const [eventLocation, setEventLocation] = useState('')
+  const [alternatePhone, setAlternatePhone] = useState('')
+  const [city, setCity] = useState('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -60,6 +62,8 @@ export function AddLeadDialog({
     setEventType('')
     setEventDate('')
     setEventLocation('')
+    setAlternatePhone('')
+    setCity('')
     setErrors({})
   }
 
@@ -76,6 +80,8 @@ export function AddLeadDialog({
       ...(eventType.trim() ? { event_type: eventType.trim() } : {}),
       ...(eventDate ? { event_date: eventDate } : {}),
       ...(eventLocation.trim() ? { event_location: eventLocation.trim() } : {}),
+      ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
+      ...(city.trim() ? { city: city.trim() } : {}),
     }
     const found = fieldErrors<Field>(createLeadRequest, body, { labels: LABELS })
     setErrors(found)
@@ -137,6 +143,11 @@ export function AddLeadDialog({
             {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <Label>Alternate phone</Label>
+            <Input value={alternatePhone} onChange={(e) => setAlternatePhone(e.target.value)} placeholder="Optional" />
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Email</Label>
@@ -175,9 +186,15 @@ export function AddLeadDialog({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Venue / location</Label>
-            <Input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Optional" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Venue / location</Label>
+              <Input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>City</Label>
+              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Optional" />
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
