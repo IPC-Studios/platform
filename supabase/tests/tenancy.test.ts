@@ -97,6 +97,7 @@ async function freshDb() {
   await db.exec(mig('0061_custom_lookups.sql'))
   await db.exec(mig('0062_activity_log.sql'))
   await db.exec(mig('0063_security_fixes.sql'))
+  await db.exec(mig('0064_gopo_gst_fixes.sql'))
   return db
 }
 
@@ -4084,5 +4085,89 @@ describe('CRM quote answered off the link (0049)', () => {
     )
     expect(shown.rows[0]!.q.place_of_supply).toBe('MH')
     expect(shown.rows[0]!.q.intra_state).toBe(true)
+  })
+})
+
+/**
+ * The dashboard RPCs, actually CALLED. A plpgsql body is not checked until it
+ * runs, so gopo_summary and gst_analysis both created cleanly in 0051/0058 and
+ * then raised on every invocation -- four separate faults in gopo_summary
+ * alone, which is why that page rendered blank in production. Creating them is
+ * not evidence they work; only calling them is.
+ *
+ * The fixture is deliberately a LOSS-MAKING, OVER-COLLECTED project: costs
+ * above revenue and a client who paid more than was invoiced. That is the shape
+ * that drives net_profit and gross_profit negative and collection_rate past
+ * 100, which the contracts used to reject outright.
+ */
+describe('dashboard RPCs run and return contract-shaped data (0064)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(
+      `update companies set plan_expiry = now() + interval '30 days' where id = get_current_company_id();`,
+    )
+    await db.exec(`
+      insert into clients (company_id, name) values (get_current_company_id(), 'Acme');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values (get_current_company_id(), (select id from clients limit 1), 'Loss Job', 1000, 'active');
+      insert into received_payments (company_id, project_id, amount, paid_on)
+        values (get_current_company_id(), (select id from projects limit 1), 1500, current_date);
+      insert into expenses (company_id, project_id, category, amount, expense_date)
+        values (get_current_company_id(), (select id from projects limit 1), 'gear', 4000, current_date);
+    `)
+  })
+
+  it('gopo_summary reports a loss and an over-collection instead of raising', async () => {
+    const r = await db.query<{ v: Record<string, never> }>(`select gopo_summary() as v;`)
+    const v = r.rows[0]!.v as unknown as {
+      score_card: { net_profit: number; collection_rate: number; profit_margin: number; health_score: number }
+      expense_breakdown: { category: string; percentage: number }[]
+      project_performance: { gross_profit: number }[]
+      attention_items: { kind: string }[]
+    }
+    // 1000 revenue - 4000 expenses = -3000.
+    expect(v.score_card.net_profit).toBe(-3000)
+    // Paid 1500 against 1000 invoiced.
+    expect(v.score_card.collection_rate).toBe(150)
+    expect(v.score_card.profit_margin).toBeLessThan(0)
+    // The score is a 0-100 gauge, so it stays clamped even on a deep loss.
+    expect(v.score_card.health_score).toBeGreaterThanOrEqual(0)
+    expect(v.score_card.health_score).toBeLessThanOrEqual(100)
+    // The windowed percentage over grouped rows used to be a bare column.
+    expect(v.expense_breakdown[0]!.percentage).toBe(100)
+    expect(v.project_performance[0]!.gross_profit).toBe(-3000)
+    // Both arms of the union survive; the loss-making project is called out.
+    expect(v.attention_items.map((a) => a.kind)).toContain('negative_profit')
+  })
+
+  it('gst_analysis reads real per-line tax, not a flat assumed rate', async () => {
+    const r = await db.query<{ v: Record<string, never> }>(
+      `select gst_analysis(current_date - 90, current_date) as v;`,
+    )
+    const v = r.rows[0]!.v as unknown as {
+      gst_collected: number
+      input_tax_credit: number
+      net_gst_liability: number
+      by_gst_rate: unknown[]
+    }
+    // No invoices in the fixture, so every figure is a real zero rather than
+    // (subtotal - discount) * an assumed 18%.
+    expect(v.gst_collected).toBe(0)
+    expect(v.net_gst_liability).toBe(0)
+    expect(Array.isArray(v.by_gst_rate)).toBe(true)
+    // Expense-side credit is derived from expenses.gst_rate, added in 0064.
+    expect(v.input_tax_credit).toBe(0)
+  })
+
+  it('expenses carries the gst_rate the credit is worked out from', async () => {
+    const c = await db.query<{ n: number }>(
+      `select count(*)::int as n from information_schema.columns
+        where table_schema = 'public' and table_name = 'expenses' and column_name = 'gst_rate';`,
+    )
+    expect(c.rows[0]!.n).toBe(1)
   })
 })

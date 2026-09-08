@@ -3,6 +3,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
+import { ErrorState } from '@/shared/ui/states'
 import { useGopoSummary } from '@/features/gopo/api'
 import {
   TrendingUp,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react'
 
 function GopoContent() {
-  const { data, isLoading } = useGopoSummary()
+  const { data, isLoading, isError, refetch } = useGopoSummary()
 
   if (isLoading) {
     return (
@@ -31,7 +32,20 @@ function GopoContent() {
     )
   }
 
-  if (!data) return null
+  // Was `return null`, which rendered the page completely blank whenever the
+  // query failed -- no header, no message, nothing to retry.
+  if (isError || !data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="GOPO Dashboard" description="Cash flow health analysis" />
+        <Card>
+          <CardContent className="py-2">
+            <ErrorState message="We could not work out your cash flow health." onRetry={() => void refetch()} />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   const { score_card, expense_breakdown, project_performance, attention_items, recent_activity } = data
 

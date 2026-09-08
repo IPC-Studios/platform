@@ -8,9 +8,12 @@ export const gopoScoreCard = z.object({
   total_received: money,
   total_expenses: money,
   total_direct_team_cost: money,
-  net_profit: money,
-  collection_rate: z.number().min(0).max(100),
-  profit_margin: z.number().min(0).max(100),
+  // Signed: costs can exceed revenue. `money` is nonnegative, so using it
+  // here rejected every loss-making studio and blanked the dashboard.
+  net_profit: z.number(),
+  // Can exceed 100 when a client pays in advance of invoiced revenue.
+  collection_rate: z.number().min(0),
+  profit_margin: z.number(),
   outstanding_balance: money,
 })
 export type GopoScoreCard = z.infer<typeof gopoScoreCard>
@@ -30,7 +33,7 @@ export const gopoProjectPerformance = z.object({
   received: money,
   direct_team_cost: money,
   project_expenses: money,
-  gross_profit: money,
+  gross_profit: z.number(),
   balance_pending: money,
   profit_margin: z.number(),
   status: z.string(),
@@ -43,7 +46,8 @@ export const gopoAttentionItem = z.object({
   message: z.string(),
   project_id: uuid.nullable(),
   project_name: z.string().nullable(),
-  amount: money.nullable(),
+  // Negative for the negative_profit item, which reports the loss.
+  amount: z.number().nullable(),
 })
 export type GopoAttentionItem = z.infer<typeof gopoAttentionItem>
 
