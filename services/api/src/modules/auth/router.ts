@@ -108,6 +108,22 @@ export const authRouter = new Hono<AppEnv>()
       'auth.register',
       () =>
         withService(c.env, async (sql) => {
+          // Someone who has been invited to a studio must join it through their
+          // link. Registering here would hand them a brand-new studio of their
+          // own -- as its super_admin, on its own trial -- while the invitation
+          // sat unaccepted and the studio that invited them saw nobody arrive.
+          // We do not auto-accept: the emailed token is the only proof that the
+          // person registering is the person who was invited.
+          const [invited] = await sql<{ one: number }[]>`
+            select 1 as one
+              from user_invitations
+             where email = ${email}
+               and accepted_at is null
+               and revoked_at is null
+               and expires_at > now()
+             limit 1`
+          if (invited) return 'invited'
+
           const [u] = await sql<{ id: string }[]>`
             insert into auth.users (email, encrypted_password)
             values (${email}, ${pwHash})
@@ -119,6 +135,12 @@ export const authRouter = new Hono<AppEnv>()
         }),
       { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
     )
+    if (token === 'invited') {
+      fail(
+        409,
+        'You have already been invited to a studio. Open the invitation link in your email to join it, rather than creating a new studio here.',
+      )
+    }
     if (token === 'taken') fail(409, 'An account with this email already exists.')
     if (!token) fail(400, 'We could not create your studio. Please try again.')
 
