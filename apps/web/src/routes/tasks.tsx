@@ -37,6 +37,7 @@ import {
   useCreateTask,
   useDeleteBundle,
   useSetTaskStatus,
+  useTaskPriorities,
   useTasks,
 } from '@/features/tasks/api'
 import {
@@ -58,6 +59,14 @@ const PRIORITY_TONE: Record<TaskPriority, 'danger' | 'warning' | 'neutral' | 'in
   high: 'warning',
   medium: 'neutral',
   low: 'info',
+}
+
+/** The studio's own label/tone when it set one, else the plain canonical badge. */
+function PriorityBadge({ task }: { task: TaskListItem }) {
+  if (task.custom_priority_code && task.custom_priority_label && task.custom_priority_tone) {
+    return <StatusBadge tone={task.custom_priority_tone}>{task.custom_priority_label}</StatusBadge>
+  }
+  return <StatusBadge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</StatusBadge>
 }
 
 
@@ -292,7 +301,7 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
           <div key={t.id} className="rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium">{t.title}</p>
-              <StatusBadge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</StatusBadge>
+              <PriorityBadge task={t} />
             </div>
             {t.project_name && (
               <p className="mt-1 truncate text-sm text-muted-foreground">{t.project_name}</p>
@@ -343,7 +352,7 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
                 )}
               </td>
               <td className="px-4 py-2">
-                <StatusBadge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</StatusBadge>
+                <PriorityBadge task={t} />
               </td>
               <td className="px-4 py-2">
                 <DueBadge task={t} today={today} />
@@ -373,11 +382,13 @@ function DueBadge({ task, today }: { task: TaskListItem; today: string }) {
 function NewTaskDialog() {
   const create = useCreateTask()
   const { data: projects } = useProjects()
+  const { data: customPriorities } = useTaskPriorities()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
+  const [customPriorityCode, setCustomPriorityCode] = useState('')
   const [dueDate, setDueDate] = useState('')
 
   function reset() {
@@ -385,6 +396,7 @@ function NewTaskDialog() {
     setDescription('')
     setProjectId('')
     setPriority('medium')
+    setCustomPriorityCode('')
     setDueDate('')
   }
 
@@ -397,6 +409,7 @@ function NewTaskDialog() {
         deliverable_id: null,
         status: 'to_do',
         priority,
+        custom_priority_code: customPriorityCode || null,
         assignees: [],
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
@@ -473,6 +486,19 @@ function NewTaskDialog() {
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
           </div>
+          {customPriorities && customPriorities.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Custom label (optional)</Label>
+              <Select value={customPriorityCode} onChange={(e) => setCustomPriorityCode(e.target.value)}>
+                <option value="">None — use {PRIORITY_LABEL[priority]}</option>
+                {customPriorities.map((p) => (
+                  <option key={p.id} value={p.code}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

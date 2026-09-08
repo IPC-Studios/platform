@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import {
   applyBundleRequest,
+  companyTaskPriority,
   createBundleRequest,
+  createTaskPriorityRequest,
   createTaskRequest,
   generateTasksRequest,
   setBoardOrderRequest,
@@ -31,6 +33,9 @@ interface RawTask {
   due_date: string | null
   project_id: string | null
   project_name: string | null
+  custom_priority_code: string | null
+  custom_priority_label: string | null
+  custom_priority_tone: string | null
   assignee_names: string[]
 }
 
@@ -44,6 +49,7 @@ function toItems(rows: RawTask[], order: Map<string, number>) {
 const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
   select t.id, t.title, t.description, t.status, t.priority, t.due_date, t.project_id,
          p.name as project_name,
+         cp.code as custom_priority_code, cp.label as custom_priority_label, cp.tone as custom_priority_tone,
          coalesce(
            array_agg(u.name order by u.name) filter (where u.user_id is not null),
            '{}'::text[]
@@ -52,12 +58,64 @@ const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
   left join projects p on p.id = t.project_id
   left join task_assignees a on a.task_id = t.id
   left join users u on u.user_id = a.user_id
+  left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
   where ${assignee ? sql`exists (select 1 from task_assignees a2 where a2.task_id = t.id and a2.user_id = ${assignee})` : sql`true`}
-  group by t.id, p.name
+  group by t.id, p.name, cp.code, cp.label, cp.tone
   order by t.created_at desc`
 
 export const tasksRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
+
+  // ── Custom priority catalogue ────────────────────────────────
+  // Declared before '/:id'-shaped routes so "priorities" is never read as one.
+  .get('/priorities', requireAction('tasks', 'view'), async (c) => {
+    const rows = await attempt(c, 'tasks.priorities.list', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`select id, code, label, tone, sort_order from company_task_priorities order by sort_order, label`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load priorities.')
+    return c.json(companyTaskPriority.array().parse(rows))
+  })
+
+  .post('/priorities', requireAction('tasks', 'edit'), async (c) => {
+    const parsed = createTaskPriorityRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the priority details.')
+    const auth = c.get('auth')
+    const row = await attempt(
+      c,
+      'tasks.priorities.create',
+      () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const nextRow = await sql<{ next: number }[]>`
+            select coalesce(max(sort_order), 0) + 10 as next from company_task_priorities where company_id = ${auth.companyId}`
+          const next = nextRow[0]?.next ?? 10
+          const rows = await sql`
+            insert into company_task_priorities ${sql({ company_id: auth.companyId, ...parsed.data, sort_order: next })}
+            returning id, code, label, tone, sort_order`
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (row === 'taken') fail(409, 'A priority with this code already exists.')
+    if (!row) fail(400, 'We could not add this priority.')
+    await audit(c, { action: 'task_priority.create', entityType: 'task_priority', entityId: row.id, after: parsed.data })
+    return c.json(companyTaskPriority.parse(row), 201)
+  })
+
+  .delete('/priorities/:id', requireAction('tasks', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'tasks.priorities.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from company_task_priorities where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this priority.')
+    if (!rows.length) fail(404, 'That priority was not found.')
+    await audit(c, { action: 'task_priority.delete', entityType: 'task_priority', entityId: id })
+    return c.body(null, 204)
+  })
 
   // ── Employee subset (any active member) ─────────────────────
   .get('/my', async (c) => {
@@ -141,10 +199,14 @@ export const tasksRouter = new Hono<AppEnv>()
             p_assignees => ${d.assignees}::uuid[]
           ) as id`
         const created = rows[0]?.id ?? null
-        // The RPC predates descriptions; set it alongside rather than changing a
-        // signature the board and the generator also call.
-        if (created && d.description) {
-          await sql`update tasks set description = ${d.description} where id = ${created}`
+        // The RPC predates descriptions and custom priorities; set them
+        // alongside rather than changing a signature the board and the
+        // generator also call.
+        if (created && (d.description || d.custom_priority_code !== undefined)) {
+          await sql`update tasks set ${sql({
+            ...(d.description ? { description: d.description } : {}),
+            ...(d.custom_priority_code !== undefined ? { custom_priority_code: d.custom_priority_code } : {}),
+          })} where id = ${created}`
         }
         return created
       }),

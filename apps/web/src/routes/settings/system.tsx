@@ -19,6 +19,8 @@ import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
 import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
 import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
+import { useTaskPriorities, useCreateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
+import type { TaskPriorityTone } from '@ipc/contracts'
 
 const when = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -65,6 +67,7 @@ function System() {
         <>
           <CustomLookups />
           <Services />
+          <TaskPriorities />
           <AuditLog />
           <CronRuns />
         </>
@@ -429,6 +432,86 @@ function Services() {
                   </li>
                 ),
               )}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const TONE_OPTIONS: { value: TaskPriorityTone; label: string }[] = [
+  { value: 'neutral', label: 'Gray' },
+  { value: 'info', label: 'Blue' },
+  { value: 'warning', label: 'Amber' },
+  { value: 'danger', label: 'Red' },
+  { value: 'success', label: 'Green' },
+]
+
+/** A studio's own priority labels — "Rush", "Whenever" — shown on tasks instead of the plain Low/Medium/High/Urgent. */
+function TaskPriorities() {
+  const { data: items, isLoading } = useTaskPriorities()
+  const create = useCreateTaskPriority()
+  const del = useDeleteTaskPriority()
+  const [label, setLabel] = useState('')
+  const [tone, setTone] = useState<TaskPriorityTone>('neutral')
+
+  function handleAdd() {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    const code = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    create.mutate({ code: code || `p-${Date.now()}`, label: trimmed, tone }, { onSuccess: () => setLabel('') })
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Task Priorities
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Your own labels for how urgent a task is — shown on tasks instead of the plain Low/Medium/High/Urgent.
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Rush"
+            className="max-w-xs"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+          <Select value={tone} onChange={(e) => setTone(e.target.value as TaskPriorityTone)} className="w-32">
+            {TONE_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </Select>
+          <Button size="sm" onClick={handleAdd} disabled={!label.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="mt-4">
+          {isLoading ? (
+            <SkeletonList rows={3} columns={2} />
+          ) : !items || items.length === 0 ? (
+            <EmptyState title="No custom priorities yet" description="Tasks show the default Low/Medium/High/Urgent until you add one." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((p) => (
+                <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                  <StatusBadge tone={p.tone}>{p.label}</StatusBadge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    onClick={() => del.mutate(p.id)}
+                    disabled={del.isPending}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

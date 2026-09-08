@@ -4351,3 +4351,46 @@ describe('Lovable parity: project documents and per-assignee filters', () => {
     expect(someoneElse.rows[0]!.count).toBe(0)
   })
 })
+
+/**
+ * Task priorities catalogue (0007's company_task_priorities, orphaned until
+ * this session -- no route or contract referenced it before). Proves a task
+ * tagged with a custom code joins back to its label and tone.
+ */
+describe('Lovable parity: custom task priorities', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into company_task_priorities (company_id, code, label, tone, sort_order)
+        values (get_current_company_id(), 'rush', 'Rush', 'danger', 10);
+      insert into tasks (company_id, title, status, priority, custom_priority_code)
+        values (get_current_company_id(), 'Cull gallery', 'to_do', 'high', 'rush');
+      insert into tasks (company_id, title, status, priority)
+        values (get_current_company_id(), 'Untitled task', 'to_do', 'medium');
+    `)
+  })
+
+  it("a task tagged with a custom code resolves to that priority's label and tone", async () => {
+    const rows = await db.query<{ title: string; custom_priority_label: string | null; custom_priority_tone: string | null }>(`
+      select t.title, cp.label as custom_priority_label, cp.tone as custom_priority_tone
+        from tasks t
+        left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
+       where t.company_id = get_current_company_id()
+       order by t.title;
+    `)
+    expect(rows.rows).toEqual([
+      { title: 'Cull gallery', custom_priority_label: 'Rush', custom_priority_tone: 'danger' },
+      { title: 'Untitled task', custom_priority_label: null, custom_priority_tone: null },
+    ])
+  })
+
+  it('a duplicate priority code within the same company is rejected', async () => {
+    await expect(
+      db.exec(`insert into company_task_priorities (company_id, code, label) values (get_current_company_id(), 'rush', 'Also Rush');`),
+    ).rejects.toThrow()
+  })
+})

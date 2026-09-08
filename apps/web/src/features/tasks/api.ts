@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   applyBundleRequest,
+  companyTaskPriority,
   createBundleRequest,
+  createTaskPriorityRequest,
   createTaskRequest,
   generateTasksRequest,
   taskBundle,
@@ -10,6 +12,7 @@ import {
   z,
   type ApplyBundleRequest,
   type CreateBundleRequest,
+  type CreateTaskPriorityRequest,
   type CreateTaskRequest,
   type GenerateTasksRequest,
   type SetBoardOrderRequest,
@@ -187,5 +190,40 @@ export function useUpdateMyTaskStatus() {
       void qc.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+/** The studio's own priority labels — "Rush", "Whenever" — layered over low/medium/high/urgent. */
+export function useTaskPriorities() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['tasks', 'priorities'],
+    queryFn: () => callApi('/tasks/priorities', { responseSchema: companyTaskPriority.array() }),
+    enabled: !!session && access.hasModule('tasks'),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useCreateTaskPriority() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateTaskPriorityRequest) =>
+      callApi('/tasks/priorities', { method: 'POST', body: createTaskPriorityRequest.parse(input), responseSchema: companyTaskPriority }),
+    onSuccess: () => {
+      toast.success('Priority added')
+      void qc.invalidateQueries({ queryKey: ['tasks', 'priorities'] })
+    },
+  })
+}
+
+export function useDeleteTaskPriority() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/tasks/priorities/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Priority deleted')
+      void qc.invalidateQueries({ queryKey: ['tasks', 'priorities'] })
+    },
   })
 }
