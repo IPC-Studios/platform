@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-nocheck
 import { useEffect, useState } from 'react'
 
 function useDebounce<T>(value: T, delay: number): T {

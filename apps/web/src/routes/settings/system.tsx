@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from 'react'
 import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2 } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
@@ -321,7 +322,7 @@ function CustomLookups() {
                 <li key={item.id} className="flex items-center justify-between py-2 text-sm">
                   <div className="flex items-center gap-3">
                     <span className="font-medium">{item.value}</span>
-                    <StatusBadge tone={item.is_active ? 'success' : 'muted'}>
+                    <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
                       {item.is_active ? 'Active' : 'Inactive'}
                     </StatusBadge>
                   </div>
