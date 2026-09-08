@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-// @ts-nocheck
 import { useEffect, useState } from 'react'
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -121,7 +119,7 @@ function PersonalExpensesContent() {
         <FilterTabs
           value={category}
           onChange={setCategory}
-          options={[
+          tabs={[
             { label: 'All', value: 'all' },
             ...PERSONAL_EXPENSE_CATEGORIES.map((c) => ({ label: categoryLabels[c] ?? c, value: c })),
           ]}

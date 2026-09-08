@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { z } from 'zod'
-import { uuid, isoDateTime, money, pagination, paginated } from './shared/primitives'
+import { uuid, isoDateTime, money } from './shared/primitives'
 
 export const referralRewardType = z.enum(['percentage', 'fixed', 'credit', 'custom'])
 export type ReferralRewardType = z.infer<typeof referralRewardType>

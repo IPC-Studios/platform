@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-// @ts-nocheck
 import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -191,7 +189,7 @@ function ProjectTemplatesContent() {
                     value={d.name}
                     onChange={(e) => {
                       const deliverables = [...form.deliverables_json]
-                      deliverables[i] = { ...deliverables[i], name: e.target.value }
+                      deliverables[i] = { ...d, name: e.target.value }
                       setForm({ ...form, deliverables_json: deliverables })
                     }}
                   />
@@ -203,7 +201,7 @@ function ProjectTemplatesContent() {
                     value={d.quantity}
                     onChange={(e) => {
                       const deliverables = [...form.deliverables_json]
-                      deliverables[i] = { ...deliverables[i], quantity: Number(e.target.value) || 1 }
+                      deliverables[i] = { ...d, quantity: Number(e.target.value) || 1 }
                       setForm({ ...form, deliverables_json: deliverables })
                     }}
                   />
@@ -241,7 +239,7 @@ function ProjectTemplatesContent() {
                     value={s.kind ?? ''}
                     onChange={(e) => {
                       const shoots = [...form.shoots_json]
-                      shoots[i] = { ...shoots[i], kind: e.target.value || null }
+                      shoots[i] = { ...s, kind: e.target.value || null }
                       setForm({ ...form, shoots_json: shoots })
                     }}
                   />
@@ -269,7 +267,7 @@ function ProjectTemplatesContent() {
                     value={t.title}
                     onChange={(e) => {
                       const tasks = [...form.tasks_json]
-                      tasks[i] = { ...tasks[i], title: e.target.value }
+                      tasks[i] = { ...t, title: e.target.value }
                       setForm({ ...form, tasks_json: tasks })
                     }}
                   />

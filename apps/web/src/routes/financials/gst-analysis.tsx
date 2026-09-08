@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -7,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { useGstAnalysis } from '@/features/gst-analysis/api'
-import { TrendingUp, TrendingDown, Receipt, Calculator, FileText, BarChart3 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Receipt, Calculator, FileText } from 'lucide-react'
 
 function GstAnalysisContent() {
   const today = new Date()

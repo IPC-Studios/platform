@@ -13,7 +13,7 @@ const activityItem = z.object({
   action: z.string(),
   entity_type: z.string(),
   entity_id: z.string().uuid().nullable(),
-  metadata: z.any().nullable(),
+  metadata: z.unknown().nullable(),
   created_at: z.string(),
 })
 

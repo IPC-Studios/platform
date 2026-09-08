@@ -1,32 +1,100 @@
--- Reminders system: dedicated reminders with entity linking and priority.
-create table if not exists reminders (
-  id            uuid primary key default gen_random_uuid(),
-  company_id    uuid not null references companies (id) on delete cascade,
-  user_id       uuid not null references users (user_id) on delete cascade,
-  title         text not null,
-  description   text,
-  priority      text not null default 'medium'
-                  check (priority in ('low', 'medium', 'high', 'urgent')),
-  status        text not null default 'active'
-                  check (status in ('active', 'completed', 'dismissed')),
-  entity_type   text check (entity_type in ('lead', 'project', 'client', 'invoice', 'custom')),
-  entity_id     uuid,
-  due_at        timestamptz,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
-);
-create index reminders_company_user_idx on reminders (company_id, user_id, status, due_at);
-create index reminders_due_idx on reminders (company_id, due_at) where status = 'active';
+-- Reminders system: entity linking, priority and status.
+--
+-- `reminders` already exists from 0015 with (remind_at, done) and its own
+-- policies, so this migrates that shape forward instead of creating a table.
+-- A `create table if not exists` here silently did nothing on any database
+-- that had run 0015 -- which is all of them -- and every statement after it
+-- referred to columns that were never added.
+alter table reminders
+  add column if not exists description text,
+  add column if not exists status      text not null default 'active',
+  add column if not exists due_at      timestamptz,
+  add column if not exists updated_at  timestamptz not null default now();
+
+-- Carry the 0015 columns across, then retire them so there is one shape.
+-- Guarded so the file re-applies cleanly.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'reminders' and column_name = 'remind_at'
+  ) then
+    update reminders set due_at = coalesce(due_at, remind_at);
+    update reminders set status = case when done then 'completed' else 'active' end;
+    -- Drops reminders_due_idx with it: that index is partial on `done`.
+    alter table reminders drop column remind_at, drop column done;
+  end if;
+end $$;
+
+-- NOT VALID: new rows are constrained, rows written before this file are left
+-- alone rather than failing the migration.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'reminders_status_check') then
+    alter table reminders add constraint reminders_status_check
+      check (status in ('active', 'completed', 'dismissed')) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'reminders_priority_check') then
+    alter table reminders add constraint reminders_priority_check
+      check (priority in ('low', 'medium', 'high', 'urgent')) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'reminders_entity_type_check') then
+    alter table reminders add constraint reminders_entity_type_check
+      check (entity_type is null or entity_type in ('lead', 'project', 'client', 'invoice', 'custom')) not valid;
+  end if;
+end $$;
+
+create index if not exists reminders_company_user_idx on reminders (company_id, user_id, status, due_at);
+create index if not exists reminders_due_idx on reminders (company_id, due_at) where status = 'active';
 drop trigger if exists reminders_set_updated_at on reminders;
 create trigger reminders_set_updated_at before update on reminders
   for each row execute function set_updated_at();
 
 alter table reminders enable row level security;
+-- 0015 created policies under these names; replace them rather than collide.
+drop policy if exists reminders_select on reminders;
+drop policy if exists reminders_write on reminders;
 create policy reminders_select on reminders for select to authenticated
   using (company_id = get_current_company_id());
 create policy reminders_write on reminders for all to authenticated
   using (company_id = get_current_company_id() and is_current_user_active())
   with check (company_id = get_current_company_id() and is_current_user_active());
+
+-- The 0015 sweep read `not done and remind_at <= now()`; both columns are gone.
+create or replace function run_reminder_cron(p_dry_run boolean default false)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_due     int := 0;
+  v_created int := 0;
+  v_r       record;
+  v_summary jsonb;
+  v_run     uuid;
+begin
+  insert into cron_runs (job_name, dry_run) values ('reminder_cron', p_dry_run) returning id into v_run;
+
+  for v_r in
+    select * from reminders where status = 'active' and due_at is not null and due_at <= now()
+  loop
+    v_due := v_due + 1;
+    if not p_dry_run then
+      if create_notification(v_r.company_id, v_r.user_id, 'reminder', v_r.title, null,
+           'reminder:' || v_r.id, v_r.entity_type, v_r.entity_id) then
+        v_created := v_created + 1;
+      end if;
+    end if;
+  end loop;
+
+  v_summary := jsonb_build_object('reminders_due', v_due, 'notifications_created', v_created, 'dry_run', p_dry_run);
+  update cron_runs set finished_at = now(), summary = v_summary where id = v_run;
+  return v_summary;
+end;
+$$;
+revoke all on function run_reminder_cron(boolean) from public, anon;
+grant execute on function run_reminder_cron(boolean) to service_role;
 
 -- RPC: list reminders with summary
 create or replace function list_reminders(

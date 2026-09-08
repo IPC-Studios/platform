@@ -11,39 +11,18 @@ alter table project_quotations
     "show_gst": true
   }'::jsonb;
 
--- Update the quotation issue function to accept display preferences
-create or replace function issue_quote_link(
-  p_project_id          uuid,
-  p_valid_days          int default 7,
-  p_display_preferences jsonb default null
-)
-returns text
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_company  uuid := get_current_company_id();
-  v_token    text;
-  v_hash     text;
-  v_id       uuid;
-begin
-  if v_company is null or not is_current_user_active() then
-    raise exception 'not allowed' using errcode = '42501';
-  end if;
-
-  -- Generate a random token
-  v_token := encode(gen_random_bytes(32), 'hex');
-  v_hash := encode(sha256(v_token::bytea), 'hex');
-
-  insert into project_quotations (company_id, project_id, token_hash, valid_days, display_preferences)
-  values (v_company, p_project_id, v_hash, p_valid_days,
-          coalesce(p_display_preferences, (select display_preferences from project_quotations where project_id = p_project_id limit 1)))
-  returning id into v_id;
-
-  return v_token;
-end;
-$$;
-
-revoke all on function issue_quote_link(uuid, int, jsonb) from public, anon;
-grant execute on function issue_quote_link(uuid, int, jsonb) to authenticated;
+-- NOTE: this file used to define issue_quote_link(uuid, int, jsonb) here.
+-- It was removed, for two independent reasons:
+--
+--   1. 0048 already defines issue_quote_link(uuid, int) for CRM quotes. Both
+--      have defaults for every parameter past the first, so a one- or
+--      two-argument call matched both and Postgres refused it as ambiguous.
+--      That broke issuing any CRM quote link -- a shipped feature.
+--   2. It inserted into project_quotations (token_hash, valid_days), neither
+--      of which is a column on that table, so it could never have run. A
+--      plpgsql body is not checked until it executes, which is why creating
+--      it appeared to succeed.
+--
+-- The project-quotation link is issued by issue_project_quotation(uuid, text,
+-- int) from 0042, which documents/router.ts calls. Nothing reads
+-- display_preferences yet; the column above is kept for when it does.

@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Hono } from 'hono'
 import {
   createTeamPayoutRequest,
-  teamPayout,
   teamPayoutList,
   z,
 } from '@ipc/contracts'

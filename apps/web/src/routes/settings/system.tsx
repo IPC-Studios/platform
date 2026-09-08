@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from 'react'
 import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2 } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
@@ -9,7 +8,7 @@ import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { SkeletonList, SkeletonTiles } from '@/shared/ui/skeleton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Select } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'

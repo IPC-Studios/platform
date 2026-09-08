@@ -86,6 +86,8 @@ app.use('*', (c, next) => {
 // its own app on a reload.
 const CREDENTIAL_PATHS = [
   '/auth/login',
+  // Sign-in like the rest, and each call makes an outbound request to Google.
+  '/auth/google',
   '/auth/register',
   '/auth/verify',
   '/auth/resend-verification',

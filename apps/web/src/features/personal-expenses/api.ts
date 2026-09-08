@@ -11,9 +11,10 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
 
 const created = z.object({ id: z.string().uuid() })
-const anySchema = z.any()
+/** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
+const anySchema = z.unknown()
 
-export function usePersonalExpenses(filters: { search?: string; category?: string }) {
+export function usePersonalExpenses(filters: { search?: string | undefined; category?: string | undefined }) {
   const { session } = useAuth()
   const access = useAccess()
   const base = new URLSearchParams()
@@ -62,7 +63,7 @@ function usePersonalExpenseMutation<TArgs, TResult>(fn: (a: TArgs) => Promise<TR
 
 export function useSavePersonalExpense() {
   return usePersonalExpenseMutation(
-    ({ id, body }: { id?: string; body: CreatePersonalExpenseRequest }) =>
+    ({ id, body }: { id?: string | undefined; body: CreatePersonalExpenseRequest }) =>
       callApi(id ? `/personal-expenses/${id}` : '/personal-expenses', {
         method: id ? 'PATCH' : 'POST',
         body,

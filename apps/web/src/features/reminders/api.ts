@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -8,14 +7,13 @@ import {
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
-import { useAccess } from '@/shared/auth/useAccess'
 
 const created = z.object({ id: z.string().uuid() })
-const anySchema = z.any()
+/** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
+const anySchema = z.unknown()
 
 export function useReminders(filters?: { status?: string; priority?: string }) {
   const { session } = useAuth()
-  const access = useAccess()
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   if (filters?.priority) params.set('priority', filters.priority)
@@ -42,7 +40,7 @@ function useReminderMutation<TArgs, TResult>(fn: (a: TArgs) => Promise<TResult>,
 
 export function useSaveReminder() {
   return useReminderMutation(
-    ({ id, body }: { id?: string; body: CreateReminderRequest }) =>
+    ({ id, body }: { id?: string | undefined; body: CreateReminderRequest }) =>
       callApi(id ? `/reminders/${id}` : '/reminders', {
         method: id ? 'PATCH' : 'POST',
         body,

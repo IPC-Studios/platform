@@ -1,6 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { z } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -12,7 +10,7 @@ const activityItemSchema = z.object({
   action: z.string(),
   entity_type: z.string(),
   entity_id: z.string().uuid().nullable(),
-  metadata: z.any().nullable(),
+  metadata: z.unknown().nullable(),
   created_at: z.string(),
 })
 

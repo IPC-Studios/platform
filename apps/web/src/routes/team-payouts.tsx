@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -16,7 +15,7 @@ import {
 } from '@/features/team-payouts/api'
 import { useDirectory } from '@/features/team/api'
 import { type CreateTeamPayoutRequest } from '@ipc/contracts'
-import { Plus, Trash2, DollarSign, Clock, CheckCircle, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, DollarSign, Clock, CheckCircle } from 'lucide-react'
 
 function TeamPayoutsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Sparkles, Type, Palette, Ruler } from 'lucide-react'
@@ -18,7 +17,6 @@ import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
 import { Input } from '@/shared/ui/input'
-import { Select } from '@/shared/ui/select'
 
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'

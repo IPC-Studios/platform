@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-// @ts-nocheck
 import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -77,7 +75,7 @@ function TemplatesContent() {
           </div>
           <div className="mt-6 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => { const parsed = createInvoiceTemplateRequest.safeParse(form); if (!parsed.success) toast.error(parsed.error.issues[0].message); else create.mutate(parsed.data) }} disabled={!form.name.trim() || create.isPending}>{create.isPending ? 'Saving…' : 'Create'}</Button>
+            <Button onClick={() => { const parsed = createInvoiceTemplateRequest.safeParse(form); if (!parsed.success) toast.error(parsed.error.issues[0]?.message ?? 'Please check the form.'); else create.mutate(parsed.data) }} disabled={!form.name.trim() || create.isPending}>{create.isPending ? 'Saving…' : 'Create'}</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { z } from 'zod'
-import { uuid, isoDate, isoDateTime, money, pagination, paginated } from './shared/primitives'
+import { uuid, isoDate, isoDateTime, money } from './shared/primitives'
 
 export const personalExpenseCategory = z.enum([
   'travel',

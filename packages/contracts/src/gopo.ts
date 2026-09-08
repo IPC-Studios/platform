@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { z } from 'zod'
-import { uuid, isoDate, isoDateTime, money } from './shared/primitives'
+import { uuid, isoDate, money } from './shared/primitives'
 
 export const gopoScoreCard = z.object({
   health_score: z.number().min(0).max(100),

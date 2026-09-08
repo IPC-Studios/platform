@@ -126,7 +126,7 @@ export function useDeleteCustomLookup() {
     mutationFn: (id: string) =>
       callApi(`/settings/lookups/${id}`, {
         method: 'DELETE',
-        responseSchema: z.any(),
+        responseSchema: z.unknown(),
       }),
     onSuccess: () => {
       toast.success('Lookup deleted')

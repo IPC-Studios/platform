@@ -108,14 +108,16 @@ revoke all on function create_referral_campaign(text, text, text, numeric, text)
 grant execute on function create_referral_campaign(text, text, text, numeric, text) to authenticated;
 
 -- RPC: submit a referral (public, no auth required)
+-- Required parameters must precede the defaulted ones; Postgres rejects the
+-- reverse. The API calls this with named arguments, so the order is free.
 create or replace function submit_referral(
-  p_campaign_id   uuid,
-  p_referrer_name text default null,
+  p_campaign_id    uuid,
+  p_client_name    text,
+  p_referrer_name  text default null,
   p_referrer_phone text default null,
-  p_client_name   text,
-  p_client_phone  text default null,
-  p_client_email  text default null,
-  p_notes         text default null
+  p_client_phone   text default null,
+  p_client_email   text default null,
+  p_notes          text default null
 )
 returns uuid
 language plpgsql

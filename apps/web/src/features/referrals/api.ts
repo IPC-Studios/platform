@@ -11,7 +11,8 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
 
 const created = z.object({ id: z.string().uuid() })
-const anySchema = z.any()
+/** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
+const anySchema = z.unknown()
 
 export function useReferralCampaigns() {
   const { session } = useAuth()
@@ -59,7 +60,7 @@ function useReferralMutation<TArgs, TResult>(fn: (a: TArgs) => Promise<TResult>,
 
 export function useSaveReferralCampaign() {
   return useReferralMutation(
-    ({ id, body }: { id?: string; body: CreateReferralCampaignRequest }) =>
+    ({ id, body }: { id?: string | undefined; body: CreateReferralCampaignRequest }) =>
       callApi(id ? `/referrals/${id}` : '/referrals/campaigns', {
         method: id ? 'PATCH' : 'POST',
         body,

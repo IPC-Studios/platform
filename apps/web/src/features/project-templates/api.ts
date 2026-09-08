@@ -10,7 +10,8 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
 
 const created = z.object({ id: z.string().uuid() })
-const anySchema = z.any()
+/** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
+const anySchema = z.unknown()
 
 export function useProjectTemplates() {
   const { session } = useAuth()
@@ -36,7 +37,7 @@ function useTemplateMutation<TArgs, TResult>(fn: (a: TArgs) => Promise<TResult>,
 
 export function useSaveProjectTemplate() {
   return useTemplateMutation(
-    ({ id, body }: { id?: string; body: CreateProjectTemplateRequest }) =>
+    ({ id, body }: { id?: string | undefined; body: CreateProjectTemplateRequest }) =>
       callApi(id ? `/projects/templates/${id}` : '/projects/templates', {
         method: id ? 'PATCH' : 'POST',
         body,
@@ -56,7 +57,7 @@ export function useDeleteProjectTemplate() {
 export function useApplyProjectTemplate() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ templateId, body }: { templateId: string; body: { name: string; client_id?: string; start_date?: string } }) =>
+    mutationFn: ({ templateId, body }: { templateId: string; body: { name: string; client_id?: string | undefined; start_date?: string | undefined } }) =>
       callApi(`/projects/templates/${templateId}/apply`, {
         method: 'POST',
         body,

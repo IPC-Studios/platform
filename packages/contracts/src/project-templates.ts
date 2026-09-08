@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { z } from 'zod'
-import { uuid, isoDateTime, money } from './shared/primitives'
+import { uuid, isoDateTime } from './shared/primitives'
 
 export const projectTemplate = z.object({
   id: uuid,

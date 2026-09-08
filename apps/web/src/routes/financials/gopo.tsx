@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -7,7 +6,6 @@ import { Badge } from '@/shared/ui/badge'
 import { useGopoSummary } from '@/features/gopo/api'
 import {
   TrendingUp,
-  TrendingDown,
   AlertTriangle,
   CheckCircle,
   DollarSign,

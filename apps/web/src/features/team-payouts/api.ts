@@ -10,7 +10,8 @@ import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
 
 const created = z.object({ id: z.string().uuid() })
-const anySchema = z.any()
+/** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
+const anySchema = z.unknown()
 
 export function useTeamPayouts(filters?: { user_id?: string; status?: string }) {
   const { session } = useAuth()
