@@ -8,6 +8,7 @@ import {
   taskBundle,
   taskListItem,
   updateTaskStatusRequest,
+  z,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -38,7 +39,9 @@ function toItems(rows: RawTask[], order: Map<string, number>) {
 }
 
 // Flat select with the project name joined in (was PostgREST `projects(name)`).
-const selectTasks = (sql: TransactionSql) => sql<RawTask[]>`
+// `assignee` narrows to tasks assigned to one person, for an admin previewing
+// what a specific team member's board looks like.
+const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
   select t.id, t.title, t.description, t.status, t.priority, t.due_date, t.project_id,
          p.name as project_name,
          coalesce(
@@ -49,6 +52,7 @@ const selectTasks = (sql: TransactionSql) => sql<RawTask[]>`
   left join projects p on p.id = t.project_id
   left join task_assignees a on a.task_id = t.id
   left join users u on u.user_id = a.user_id
+  where ${assignee ? sql`exists (select 1 from task_assignees a2 where a2.task_id = t.id and a2.user_id = ${assignee})` : sql`true`}
   group by t.id, p.name
   order by t.created_at desc`
 
@@ -112,7 +116,10 @@ export const tasksRouter = new Hono<AppEnv>()
 
   // ── Admin/manager task ops ──────────────────────────────────
   .get('/', requireAction('tasks', 'view'), async (c) => {
-    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, selectTasks))
+    const assignee = c.req.query('assignee')
+    const ac = assignee ? z.string().uuid().safeParse(assignee) : null
+    if (assignee && !ac?.success) fail(422, 'Invalid assignee id.')
+    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, (sql) => selectTasks(sql, assignee)))
     if (!rows) fail(400, 'We could not load tasks.')
     return c.json(list.parse(toItems(rows, new Map())))
   })

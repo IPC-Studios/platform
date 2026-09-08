@@ -17,7 +17,12 @@ export const workRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
   // Any active member: RLS returns their own submissions (+ all for admin/manager).
+  // `user_id` narrows to one person's — RLS still caps a non-admin to their own
+  // regardless of what they pass, so this is a display filter, not a grant.
   .get('/submissions', async (c) => {
+    const userId = c.req.query('user_id')
+    const uc = userId ? z.string().uuid().safeParse(userId) : null
+    if (userId && !uc?.success) fail(422, 'Invalid user id.')
     const rows = await attempt(c, 'work.list', () =>
       withUser(
         c.env,
@@ -25,6 +30,7 @@ export const workRouter = new Hono<AppEnv>()
         (sql) =>
           sql`select id, project_id, task_id, submission_link, notes, status, review_notes, created_at
               from team_work_submissions
+              where ${userId ? sql`submitted_by = ${userId}` : sql`true`}
               order by created_at desc`,
       ),
     )

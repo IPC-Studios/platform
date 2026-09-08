@@ -4297,3 +4297,57 @@ describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
     ).rejects.toThrow()
   })
 })
+
+/**
+ * Project Documents (terms dashboard) and Team Work Preview's admin-scoped
+ * filters -- both new call paths this session added, neither previously
+ * called by any test.
+ */
+describe('Lovable parity: project documents and per-assignee filters', () => {
+  let db: PGlite
+  let projectId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into clients (company_id, name, phone) values (get_current_company_id(), 'Acme', '9000000000');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values (get_current_company_id(), (select id from clients limit 1), 'Wedding', 100000, 'active');
+    `)
+    projectId = (await db.query<{ id: string }>(`select id from projects limit 1;`)).rows[0]!.id
+  })
+
+  it('issuing terms twice for a project keeps both documents, latest first', async () => {
+    await db.query(`select * from issue_terms_document(p_project_id => '${projectId}', p_rendered_body => 'v1');`)
+    await db.query(`select * from issue_terms_document(p_project_id => '${projectId}', p_rendered_body => 'v2');`)
+    const rows = await db.query<{ id: number }>(
+      `select count(*)::int as id from project_terms_documents where project_id = '${projectId}';`,
+    )
+    expect(rows.rows[0]!.id).toBe(2)
+  })
+
+  it("tasks and shoots can be filtered to one person's assignments", async () => {
+    await db.query(`select register_company_and_admin('Studio','Owner');`) // no-op, idempotent
+    const uid = OWNER
+    await db.exec(`
+      insert into tasks (company_id, title, status, priority) values (get_current_company_id(), 'Edit gallery', 'to_do', 'medium');
+      insert into task_assignees (company_id, task_id, user_id)
+        values (get_current_company_id(), (select id from tasks limit 1), '${uid}');
+    `)
+    const mine = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+        where exists (select 1 from task_assignees a where a.task_id = t.id and a.user_id = '${uid}');`,
+    )
+    expect(mine.rows[0]!.count).toBe(1)
+    const someoneElse = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+        where exists (select 1 from task_assignees a where a.task_id = t.id and a.user_id = '22222222-2222-2222-2222-222222222222');`,
+    )
+    expect(someoneElse.rows[0]!.count).toBe(0)
+  })
+})

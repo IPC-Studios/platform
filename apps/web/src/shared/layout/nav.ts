@@ -30,6 +30,8 @@ import {
   BarChart3,
   DollarSign,
   FileText,
+  FileSignature,
+  Eye,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -101,6 +103,7 @@ export const NAV: NavEntry[] = [
       leaf('Create Project', '/projects/new', Plus, { module: 'projects' }),
       leaf('Project Tracking', '/project-tracking', Target, { module: 'projects' }),
       leaf('Templates', '/settings/project-templates', Package, { module: 'projects' }),
+      leaf('Documents', '/project-documents', FileSignature, { module: 'projects' }),
     ],
   },
 
@@ -143,6 +146,8 @@ export const NAV: NavEntry[] = [
       leaf('Team Directory', '/employees', Users, { module: 'team_directory' }),
       leaf('Attendance', '/attendance', Clock, { module: 'attendance' }),
       leaf('Roles & Access', '/settings/roles', ShieldCheck, { module: 'team_roles' }),
+      leaf('Team Terms', '/settings/team-terms', FileSignature, { module: 'team_terms' }),
+      leaf('Work Preview', '/team/work-preview', Eye, { module: 'team_work_preview' }),
     ],
   },
 

@@ -103,6 +103,7 @@ export const shootsRouter = new Hono<AppEnv>()
 
   .get('/', requireAction('projects', 'view'), async (c) => {
     const project = uuidQuery(c, 'project_id')
+    const assignee = uuidQuery(c, 'assignee')
     const rows = await attempt(c, 'shoots.list', () =>
       withUser(
         c.env,
@@ -110,6 +111,14 @@ export const shootsRouter = new Hono<AppEnv>()
         (sql) => sql`
           ${selectShoots(sql)}
           where ${project ? sql`s.project_id = ${project}` : sql`true`}
+            and ${
+              assignee
+                ? sql`exists (
+                    select 1 from team_assignment_slots t
+                    where t.shoot_id = s.id and t.user_id = ${assignee} and t.status <> 'cancelled'
+                  )`
+                : sql`true`
+            }
           order by s.shoot_date asc nulls last`,
       ),
     )
