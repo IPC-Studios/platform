@@ -13,6 +13,7 @@ import { fail } from '../../middleware/errors'
 import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
+import { rpcJson } from '../../lib/rpc'
 import { audit } from '../../lib/audit'
 
 const okResponse = z.object({ ok: z.boolean() })
@@ -34,14 +35,14 @@ export const personalExpensesRouter = new Hono<AppEnv>()
 
     const rows = await attempt(c, 'personal-expenses.list', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ list_personal_expenses: string }[]>`
+        const result = await sql<{ list_personal_expenses: unknown }[]>`
           select list_personal_expenses(
             p_search => ${search},
             p_category => ${category},
             p_cursor => ${cursor ? cursor : null}::timestamptz,
             p_limit => ${limit}
           ) as list_personal_expenses`
-        return JSON.parse(result[0]?.list_personal_expenses ?? '{}')
+        return rpcJson(result[0]?.list_personal_expenses, {})
       }),
     )
     if (!rows) fail(400, 'We could not load your expenses.')
@@ -57,12 +58,12 @@ export const personalExpensesRouter = new Hono<AppEnv>()
 
     const rows = await attempt(c, 'personal-expenses.report', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ personal_expense_report: string }[]>`
+        const result = await sql<{ personal_expense_report: unknown }[]>`
           select personal_expense_report(
             p_start_date => ${parsed.data.start_date}::date,
             p_end_date => ${parsed.data.end_date}::date
           ) as personal_expense_report`
-        return JSON.parse(result[0]?.personal_expense_report ?? '{}')
+        return rpcJson(result[0]?.personal_expense_report, {})
       }),
     )
     if (!rows) fail(400, 'We could not generate the report.')

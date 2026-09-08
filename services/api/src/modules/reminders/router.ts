@@ -10,6 +10,7 @@ import { fail } from '../../middleware/errors'
 import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
+import { rpcJson } from '../../lib/rpc'
 import { audit } from '../../lib/audit'
 
 const okResponse = z.object({ ok: z.boolean() })
@@ -36,13 +37,16 @@ export const remindersRouter = new Hono<AppEnv>()
 
     const rows = await attempt(c, 'reminders.list', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ list_reminders: string }[]>`
+        const result = await sql<{ list_reminders: unknown }[]>`
           select list_reminders(
             p_status => ${status}::text,
             p_priority => ${priority}::text,
             p_user_id => ${userId}::uuid
           ) as list_reminders`
-        return JSON.parse(result[0]?.list_reminders ?? '{"items":[],"summary":{"total_count":0,"active_count":0,"overdue_count":0,"due_today_count":0}}')
+        return rpcJson(result[0]?.list_reminders, {
+          items: [],
+          summary: { total_count: 0, active_count: 0, overdue_count: 0, due_today_count: 0 },
+        })
       }),
     )
     if (!rows) fail(400, 'We could not load reminders.')

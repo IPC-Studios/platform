@@ -7,6 +7,7 @@ import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
+import { rpcJson } from '../../lib/rpc'
 import { audit } from '../../lib/audit'
 
 const expenses = expense.array()
@@ -85,8 +86,8 @@ export const financialsRouter = new Hono<AppEnv>()
   .get('/gopo', requireModule('financials'), async (c) => {
     const data = await attempt(c, 'financials.gopo', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ gopo_summary: string }[]>`select gopo_summary() as gopo_summary`
-        return JSON.parse(result[0]?.gopo_summary ?? '{}')
+        const result = await sql<{ gopo_summary: unknown }[]>`select gopo_summary() as gopo_summary`
+        return rpcJson(result[0]?.gopo_summary, {})
       }),
     )
     if (!data) fail(400, 'We could not load the GOPO dashboard.')
@@ -103,12 +104,12 @@ export const financialsRouter = new Hono<AppEnv>()
 
     const data = await attempt(c, 'financials.gst_analysis', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ gst_analysis: string }[]>`
+        const result = await sql<{ gst_analysis: unknown }[]>`
           select gst_analysis(
             p_start_date => ${parsed.data.start_date}::date,
             p_end_date => ${parsed.data.end_date}::date
           ) as gst_analysis`
-        return JSON.parse(result[0]?.gst_analysis ?? '{}')
+        return rpcJson(result[0]?.gst_analysis, {})
       }),
     )
     if (!data) fail(400, 'We could not load GST analysis.')

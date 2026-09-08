@@ -4171,3 +4171,52 @@ describe('dashboard RPCs run and return contract-shaped data (0064)', () => {
     expect(c.rows[0]!.n).toBe(1)
   })
 })
+
+/**
+ * The predicate /auth/register uses to spot a pending invitation before it
+ * creates a studio. Without it, an invited photographer who signs up on the
+ * site instead of following their emailed link becomes super_admin of a brand
+ * new empty studio, on its own trial, while the studio that invited them sees
+ * nobody arrive -- which is how a team of employees ends up as a set of
+ * unrelated owners.
+ *
+ * Only a LIVE invitation counts. Revoked, expired and already-accepted ones
+ * must not block a genuine new signup.
+ */
+describe('registration defers to a live invitation', () => {
+  let db: PGlite
+  const live = 'joiner@studio.test'
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into user_invitations (company_id, email, token_hash, pending_name, expires_at)
+      values
+        (get_current_company_id(), '${live}',            'h1', 'Live',    now() + interval '7 days'),
+        (get_current_company_id(), 'expired@s.test',     'h2', 'Expired', now() - interval '1 day'),
+        (get_current_company_id(), 'revoked@s.test',     'h3', 'Revoked', now() + interval '7 days'),
+        (get_current_company_id(), 'accepted@s.test',    'h4', 'Done',    now() + interval '7 days');
+      update user_invitations set revoked_at  = now() where email = 'revoked@s.test';
+      update user_invitations set accepted_at = now() where email = 'accepted@s.test';
+    `)
+  })
+
+  const pending = (email: string) =>
+    db.query<{ one: number }>(
+      `select 1 as one from user_invitations
+        where email = '${email}' and accepted_at is null and revoked_at is null and expires_at > now()
+        limit 1;`,
+    )
+
+  it('blocks a signup that already has an invitation waiting', async () => {
+    expect((await pending(live)).rows).toHaveLength(1)
+  })
+
+  it('lets everyone else through: revoked, expired, accepted and unknown', async () => {
+    for (const e of ['expired@s.test', 'revoked@s.test', 'accepted@s.test', 'nobody@s.test']) {
+      expect((await pending(e)).rows).toHaveLength(0)
+    }
+  })
+})
