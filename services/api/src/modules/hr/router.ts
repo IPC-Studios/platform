@@ -15,6 +15,7 @@ import { fail } from '../../middleware/errors'
 import { uuidParam, dateParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
+import { rpcJson } from '../../lib/rpc'
 import { audit } from '../../lib/audit'
 
 const list = attendanceRecord.array()
@@ -181,9 +182,9 @@ export const hrRouter = new Hono<AppEnv>()
   .get('/attendance/streak', async (c) => {
     const rows = await attempt(c, 'hr.attendance_streak', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const result = await sql<{ get_attendance_streak: string }[]>`
+        const result = await sql<{ get_attendance_streak: unknown }[]>`
           select get_attendance_streak() as get_attendance_streak`
-        return JSON.parse(result[0]?.get_attendance_streak ?? '{"streak":0,"last_check_date":null}')
+        return rpcJson(result[0]?.get_attendance_streak, { streak: 0, last_check_date: null })
       }),
     )
     if (!rows) fail(400, 'We could not load your streak.')
