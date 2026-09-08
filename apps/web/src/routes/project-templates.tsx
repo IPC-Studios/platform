@@ -1,0 +1,331 @@
+import { useState } from 'react'
+import { AuthedPage } from '@/shared/layout/AuthedPage'
+import { PageHeader } from '@/shared/layout/page-header'
+import { Button } from '@/shared/ui/button'
+import { Input } from '@/shared/ui/input'
+import { Dialog, DialogContent } from '@/shared/ui/dialog'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Badge } from '@/shared/ui/badge'
+import {
+  useProjectTemplates,
+  useSaveProjectTemplate,
+  useDeleteProjectTemplate,
+  useApplyProjectTemplate,
+} from '@/features/project-templates/api'
+import { type CreateProjectTemplateRequest } from '@ipc/contracts'
+import { Plus, Trash2, Copy, Package, Camera, ListChecks } from 'lucide-react'
+
+function ProjectTemplatesContent() {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null)
+  const [applyForm, setApplyForm] = useState({ name: '', client_id: '', start_date: '' })
+  const [form, setForm] = useState<CreateProjectTemplateRequest>({
+    name: '',
+    description: null,
+    deliverables_json: [],
+    shoots_json: [],
+    tasks_json: [],
+  })
+
+  const { data } = useProjectTemplates()
+  const saveTemplate = useSaveProjectTemplate()
+  const deleteTemplate = useDeleteProjectTemplate()
+  const applyTemplate = useApplyProjectTemplate()
+
+  const templates = data?.items ?? []
+
+  function openCreate() {
+    setEditingId(null)
+    setForm({ name: '', description: null, deliverables_json: [], shoots_json: [], tasks_json: [] })
+    setDialogOpen(true)
+  }
+
+  function openEdit(template: (typeof templates)[0]) {
+    setEditingId(template.id)
+    setForm({
+      name: template.name,
+      description: template.description,
+      deliverables_json: template.deliverables_json ?? [],
+      shoots_json: template.shoots_json ?? [],
+      tasks_json: template.tasks_json ?? [],
+    })
+    setDialogOpen(true)
+  }
+
+  function openApply(templateId: string) {
+    setApplyingTemplateId(templateId)
+    setApplyForm({ name: '', client_id: '', start_date: '' })
+    setApplyDialogOpen(true)
+  }
+
+  function handleApply() {
+    if (!applyingTemplateId || !applyForm.name.trim()) return
+    applyTemplate.mutate(
+      { templateId: applyingTemplateId, body: { name: applyForm.name, client_id: applyForm.client_id || undefined, start_date: applyForm.start_date || undefined } },
+      { onSuccess: () => setApplyDialogOpen(false) },
+    )
+  }
+
+  function addDeliverable() {
+    setForm({
+      ...form,
+      deliverables_json: [...form.deliverables_json, { name: '', description: null, quantity: 1 }],
+    })
+  }
+
+  function addShoot() {
+    setForm({
+      ...form,
+      shoots_json: [...form.shoots_json, { name: '', kind: null, duration_hours: null }],
+    })
+  }
+
+  function addTask() {
+    setForm({
+      ...form,
+      tasks_json: [...form.tasks_json, { title: '', priority: 'medium', sort_order: form.tasks_json.length }],
+    })
+  }
+
+  function handleSubmit() {
+    if (!form.name.trim()) return
+    saveTemplate.mutate(
+      { id: editingId ?? undefined, body: form },
+      { onSuccess: () => setDialogOpen(false) },
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Project Templates"
+        description="Create reusable project configurations"
+        actions={
+          <Button onClick={openCreate} size="sm">
+            <Plus className="mr-1 h-4 w-4" /> New Template
+          </Button>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {templates.map((template) => (
+          <Card key={template.id}>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">{template.name}</CardTitle>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openApply(template.id)}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(template)}>
+                    <Package className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteTemplate.mutate(template.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {template.description && (
+                <p className="mb-3 text-sm text-muted-foreground">{template.description}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  <Package className="mr-1 h-3 w-3" /> {(template.deliverables_json ?? []).length} deliverables
+                </Badge>
+                <Badge variant="secondary">
+                  <Camera className="mr-1 h-3 w-3" /> {(template.shoots_json ?? []).length} shoots
+                </Badge>
+                <Badge variant="secondary">
+                  <ListChecks className="mr-1 h-3 w-3" /> {(template.tasks_json ?? []).length} tasks
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {templates.length === 0 && (
+          <div className="col-span-full py-12 text-center text-muted-foreground">
+            No templates yet. Create one to speed up project setup.
+          </div>
+        )}
+      </div>
+
+      {/* Create/Edit Template Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" title={editingId ? 'Edit Template' : 'New Template'}>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Template Name</label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Wedding Photography Package"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Description</label>
+              <Input
+                value={form.description ?? ''}
+                onChange={(e) => setForm({ ...form, description: e.target.value || null })}
+                placeholder="Optional description"
+              />
+            </div>
+
+            {/* Deliverables */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Deliverables</label>
+                <Button variant="outline" size="sm" onClick={addDeliverable}>
+                  <Plus className="mr-1 h-3 w-3" /> Add
+                </Button>
+              </div>
+              {form.deliverables_json.map((d, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <Input
+                    placeholder="Deliverable name"
+                    value={d.name}
+                    onChange={(e) => {
+                      const deliverables = [...form.deliverables_json]
+                      deliverables[i] = { ...deliverables[i], name: e.target.value }
+                      setForm({ ...form, deliverables_json: deliverables })
+                    }}
+                  />
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Qty"
+                    className="w-20"
+                    value={d.quantity}
+                    onChange={(e) => {
+                      const deliverables = [...form.deliverables_json]
+                      deliverables[i] = { ...deliverables[i], quantity: Number(e.target.value) || 1 }
+                      setForm({ ...form, deliverables_json: deliverables })
+                    }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => {
+                    setForm({ ...form, deliverables_json: form.deliverables_json.filter((_, j) => j !== i) })
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Shoots */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Shoots</label>
+                <Button variant="outline" size="sm" onClick={addShoot}>
+                  <Plus className="mr-1 h-3 w-3" /> Add
+                </Button>
+              </div>
+              {form.shoots_json.map((s, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <Input
+                    placeholder="Shoot name"
+                    value={s.name}
+                    onChange={(e) => {
+                      const shoots = [...form.shoots_json]
+                      shoots[i] = { ...shoots[i], name: e.target.value }
+                      setForm({ ...form, shoots_json: shoots })
+                    }}
+                  />
+                  <Input
+                    placeholder="Kind (e.g. wedding)"
+                    className="w-32"
+                    value={s.kind ?? ''}
+                    onChange={(e) => {
+                      const shoots = [...form.shoots_json]
+                      shoots[i] = { ...shoots[i], kind: e.target.value || null }
+                      setForm({ ...form, shoots_json: shoots })
+                    }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => {
+                    setForm({ ...form, shoots_json: form.shoots_json.filter((_, j) => j !== i) })
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Tasks */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Tasks</label>
+                <Button variant="outline" size="sm" onClick={addTask}>
+                  <Plus className="mr-1 h-3 w-3" /> Add
+                </Button>
+              </div>
+              {form.tasks_json.map((t, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <Input
+                    placeholder="Task title"
+                    value={t.title}
+                    onChange={(e) => {
+                      const tasks = [...form.tasks_json]
+                      tasks[i] = { ...tasks[i], title: e.target.value }
+                      setForm({ ...form, tasks_json: tasks })
+                    }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => {
+                    setForm({ ...form, tasks_json: form.tasks_json.filter((_, j) => j !== i) })
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!form.name.trim() || saveTemplate.isPending}>
+              {saveTemplate.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Apply Template Dialog */}
+      <Dialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
+        <DialogContent title="Create Project from Template">
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Project Name</label>
+              <Input
+                value={applyForm.name}
+                onChange={(e) => setApplyForm({ ...applyForm, name: e.target.value })}
+                placeholder="e.g. Sharma Wedding"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Start Date (optional)</label>
+              <Input
+                type="date"
+                value={applyForm.start_date}
+                onChange={(e) => setApplyForm({ ...applyForm, start_date: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setApplyDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleApply} disabled={!applyForm.name.trim() || applyTemplate.isPending}>
+              {applyTemplate.isPending ? 'Creating...' : 'Create Project'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export function ProjectTemplatesPage() {
+  return (
+    <AuthedPage module="projects">
+      <ProjectTemplatesContent />
+    </AuthedPage>
+  )
+}

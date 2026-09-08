@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Sparkles, Type } from 'lucide-react'
+import { Check, Sparkles, Type, Palette, Ruler } from 'lucide-react'
 import { toast } from 'sonner'
 import { companyTheme, type ThemeFontKey } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -14,8 +14,10 @@ import { FONT_OPTIONS, FONT_KEYS, fontOr, fontStack, loadFont } from '@/shared/t
 import { Button } from '@/shared/ui/button'
 import { TiltCard } from '@/shared/ui/tilt-card'
 import { SkeletonCards } from '@/shared/ui/skeleton'
-import { Card, CardContent } from '@/shared/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
+import { Input } from '@/shared/ui/input'
+import { Select } from '@/shared/ui/select'
 
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
@@ -150,6 +152,120 @@ function Appearance() {
             onCustomizeFont={() => setFontFor(p)}
           />
         ))}
+      </div>
+
+      {/* Custom Color & Border Radius */}
+      <div className="mt-8 grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Palette className="h-4 w-4" /> Custom Accent Color
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Override the theme's accent color with your brand color.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={data?.custom_color ?? '#6366f1'}
+                onChange={(e) => {
+                  // Live preview of custom color
+                  document.documentElement.style.setProperty('--custom-accent', e.target.value)
+                }}
+                onBlur={(e) => {
+                  if (isOwner) {
+                    save.mutate({
+                      preset_key: savedPreset,
+                      font_key: savedFont,
+                      custom_color: e.target.value,
+                    })
+                  }
+                }}
+                className="h-10 w-10 cursor-pointer rounded border border-border"
+              />
+              <Input
+                value={data?.custom_color ?? ''}
+                onChange={(e) => {
+                  if (isOwner) {
+                    save.mutate({
+                      preset_key: savedPreset,
+                      font_key: savedFont,
+                      custom_color: e.target.value || null,
+                    })
+                  }
+                }}
+                placeholder="#6366f1"
+                className="flex-1"
+              />
+              {data?.custom_color && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    save.mutate({
+                      preset_key: savedPreset,
+                      font_key: savedFont,
+                      custom_color: null,
+                    })
+                  }}
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Ruler className="h-4 w-4" /> Border Radius
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Adjust the roundness of cards, buttons, and inputs.
+            </p>
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                { value: '0', label: 'None' },
+                { value: '0.25', label: 'Small' },
+                { value: '0.5', label: 'Default' },
+                { value: '0.75', label: 'Large' },
+                { value: '1', label: 'Full' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    if (isOwner) {
+                      document.documentElement.style.setProperty('--radius', `${opt.value}rem`)
+                      save.mutate({
+                        preset_key: savedPreset,
+                        font_key: savedFont,
+                        border_radius: opt.value,
+                      })
+                    }
+                  }}
+                  className={cn(
+                    'flex flex-col items-center gap-1 rounded-lg border p-2 text-xs transition-colors',
+                    data?.border_radius === opt.value
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                      : 'border-border hover:bg-accent',
+                  )}
+                >
+                  <div
+                    className="h-6 w-6 border-2 border-primary"
+                    style={{ borderRadius: `${opt.value}rem` }}
+                  />
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {fontFor && (

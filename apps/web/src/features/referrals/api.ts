@@ -1,0 +1,93 @@
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import {
+  referralCampaignList,
+  referralSubmissionList,
+  z,
+  type CreateReferralCampaignRequest,
+} from '@ipc/contracts'
+import { callApi } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useAccess } from '@/shared/auth/useAccess'
+
+const created = z.object({ id: z.string().uuid() })
+const anySchema = z.any()
+
+export function useReferralCampaigns() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['referrals', 'campaigns'],
+    queryFn: () => callApi('/referrals/campaigns', { responseSchema: referralCampaignList }),
+    enabled: !!session && access.hasModule('referrals'),
+    staleTime: 15_000,
+  })
+}
+
+export function useReferralSubmissions(campaignId?: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const base = new URLSearchParams()
+  if (campaignId) base.set('campaign_id', campaignId)
+  const qs = base.toString()
+
+  return useInfiniteQuery({
+    queryKey: ['referrals', 'submissions', campaignId ?? 'all'],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams(qs)
+      if (pageParam) params.set('cursor', pageParam)
+      const suffix = params.toString()
+      return callApi(`/referrals/submissions${suffix ? `?${suffix}` : ''}`, { responseSchema: referralSubmissionList })
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: !!session && access.hasModule('referrals'),
+    staleTime: 15_000,
+  })
+}
+
+function useReferralMutation<TArgs, TResult>(fn: (a: TArgs) => Promise<TResult>, message: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      toast.success(message)
+      void qc.invalidateQueries({ queryKey: ['referrals'] })
+    },
+  })
+}
+
+export function useSaveReferralCampaign() {
+  return useReferralMutation(
+    ({ id, body }: { id?: string; body: CreateReferralCampaignRequest }) =>
+      callApi(id ? `/referrals/${id}` : '/referrals/campaigns', {
+        method: id ? 'PATCH' : 'POST',
+        body,
+        responseSchema: id ? anySchema : created,
+      }),
+    'Campaign saved',
+  )
+}
+
+export function useDeleteReferralCampaign() {
+  return useReferralMutation(
+    (id: string) => callApi(`/referrals/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    'Campaign deleted',
+  )
+}
+
+export function useUpdateSubmissionStatus() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      callApi(`/referrals/submissions/${id}/status`, {
+        method: 'PATCH',
+        body: { status },
+        responseSchema: anySchema,
+      }),
+    onSuccess: () => {
+      toast.success('Status updated')
+      void qc.invalidateQueries({ queryKey: ['referrals'] })
+    },
+  })
+}

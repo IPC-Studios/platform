@@ -1,9 +1,11 @@
-import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   auditLogPage,
   authToken,
   cronRun,
   healthBody,
+  z,
   type ChangePasswordRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
@@ -75,6 +77,60 @@ export function useChangePassword() {
       })
       rememberSession(pair)
       await refresh()
+    },
+  })
+}
+
+// ── Custom Lookups ──────────────────────────────────────────
+const lookupSchema = z.object({
+  id: z.string().uuid(),
+  category: z.string(),
+  value: z.string(),
+  sort_order: z.number().int(),
+  is_active: z.boolean(),
+})
+const lookupArraySchema = lookupSchema.array()
+
+export function useCustomLookups(category?: string) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['settings', 'lookups', category ?? 'all'],
+    queryFn: () => {
+      const params = category ? `?category=${encodeURIComponent(category)}` : ''
+      return callApi(`/settings/lookups${params}`, { responseSchema: lookupArraySchema })
+    },
+    enabled: !!session?.is_owner,
+    staleTime: 30_000,
+  })
+}
+
+export function useCreateCustomLookup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { category: string; value: string; sort_order?: number }) =>
+      callApi('/settings/lookups', {
+        method: 'POST',
+        body,
+        responseSchema: z.object({ id: z.string().uuid() }),
+      }),
+    onSuccess: () => {
+      toast.success('Lookup created')
+      void qc.invalidateQueries({ queryKey: ['settings', 'lookups'] })
+    },
+  })
+}
+
+export function useDeleteCustomLookup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      callApi(`/settings/lookups/${id}`, {
+        method: 'DELETE',
+        responseSchema: z.any(),
+      }),
+    onSuccess: () => {
+      toast.success('Lookup deleted')
+      void qc.invalidateQueries({ queryKey: ['settings', 'lookups'] })
     },
   })
 }

@@ -97,13 +97,13 @@ export const settingsRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'settings.theme', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
-          select preset_key, font_key, color_scheme
+          select preset_key, font_key, color_scheme, custom_color, border_radius
           from company_theme_settings where company_id = ${auth.companyId}`
         return rows[0] ?? null
       }),
     )
     return c.json(
-      companyTheme.parse(row ?? { preset_key: 'ipc_classic', font_key: null, color_scheme: 'light' }),
+      companyTheme.parse(row ?? { preset_key: 'ipc_classic', font_key: null, color_scheme: 'light', custom_color: null, border_radius: '0.5' }),
     )
   })
 
@@ -117,15 +117,18 @@ export const settingsRouter = new Hono<AppEnv>()
           insert into company_theme_settings ${sql({
             company_id: auth.companyId,
             preset_key: parsed.data.preset_key,
-            // null is a real value here: it hands typography back to the theme.
             font_key: parsed.data.font_key ?? null,
             color_scheme: parsed.data.color_scheme,
+            custom_color: parsed.data.custom_color ?? null,
+            border_radius: parsed.data.border_radius ?? '0.5',
           })}
           on conflict (company_id) do update
-            set preset_key   = excluded.preset_key,
-                font_key     = excluded.font_key,
-                color_scheme = excluded.color_scheme
-          returning preset_key, font_key, color_scheme`
+            set preset_key    = excluded.preset_key,
+                font_key      = excluded.font_key,
+                color_scheme  = excluded.color_scheme,
+                custom_color  = excluded.custom_color,
+                border_radius = excluded.border_radius
+          returning preset_key, font_key, color_scheme, custom_color, border_radius`
         return rows[0] ?? null
       }),
     )
@@ -169,4 +172,58 @@ export const settingsRouter = new Hono<AppEnv>()
         next_cursor: rows.length > limit && last?.created_at ? last.created_at : null,
       }),
     )
+  })
+
+  // ── Custom Lookups ─────────────────────────────────────────
+  .get('/lookups', requireOwner(), async (c) => {
+    const category = c.req.query('category')
+    const rows = await attempt(c, 'settings.lookups', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        return sql`
+          select id, category, value, sort_order, is_active
+            from custom_lookups
+           where company_id = ${c.get('auth').companyId}
+             and ${category ? sql`category = ${category}` : sql`true`}
+           order by category, sort_order, value`
+      }),
+    )
+    if (!rows) fail(400, 'We could not load lookups.')
+    return c.json(rows)
+  })
+
+  .post('/lookups', requireOwner(), async (c) => {
+    const body = await c.req.json().catch(() => ({}))
+    const category = typeof body.category === 'string' ? body.category.trim() : ''
+    const value = typeof body.value === 'string' ? body.value.trim() : ''
+    if (!category || !value) fail(422, 'Category and value are required.')
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'settings.lookup_create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const made = await sql<{ id: string }[]>`
+          insert into custom_lookups (company_id, category, value, sort_order)
+          values (${auth.companyId}, ${category}, ${value}, ${body.sort_order ?? 0})
+          on conflict (company_id, category, value) do nothing
+          returning id`
+        return made
+      }),
+    )
+    if (!rows?.[0]) fail(409, 'That lookup value already exists.')
+    await audit(c, { action: 'lookup.create', entityType: 'custom_lookup', entityId: rows[0].id, after: { category, value } })
+    return c.json({ id: rows[0].id }, 201)
+  })
+
+  .delete('/lookups/:id', requireOwner(), async (c) => {
+    const id = c.req.param('id')
+    if (!id) fail(422, 'ID is required.')
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'settings.lookup_delete', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          delete from custom_lookups where id = ${id} and company_id = ${auth.companyId} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not delete this lookup.')
+    if (!rows.length) fail(404, 'We could not find that lookup.')
+    await audit(c, { action: 'lookup.delete', entityType: 'custom_lookup', entityId: id })
+    return c.json({ ok: true })
   })

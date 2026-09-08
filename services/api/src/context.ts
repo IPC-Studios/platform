@@ -56,6 +56,8 @@ export interface Env {
   LOG_LEVEL: string
   /** Build/release identifier surfaced by /health and error reports. */
   APP_VERSION: string
+  /** Google OAuth Client ID for GIS id_token verification (optional). */
+  GOOGLE_CLIENT_ID: string
 }
 
 /**

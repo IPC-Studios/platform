@@ -340,3 +340,62 @@ export function Select({ className, children, disabled, ...props }: ComponentPro
     </div>
   )
 }
+
+// ── Radix-compatible aliases (for pages that use shadcn-style Select) ──
+// These allow <Select><SelectTrigger><SelectValue/><SelectContent><SelectItem>>
+// to compile while still using the native <option> machinery above via a thin context.
+// For new code prefer the native <Select><option> API; these exist only for compat.
+import { createContext, useContext as useCtx } from 'react'
+
+type RadixCtx = { value: string; onValueChange?: (v: string) => void }
+const RadixCtx = createContext<RadixCtx>({ value: '' })
+
+export function SelectContent({ children, className, ...props }: ComponentProps<'div'>) {
+  return <>{children}</>
+}
+export function SelectItem({ children, value, ...props }: ComponentProps<'div'> & { value: string }) {
+  const ctx = useCtx(RadixCtx)
+  // Render as <option> child of the parent Radix Select — parent will lift it.
+  // We stash as data attributes so the outer Select can collect them if needed.
+  return <option value={value} {...props}>{children as ReactNode}</option>
+}
+export function SelectTrigger({ children, className, ...props }: ComponentProps<'div'>) {
+  return <>{children}</>
+}
+export function SelectValue({ placeholder, ...props }: { placeholder?: string } & ComponentProps<'span'>) {
+  return null
+}
+
+// Radix-style Select wrapper that bridges to the native Select above
+export function RadixSelect({
+  value,
+  onValueChange,
+  children,
+  ...props
+}: { value?: string; onValueChange?: (v: string) => void; children: ReactNode } & Omit<ComponentProps<'select'>, 'value'>) {
+  // Collect SelectItem values from children tree
+  const items: ReactNode[] = []
+  function collect(node: ReactNode) {
+    if (!node) return
+    if (Array.isArray(node)) node.forEach(collect)
+    else if (isValidElement(node)) {
+      const p = node.props as Record<string, unknown>
+      if (node.type === SelectItem) items.push(node)
+      else if (p.children) collect(p.children as ReactNode)
+      else if (node.type === SelectContent) collect(p.children as ReactNode)
+      else if (node.type === SelectTrigger) collect(p.children as ReactNode)
+    }
+  }
+  collect(children)
+  return (
+    <RadixCtx.Provider value={{ value: value ?? '', onValueChange }}>
+      <Select
+        value={value}
+        onChange={(e) => onValueChange?.(e.target.value)}
+        {...props}
+      >
+        {items}
+      </Select>
+    </RadixCtx.Provider>
+  )
+}

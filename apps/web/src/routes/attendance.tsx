@@ -10,6 +10,7 @@ import {
   MapPin,
   Pencil,
   RefreshCw,
+  Flame,
 } from 'lucide-react'
 import {
   attendanceDayRow,
@@ -82,8 +83,22 @@ function useFence() {
   })
 }
 
+function useAttendanceStreak() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['hr', 'attendance', 'streak'],
+    queryFn: () =>
+      callApi('/hr/attendance/streak', {
+        responseSchema: z.object({ streak: z.number().int(), last_check_date: z.string().nullable() }),
+      }),
+    enabled: !!session,
+    staleTime: 60_000,
+  })
+}
+
 function Attendance() {
   const { session } = useAuth()
+  const { data: streak } = useAttendanceStreak()
   // Everyone can see their own record; only the people who run the studio have
   // a roster to look at, so employees land straight on their own history.
   const canSeeTeam = ['super_admin', 'admin', 'manager'].includes(session?.role ?? '')
@@ -94,7 +109,17 @@ function Attendance() {
       <PageHeader
         title="Attendance"
         description="Track your team's daily check-ins, check-outs, and attendance status."
-        actions={<ClockActions />}
+        actions={
+          <div className="flex items-center gap-3">
+            {streak && streak.streak > 0 && (
+              <div className="flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-sm font-medium text-orange-700">
+                <Flame className="h-4 w-4" />
+                {streak.streak} day streak
+              </div>
+            )}
+            <ClockActions />
+          </div>
+        }
       />
 
       {canSeeTeam && (
