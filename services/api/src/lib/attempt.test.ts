@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import type { AppEnv } from '../context'
-import { errorBoundary } from '../middleware/errors'
+import { errorHandler } from '../middleware/errors'
 import { requestId } from '../middleware/request-id'
 import { attempt } from './attempt'
 
@@ -17,7 +17,7 @@ class PgError extends Error {
 function build(thrower: () => Promise<unknown>, onCode?: (code: string) => unknown) {
   const app = new Hono<AppEnv>()
   app.use('*', requestId)
-  app.use('*', errorBoundary)
+  app.onError(errorHandler)
   app.get('/x', async (c) => {
     const r = await attempt(c, 'test.op', thrower, onCode ? { onCode } : {})
     if (r === null) return c.json({ error: 'fallback' }, 400)
