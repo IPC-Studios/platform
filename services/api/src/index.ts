@@ -30,8 +30,13 @@ import { publicQuotesRouter } from './modules/crm/quotes'
 import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/router'
 import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
 import { enquiriesRouter } from './modules/enquiries/router'
+import { personalExpensesRouter } from './modules/personal-expenses/router'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
+import { referralsRouter, publicReferralsRouter } from './modules/referrals/router'
+import { teamPayoutsRouter } from './modules/team-payouts/router'
+import { remindersRouter } from './modules/reminders/router'
+import { activityRouter } from './modules/activity/router'
 
 const app = new Hono<AppEnv>()
 
@@ -81,6 +86,8 @@ app.use('*', (c, next) => {
 // its own app on a reload.
 const CREDENTIAL_PATHS = [
   '/auth/login',
+  // Sign-in like the rest, and each call makes an outbound request to Google.
+  '/auth/google',
   '/auth/register',
   '/auth/verify',
   '/auth/resend-verification',
@@ -130,11 +137,17 @@ app.route('/team-terms', teamTermsRouter)
 app.route('/public', publicTermsRouter)
 app.route('/documents', documentsRouter)
 app.route('/enquiries', enquiriesRouter)
+app.route('/personal-expenses', personalExpensesRouter)
 app.route('/public', publicQuotesRouter)
 app.route('/public', publicTeamTermsRouter)
 app.route('/public', publicDocumentsRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
+app.route('/referrals', referralsRouter)
+app.route('/public', publicReferralsRouter)
+app.route('/team-payouts', teamPayoutsRouter)
+app.route('/reminders', remindersRouter)
+app.route('/activity', activityRouter)
 
 // Every failure leaves through here, in one JSON envelope the web client
 // can read. Hono's own handler would return the bare message instead.

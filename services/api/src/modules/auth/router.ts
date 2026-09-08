@@ -200,6 +200,46 @@ export const authRouter = new Hono<AppEnv>()
     return c.json(await signIn(c, row.id))
   })
 
+  .post('/google', async (c) => {
+    const body = await c.req.json().catch(() => ({}))
+    const token = typeof body.id_token === 'string' ? body.id_token.trim() : ''
+    if (!token) fail(422, 'Missing Google token.')
+    if (!c.env.GOOGLE_CLIENT_ID) fail(503, 'Google login is not configured on this server.')
+
+    // Verify via Google tokeninfo (no secret needed for GIS id_token)
+    let info: Record<string, string>
+    try {
+      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`)
+      if (!res.ok) fail(401, 'Invalid Google token. Please try again.')
+      info = (await res.json()) as Record<string, string>
+    } catch {
+      fail(401, 'Could not verify Google token. Please try again.')
+    }
+    if (info.aud !== c.env.GOOGLE_CLIENT_ID) fail(401, 'Google token audience mismatch.')
+    if (info.iss !== 'https://accounts.google.com' && info.iss !== 'accounts.google.com') {
+      fail(401, 'Invalid Google token issuer.')
+    }
+    if (info.email_verified !== 'true') fail(401, 'Your Google email is not verified.')
+    const email = (info.email ?? '').toLowerCase().trim()
+    if (!email) fail(401, 'No email in Google token.')
+
+    const rows = await attempt(c, 'auth.google.lookup', () =>
+      withService(c.env, (sql) => sql<{ id: string; email_verified: boolean }[]>`select id, email_verified from auth.users where lower(email) = ${email}`),
+    )
+    if (!rows) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+    const row = rows[0]
+    if (!row) fail(404, 'No studio account found for this Google email. Please register first or use email + password.')
+
+    // Google proves mailbox control: auto-verify if still pending
+    if (!row.email_verified) {
+      await attempt(c, 'auth.google.verify', () =>
+        withService(c.env, (sql) => sql`update auth.users set email_verified = true where id = ${row.id}`),
+      )
+    }
+
+    return c.json(await signIn(c, row.id))
+  })
+
   .post('/forgot-password', async (c) => {
     const parsed = forgotPasswordRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please enter your email.')

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createExpenseRequest, expense, projectFinancials } from '@ipc/contracts'
+import { createExpenseRequest, expense, projectFinancials, gopoSummary, gstAnalysis, gstAnalysisRequest } from '@ipc/contracts'
 import { grossProfit, balancePending } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -79,4 +79,38 @@ export const financialsRouter = new Hono<AppEnv>()
       balance_pending: balancePending(row.revenue, row.received),
     }))
     return c.json(financials.parse(rows))
+  })
+
+  // ── GOPO Dashboard (financials module) ──────────────────────
+  .get('/gopo', requireModule('financials'), async (c) => {
+    const data = await attempt(c, 'financials.gopo', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ gopo_summary: string }[]>`select gopo_summary() as gopo_summary`
+        return JSON.parse(result[0]?.gopo_summary ?? '{}')
+      }),
+    )
+    if (!data) fail(400, 'We could not load the GOPO dashboard.')
+    return c.json(gopoSummary.parse(data))
+  })
+
+  // ── GST Analysis (financials module) ───────────────────────
+  .get('/gst-analysis', requireModule('financials'), async (c) => {
+    const parsed = gstAnalysisRequest.safeParse({
+      start_date: c.req.query('start_date'),
+      end_date: c.req.query('end_date'),
+    })
+    if (!parsed.success) fail(422, 'Please provide valid start and end dates.')
+
+    const data = await attempt(c, 'financials.gst_analysis', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ gst_analysis: string }[]>`
+          select gst_analysis(
+            p_start_date => ${parsed.data.start_date}::date,
+            p_end_date => ${parsed.data.end_date}::date
+          ) as gst_analysis`
+        return JSON.parse(result[0]?.gst_analysis ?? '{}')
+      }),
+    )
+    if (!data) fail(400, 'We could not load GST analysis.')
+    return c.json(gstAnalysis.parse(data))
   })

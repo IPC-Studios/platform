@@ -176,3 +176,28 @@ export const hrRouter = new Hono<AppEnv>()
     await audit(c, { action: 'attendance.check_in', entityType: 'attendance', entityId: id })
     return c.json(idOnly.parse({ id }), 201)
   })
+
+  // ── Attendance Streak ────────────────────────────────────────
+  .get('/attendance/streak', async (c) => {
+    const rows = await attempt(c, 'hr.attendance_streak', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ get_attendance_streak: string }[]>`
+          select get_attendance_streak() as get_attendance_streak`
+        return JSON.parse(result[0]?.get_attendance_streak ?? '{"streak":0,"last_check_date":null}')
+      }),
+    )
+    if (!rows) fail(400, 'We could not load your streak.')
+    return c.json(rows)
+  })
+
+  // ── Auto Check-in ───────────────────────────────────────────
+  .post('/attendance/auto-check-in', async (c) => {
+    const rows = await attempt(c, 'hr.auto_check_in', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ auto_check_in: string | null }[]>`
+          select auto_check_in() as auto_check_in`
+        return result[0]?.auto_check_in ?? null
+      }),
+    )
+    return c.json({ id: rows, checked_in: !!rows })
+  })

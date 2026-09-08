@@ -25,6 +25,11 @@ import {
   Settings,
   ShieldCheck,
   Building2,
+  Activity,
+  Package,
+  BarChart3,
+  DollarSign,
+  FileText,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -95,6 +100,7 @@ export const NAV: NavEntry[] = [
       leaf('All Projects', '/projects', Briefcase, { module: 'projects' }),
       leaf('Create Project', '/projects/new', Plus, { module: 'projects' }),
       leaf('Project Tracking', '/project-tracking', Target, { module: 'projects' }),
+      leaf('Templates', '/settings/project-templates', Package, { module: 'projects' }),
     ],
   },
 
@@ -107,7 +113,10 @@ export const NAV: NavEntry[] = [
     match: '/billing',
     children: [
       leaf('Payments', '/billing', Receipt, { module: 'billing' }),
+      leaf('Invoice Templates', '/billing/templates', FileText, { module: 'billing' }),
       leaf('Expenses', '/company-expenses', Wallet, { module: 'company_expenses' }),
+      leaf('GOPO Dashboard', '/financials/gopo', BarChart3, { module: 'financials' }),
+      leaf('GST Analysis', '/financials/gst-analysis', Receipt, { module: 'financials' }),
       leaf('Profitability', '/financials', TrendingUp, { module: 'financials' }),
     ],
   },
@@ -136,6 +145,16 @@ export const NAV: NavEntry[] = [
       leaf('Roles & Access', '/settings/roles', ShieldCheck, { module: 'team_roles' }),
     ],
   },
+
+  // Alerts reach everyone: reminders and overdue follow-ups land on whoever
+  // owns them, CRM module or not.
+  leaf('Personal Expenses', '/personal-expenses', Wallet, { module: 'personal_expenses' }),
+  leaf('Referrals', '/referrals', Target, { module: 'referrals' }),
+  leaf('Team Payouts', '/team-payouts', DollarSign, { module: 'team_payouts' }),
+  leaf('Reminders', '/reminders', Bell),
+
+  // Activity trail: see what's changed across the studio.
+  leaf('Activity', '/activity', Activity),
 
   // Alerts reach everyone: reminders and overdue follow-ups land on whoever
   // owns them, CRM module or not.

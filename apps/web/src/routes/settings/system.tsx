@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Activity, Database, ScrollText, Timer } from 'lucide-react'
+import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2 } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { Button } from '@/shared/ui/button'
+import { Input } from '@/shared/ui/input'
 import { SkeletonList, SkeletonTiles } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
@@ -16,7 +17,7 @@ import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
-import { useAuditLog, useCronRuns, useHealth } from '@/features/settings/api'
+import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
 
 const when = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -61,6 +62,7 @@ function System() {
       <HealthCard />
       {session?.is_owner ? (
         <>
+          <CustomLookups />
           <AuditLog />
           <CronRuns />
         </>
@@ -253,5 +255,91 @@ function CronRow({ run }: { run: CronRun }) {
       {run.dry_run && <StatusBadge tone="neutral">Dry run</StatusBadge>}
       <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary || '—'}</span>
     </li>
+  )
+}
+
+const LOOKUP_CATEGORIES = [
+  { value: 'lead_source', label: 'Lead Sources' },
+  { value: 'expense_category', label: 'Expense Categories' },
+  { value: 'project_type', label: 'Project Types' },
+  { value: 'currency', label: 'Currencies' },
+]
+
+function CustomLookups() {
+  const [activeCategory, setActiveCategory] = useState('lead_source')
+  const [newValue, setNewValue] = useState('')
+  const { data: items, isLoading } = useCustomLookups(activeCategory)
+  const create = useCreateCustomLookup()
+  const del = useDeleteCustomLookup()
+
+  function handleAdd() {
+    if (!newValue.trim()) return
+    create.mutate({ category: activeCategory, value: newValue.trim() }, {
+      onSuccess: () => setNewValue(''),
+    })
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold tracking-tight flex items-center gap-2">
+              <Settings className="h-4 w-4" /> Custom Lookups
+            </h3>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Manage dropdown values used throughout the app: lead sources, expense categories, and more.
+            </p>
+          </div>
+          <Select value={activeCategory} onChange={(e) => setActiveCategory(e.target.value)} className="w-48">
+            {LOOKUP_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <Input
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            placeholder={`Add a new ${humanize(activeCategory).toLowerCase()}...`}
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+          <Button size="sm" onClick={handleAdd} disabled={!newValue.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="mt-4">
+          {isLoading ? (
+            <SkeletonList rows={4} columns={3} />
+          ) : !items || items.length === 0 ? (
+            <EmptyState title="No values yet" description="Add your first lookup value above." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((item) => (
+                <li key={item.id} className="flex items-center justify-between py-2 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium">{item.value}</span>
+                    <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
+                      {item.is_active ? 'Active' : 'Inactive'}
+                    </StatusBadge>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    onClick={() => del.mutate(item.id)}
+                    disabled={del.isPending}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

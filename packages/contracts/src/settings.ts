@@ -85,6 +85,8 @@ export const companyTheme = z.object({
   preset_key: z.string(),
   font_key: z.string().nullable(),
   color_scheme: z.enum(['light', 'dark', 'system']),
+  custom_color: z.string().nullable().optional(),
+  border_radius: z.string().nullable().optional(),
 })
 export type CompanyTheme = z.infer<typeof companyTheme>
 
@@ -95,5 +97,7 @@ export const updateThemeRequest = z.object({
   // cards send; the font picker sends an explicit key.
   font_key: themeFontKey.nullish(),
   color_scheme: z.enum(['light', 'dark', 'system']).default('light'),
+  custom_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullish(),
+  border_radius: z.enum(['0', '0.25', '0.5', '0.75', '1']).nullish(),
 })
 export type UpdateThemeRequest = z.infer<typeof updateThemeRequest>

@@ -28,6 +28,8 @@ import { BillingPage } from '@/routes/billing'
 import { InvoiceDetailPage } from '@/routes/invoice-detail'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
+import { GopoPage } from '@/routes/financials/gopo'
+import { GstAnalysisPage } from '@/routes/financials/gst-analysis'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { CrmContactsPage } from '@/routes/crm/contacts'
 import { CrmCompaniesPage } from '@/routes/crm/companies'
@@ -44,11 +46,18 @@ import { QuoteAcceptPage } from '@/routes/quote-accept'
 import { TeamTermsAcknowledgePage } from '@/routes/team-terms-acknowledge'
 import { QuotationPage } from '@/routes/quotation'
 import { EnquiriesPage } from '@/routes/enquiries'
+import { PersonalExpensesPage } from '@/routes/personal-expenses'
 import { ReceiptPage } from '@/routes/receipt'
 import { DeliveryPage } from '@/routes/delivery'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
+import { ReferralsPage } from '@/routes/referrals'
+import { ProjectTemplatesPage } from '@/routes/project-templates'
+import { TeamPayoutsPage } from '@/routes/team-payouts'
+import { RemindersPage } from '@/routes/reminders'
+import { ActivityPage } from '@/routes/activity'
+import { InvoiceTemplatesPage } from '@/routes/billing/templates'
 import { MyTasksPage } from '@/routes/tasks/my'
 import { MyShootsPage } from '@/routes/shoots/my'
 import { RequireAuth } from '@/shared/auth/guards'
@@ -160,16 +169,25 @@ const routeTree = rootRoute.addChildren([
   route('/employees', EmployeesPage),
   route('/attendance', AttendancePage),
   route('/billing', BillingPage),
+  route('/billing/templates', InvoiceTemplatesPage),
   route('/billing/invoices/$id', InvoiceDetailPage),
   route('/company-expenses', CompanyExpensesPage),
   route('/financials', FinancialsPage),
+  route('/financials/gopo', GopoPage),
+  route('/financials/gst-analysis', GstAnalysisPage),
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
   route('/settings/team-terms', TeamTermsPage),
   route('/enquiries', EnquiriesPage),
+  route('/personal-expenses', PersonalExpensesPage),
   route('/settings/appearance', AppearancePage),
   route('/settings/system', SystemPage),
+  route('/referrals', ReferralsPage),
+  route('/settings/project-templates', ProjectTemplatesPage),
+  route('/team-payouts', TeamPayoutsPage),
+  route('/reminders', RemindersPage),
+  route('/activity', ActivityPage),
   route('/platform/studios', PlatformStudiosPage),
   route('/platform/usage', PlatformUsagePage),
   ]),

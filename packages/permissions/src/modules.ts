@@ -37,6 +37,8 @@ export type ModuleKey =
   | 'usage_analytics'
   | 'team_salaries'
   | 'employee_credentials'
+  | 'referrals'
+  | 'team_payouts'
 
 export type ModuleAction = 'view' | 'create' | 'edit' | 'delete'
 
@@ -298,6 +300,23 @@ export const MODULES: Readonly<Record<ModuleKey, ModuleDef>> = {
     label: 'Usage Analytics',
     path: '/platform/usage',
     routePatterns: ['/platform/usage'],
+    sensitive: true,
+    defaultVisibility: allow(false, false, false),
+    superAdminOnly: true,
+  },
+  referrals: {
+    key: 'referrals',
+    label: 'Referrals',
+    path: '/referrals',
+    routePatterns: ['/referrals'],
+    sensitive: false,
+    defaultVisibility: allow(true, true, false),
+  },
+  team_payouts: {
+    key: 'team_payouts',
+    label: 'Team Payouts',
+    path: '/team-payouts',
+    routePatterns: ['/team-payouts'],
     sensitive: true,
     defaultVisibility: allow(false, false, false),
     superAdminOnly: true,

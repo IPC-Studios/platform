@@ -83,6 +83,20 @@ async function freshDb() {
   await db.exec(mig('0047_crm_workflows.sql'))
   await db.exec(mig('0048_crm_quotes_prefs.sql'))
   await db.exec(mig('0049_crm_gaps.sql'))
+  await db.exec(mig('0050_personal_expenses.sql'))
+  await db.exec(mig('0051_gopo.sql'))
+  await db.exec(mig('0052_referrals.sql'))
+  await db.exec(mig('0053_project_templates.sql'))
+  await db.exec(mig('0054_attendance_enhancements.sql'))
+  await db.exec(mig('0055_theme_enhancements.sql'))
+  await db.exec(mig('0056_invoice_templates.sql'))
+  await db.exec(mig('0057_quotation_enhancements.sql'))
+  await db.exec(mig('0058_financial_filters.sql'))
+  await db.exec(mig('0059_team_payouts.sql'))
+  await db.exec(mig('0060_reminders.sql'))
+  await db.exec(mig('0061_custom_lookups.sql'))
+  await db.exec(mig('0062_activity_log.sql'))
+  await db.exec(mig('0063_security_fixes.sql'))
   return db
 }
 
@@ -884,7 +898,7 @@ describe('notifications & idempotent cron (Phase 13)', () => {
     )
     // A due reminder + a future one.
     await db.exec(
-      `insert into reminders (company_id, user_id, title, remind_at)
+      `insert into reminders (company_id, user_id, title, due_at)
        values (get_current_company_id(), '${OWNER}', 'Call client', now() - interval '1 hour'),
               (get_current_company_id(), '${OWNER}', 'Later task', now() + interval '2 days');`,
     )

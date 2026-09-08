@@ -9,6 +9,9 @@ import {
   projectTrackingRow,
   saveDeliverableSetRequest,
   updateProjectRequest,
+  createProjectTemplateRequest,
+  projectTemplateList,
+  z,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -192,6 +195,113 @@ export const projectsRouter = new Hono<AppEnv>()
     return c.body(null, 204)
   })
 
+  // ── Project Templates (declared before /:id so static path is not captured as an id)
+  .get('/templates', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.templates_list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, company_id, name, description, deliverables_json, shoots_json, tasks_json, created_at
+          from project_templates
+         where company_id = ${c.get('auth').companyId}
+         order by created_at desc`),
+    )
+    if (!rows) fail(400, 'We could not load templates.')
+    return c.json(projectTemplateList.parse({ items: rows }))
+  })
+
+  .post('/templates', requireAction('projects', 'edit'), async (c) => {
+    const parsed = createProjectTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'projects.template_create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const made = await sql<{ id: string }[]>`
+          insert into project_templates (company_id, name, description, deliverables_json, shoots_json, tasks_json, created_by)
+          values (${auth.companyId}, ${d.name}, ${d.description ?? null},
+                  ${JSON.stringify(d.deliverables_json)}::jsonb,
+                  ${JSON.stringify(d.shoots_json)}::jsonb,
+                  ${JSON.stringify(d.tasks_json)}::jsonb,
+                  ${auth.userId})
+          returning id`
+        return made
+      }),
+    )
+    if (!rows?.[0]) fail(400, 'We could not create this template.')
+    await audit(c, { action: 'project_template.create', entityType: 'project_template', entityId: rows[0].id, after: { name: d.name } })
+    return c.json({ id: rows[0].id }, 201)
+  })
+
+  .patch('/templates/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const parsed = createProjectTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'projects.template_update', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          update project_templates
+             set name = ${d.name}, description = ${d.description ?? null},
+                 deliverables_json = ${JSON.stringify(d.deliverables_json)}::jsonb,
+                 shoots_json = ${JSON.stringify(d.shoots_json)}::jsonb,
+                 tasks_json = ${JSON.stringify(d.tasks_json)}::jsonb
+           where id = ${id} and company_id = ${auth.companyId}
+           returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not save this template.')
+    if (!rows.length) fail(404, 'We could not find that template.')
+    await audit(c, { action: 'project_template.update', entityType: 'project_template', entityId: id, after: d })
+    return c.json({ ok: true })
+  })
+
+  .delete('/templates/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'projects.template_delete', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          delete from project_templates where id = ${id} and company_id = ${auth.companyId} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not delete this template.')
+    if (!rows.length) fail(404, 'We could not find that template.')
+    await audit(c, { action: 'project_template.delete', entityType: 'project_template', entityId: id })
+    return c.json({ ok: true })
+  })
+
+  .post('/templates/:id/apply', requireAction('projects', 'edit'), async (c) => {
+    const templateId = uuidParam(c)
+    const body = await c.req.json().catch(() => ({}))
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) fail(422, 'Project name is required.')
+    // Validate optional client_id/start_date rather than letting Postgres throw 22P02
+    if (body.client_id != null) {
+      const uc = z.string().uuid().safeParse(body.client_id)
+      if (!uc.success) fail(422, 'Invalid client ID.')
+    }
+    if (body.start_date != null) {
+      const dc = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(body.start_date)
+      if (!dc.success) fail(422, 'Invalid start date.')
+    }
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'projects.template_apply', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const result = await sql<{ create_project_from_template: string }[]>`
+          select create_project_from_template(
+            p_template_id => ${templateId}::uuid,
+            p_name => ${name},
+            p_client_id => ${body.client_id ?? null}::uuid,
+            p_start_date => ${body.start_date ?? null}::date
+          ) as create_project_from_template`
+        return result
+      }),
+    )
+    if (!rows?.[0]) fail(400, 'We could not create the project from this template.')
+    await audit(c, { action: 'project_template.apply', entityType: 'project_template', entityId: templateId, after: { project_id: rows[0].create_project_from_template } })
+    return c.json({ project_id: rows[0].create_project_from_template }, 201)
+  })
+
   .get('/:id', requireAction('projects', 'view'), async (c) => {
     const id = uuidParam(c)
     const row = await attempt(c, 'projects.get', () =>
@@ -338,3 +448,5 @@ export const projectsRouter = new Hono<AppEnv>()
     await audit(c, { action: 'project.payment', entityType: 'project', entityId: projectId, after: parsed.data })
     return c.json({ id: row.id }, 201)
   })
+
+

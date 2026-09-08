@@ -5,6 +5,8 @@ import {
   invoiceDetail,
   invoiceListItem,
   recordPaymentRequest,
+  createInvoiceTemplateRequest,
+  invoiceTemplateList,
 } from '@ipc/contracts'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import type { AppEnv } from '../../context'
@@ -149,4 +151,79 @@ export const billingRouter = new Hono<AppEnv>()
     if (!ok) fail(400, 'We could not record the payment.')
     await audit(c, { action: 'invoice.payment', entityType: 'invoice', entityId: id, after: d })
     return c.body(null, 204)
+  })
+
+  // ── Invoice Templates ──────────────────────────────────────
+  .get('/templates', async (c) => {
+    const rows = await attempt(c, 'billing.templates_list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, company_id, name, layout_json, is_default, created_at
+          from invoice_templates
+         where company_id = ${c.get('auth').companyId}
+         order by is_default desc, created_at desc`),
+    )
+    if (!rows) fail(400, 'We could not load templates.')
+    return c.json(invoiceTemplateList.parse({ items: rows }))
+  })
+
+  .post('/templates', requireAction('billing', 'edit'), async (c) => {
+    const parsed = createInvoiceTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'billing.template_create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        // If setting as default, unset other defaults
+        if (d.is_default) {
+          await sql`update invoice_templates set is_default = false where company_id = ${auth.companyId} and is_default = true`
+        }
+        const made = await sql<{ id: string }[]>`
+          insert into invoice_templates (company_id, name, layout_json, is_default)
+          values (${auth.companyId}, ${d.name}, ${JSON.stringify(d.layout_json)}::jsonb, ${d.is_default})
+          returning id`
+        return made
+      }),
+    )
+    if (!rows?.[0]) fail(400, 'We could not create this template.')
+    await audit(c, { action: 'invoice_template.create', entityType: 'invoice_template', entityId: rows[0].id, after: { name: d.name } })
+    return c.json({ id: rows[0].id }, 201)
+  })
+
+  .patch('/templates/:id', requireAction('billing', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const parsed = createInvoiceTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'billing.template_update', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        if (d.is_default) {
+          await sql`update invoice_templates set is_default = false where company_id = ${auth.companyId} and is_default = true and id != ${id}`
+        }
+        return sql<{ id: string }[]>`
+          update invoice_templates
+             set name = ${d.name}, layout_json = ${JSON.stringify(d.layout_json)}::jsonb, is_default = ${d.is_default}
+           where id = ${id} and company_id = ${auth.companyId}
+           returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not save this template.')
+    if (!rows.length) fail(404, 'We could not find that template.')
+    await audit(c, { action: 'invoice_template.update', entityType: 'invoice_template', entityId: id, after: d })
+    return c.json({ ok: true })
+  })
+
+  .delete('/templates/:id', requireAction('billing', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'billing.template_delete', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          delete from invoice_templates where id = ${id} and company_id = ${auth.companyId} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not delete this template.')
+    if (!rows.length) fail(404, 'We could not find that template.')
+    await audit(c, { action: 'invoice_template.delete', entityType: 'invoice_template', entityId: id })
+    return c.json({ ok: true })
   })

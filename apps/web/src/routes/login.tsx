@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { MailCheck } from 'lucide-react'
 import {
@@ -87,6 +87,9 @@ export function LoginPage() {
   // Set once a reset link has been requested (shown regardless of whether the
   // account exists — the API never tells us).
   const [resetSentTo, setResetSentTo] = useState<string | null>(null)
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+  const googleDivRef = useRef<HTMLDivElement>(null)
+  const [googleReady, setGoogleReady] = useState(false)
 
   const isRegister = mode === 'register'
   const isForgot = mode === 'forgot'
@@ -229,6 +232,66 @@ export function LoginPage() {
       setBusy(false)
     }
   }
+
+  async function handleGoogleCredential(idToken: string) {
+    setError(null)
+    setBusy(true)
+    try {
+      rememberSession(
+        await callApi('/auth/google', {
+          method: 'POST',
+          body: { id_token: idToken },
+          responseSchema: authToken,
+        }),
+      )
+      await refresh()
+      await navigate({ to: '/dashboard' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!googleClientId || mode !== 'signin' || pendingEmail || resetSentTo) return
+    if (document.getElementById('google-gsi')) {
+      setGoogleReady(true)
+      return
+    }
+    const s = document.createElement('script')
+    s.id = 'google-gsi'
+    s.src = 'https://accounts.google.com/gsi/client'
+    s.async = true
+    s.defer = true
+    s.onload = () => setGoogleReady(true)
+    s.onerror = () => setGoogleReady(false)
+    document.head.appendChild(s)
+  }, [googleClientId, mode, pendingEmail, resetSentTo])
+
+  useEffect(() => {
+    if (!googleReady || !googleClientId || !googleDivRef.current) return
+    const g = (window as unknown as { google?: { accounts: { id: { initialize(opts: unknown): void; renderButton(el: HTMLElement, opts: unknown): void } } } }).google
+    if (!g?.accounts?.id) return
+    try {
+      g.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: (resp: { credential: string }) => void handleGoogleCredential(resp.credential),
+        ux_mode: 'popup',
+        auto_select: false,
+      })
+      googleDivRef.current.innerHTML = ''
+      g.accounts.id.renderButton(googleDivRef.current, {
+        theme: 'outline',
+        size: 'large',
+        width: 320,
+        text: 'continue_with',
+        shape: 'rectangular',
+      } as unknown as Record<string, unknown>)
+    } catch {
+      // GIS may throw if already initialized — ignore
+    }
+  }, [googleReady, googleClientId])
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/40 p-4">
@@ -489,6 +552,20 @@ export function LoginPage() {
                           ? 'Create account'
                           : 'Sign in'}
                   </Button>
+
+                  {!isForgot && !isRegister && googleClientId && (
+                    <>
+                      <div className="my-4 flex items-center gap-3">
+                        <div className="h-px flex-1 bg-border" />
+                        <span className="text-xs text-muted-foreground">or</span>
+                        <div className="h-px flex-1 bg-border" />
+                      </div>
+                      <div ref={googleDivRef} className="flex justify-center" />
+                      {!googleReady && (
+                        <p className="mt-2 text-center text-xs text-muted-foreground">Loading Google…</p>
+                      )}
+                    </>
+                  )}
                 </form>
               </CardContent>
             </Card>
