@@ -22,6 +22,10 @@ import {
   useDeletePersonalExpense,
 } from '@/features/personal-expenses/api'
 import { PERSONAL_EXPENSE_CATEGORIES, type CreatePersonalExpenseRequest } from '@ipc/contracts'
+import { PartyPicker } from '@/features/parties/PartyPicker'
+
+const GST_RATES = [0, 5, 12, 18, 28]
+const todayISO = () => new Date().toISOString().slice(0, 10)
 import { Plus, Search, Trash2, Edit, Wallet, Calendar, BarChart3 } from 'lucide-react'
 
 function PersonalExpensesContent() {
@@ -34,7 +38,9 @@ function PersonalExpensesContent() {
     amount: 0,
     category: null,
     description: null,
+    expense_date: todayISO(),
     gst_treatment: 'non_gst',
+    gst_rate: null,
     party_id: null,
   })
 
@@ -51,7 +57,15 @@ function PersonalExpensesContent() {
 
   function openCreate() {
     setEditingId(null)
-    setForm({ amount: 0, category: null, description: null, gst_treatment: 'non_gst', party_id: null })
+    setForm({
+      amount: 0,
+      category: null,
+      description: null,
+      expense_date: todayISO(),
+      gst_treatment: 'non_gst',
+      gst_rate: null,
+      party_id: null,
+    })
     setDialogOpen(true)
   }
 
@@ -61,7 +75,9 @@ function PersonalExpensesContent() {
       amount: item.amount,
       category: item.category as CreatePersonalExpenseRequest['category'],
       description: item.description,
+      expense_date: item.expense_date,
       gst_treatment: item.gst_treatment as CreatePersonalExpenseRequest['gst_treatment'],
+      gst_rate: item.gst_rate,
       party_id: item.party_id,
     })
     setDialogOpen(true)
@@ -194,6 +210,14 @@ function PersonalExpensesContent() {
               />
             </div>
             <div>
+              <label className="text-sm font-medium">Date</label>
+              <Input
+                type="date"
+                value={form.expense_date ?? todayISO()}
+                onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
+              />
+            </div>
+            <div>
               <label className="text-sm font-medium">Category</label>
               <Select value={form.category ?? ''} onChange={(e) => setForm({ ...form, category: (e.target.value || null) as CreatePersonalExpenseRequest['category'] })}>
                 <option value="">Select category</option>
@@ -201,6 +225,33 @@ function PersonalExpensesContent() {
                   <option key={c} value={c}>{categoryLabels[c] ?? c}</option>
                 ))}
               </Select>
+            </div>
+            <PartyPicker value={form.party_id ?? ''} onChange={(id) => setForm({ ...form, party_id: id || null })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">GST treatment</label>
+                <Select
+                  value={form.gst_treatment}
+                  onChange={(e) => setForm({ ...form, gst_treatment: e.target.value as CreatePersonalExpenseRequest['gst_treatment'] })}
+                >
+                  <option value="non_gst">No GST</option>
+                  <option value="gst_applicable">GST applicable</option>
+                  <option value="exempt">Exempt</option>
+                  <option value="reverse_charge">Reverse charge</option>
+                </Select>
+              </div>
+              {form.gst_treatment === 'gst_applicable' && (
+                <div>
+                  <label className="text-sm font-medium">GST rate</label>
+                  <Select value={form.gst_rate ?? 18} onChange={(e) => setForm({ ...form, gst_rate: Number(e.target.value) })}>
+                    {GST_RATES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}%
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">Description</label>

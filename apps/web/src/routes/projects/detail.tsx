@@ -165,6 +165,7 @@ function ProjectDetail() {
               name={data.name}
               status={data.status}
               packageCost={data.package_cost}
+              showQuotation={data.show_quotation}
             />
             <Button
               variant="outline"
@@ -428,15 +429,22 @@ function EditProjectDialog({
   name,
   status,
   packageCost,
+  showQuotation,
 }: {
   id: string
   name: string
   status: ProjectStatus
   packageCost: number
+  showQuotation: boolean
 }) {
   const update = useUpdateProject(id)
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState<UpdateProjectRequest>({ name, status, package_cost: packageCost })
+  const [form, setForm] = useState<UpdateProjectRequest>({
+    name,
+    status,
+    package_cost: packageCost,
+    show_quotation: showQuotation,
+  })
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -477,6 +485,14 @@ function EditProjectDialog({
               />
             </div>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.show_quotation ?? false}
+              onChange={(e) => setForm({ ...form, show_quotation: e.target.checked })}
+            />
+            Show quotation to client
+          </label>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

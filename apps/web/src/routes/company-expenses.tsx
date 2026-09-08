@@ -20,6 +20,7 @@ import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { groupBy, monthlySeries } from '@/shared/ui/chart-geometry'
 import { useExpenses, useCreateExpense } from '@/features/financials/api'
 import { useProjects } from '@/features/projects/api'
+import { PartyPicker } from '@/features/parties/PartyPicker'
 
 export function CompanyExpensesPage() {
   return (
@@ -144,6 +145,7 @@ function AddExpenseDialog() {
   const [amount, setAmount] = useState(0)
   const [expenseDate, setExpenseDate] = useState(todayISO())
   const [projectId, setProjectId] = useState('')
+  const [partyId, setPartyId] = useState('')
   const [overhead, setOverhead] = useState(false)
   const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>('non_gst')
   const [gstRate, setGstRate] = useState(18)
@@ -155,6 +157,7 @@ function AddExpenseDialog() {
     setAmount(0)
     setExpenseDate(todayISO())
     setProjectId('')
+    setPartyId('')
     setOverhead(false)
     setGstTreatment('non_gst')
     setGstRate(18)
@@ -169,6 +172,7 @@ function AddExpenseDialog() {
         // Settings → Financials); pinning it to one project too would count
         // it twice.
         project_id: overhead ? null : projectId || null,
+        party_id: partyId || null,
         amount,
         expense_date: expenseDate,
         is_fixed_overhead: overhead,
@@ -208,6 +212,8 @@ function AddExpenseDialog() {
             <Label>Description</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
+
+          <PartyPicker value={partyId} onChange={setPartyId} />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">

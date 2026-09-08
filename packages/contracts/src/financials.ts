@@ -6,6 +6,8 @@ export const gstTreatment = z.enum(['non_gst', 'gst_applicable', 'exempt', 'reve
 export const expense = z.object({
   id: uuid,
   project_id: uuid.nullable(),
+  party_id: uuid.nullable(),
+  party_name: z.string().nullable(),
   category: z.string().nullable(),
   description: z.string().nullable(),
   amount: money,
@@ -18,6 +20,7 @@ export type Expense = z.infer<typeof expense>
 
 export const createExpenseRequest = z.object({
   project_id: uuid.nullable().default(null),
+  party_id: uuid.nullable().optional(),
   category: z.string().max(80).optional(),
   description: z.string().max(400).optional(),
   amount: money,

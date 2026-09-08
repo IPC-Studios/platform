@@ -78,10 +78,10 @@ export const personalExpensesRouter = new Hono<AppEnv>()
     const rows = await attempt(c, 'personal-expenses.create', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const made = await sql<{ id: string }[]>`
-          insert into personal_expense (company_id, user_id, party_id, amount, expense_date, category, gst_treatment, description)
+          insert into personal_expense (company_id, user_id, party_id, amount, expense_date, category, gst_treatment, gst_rate, description)
           values (${auth.companyId}, ${auth.userId}, ${d.party_id ?? null}, ${d.amount},
                   ${d.expense_date ?? new Date().toISOString().slice(0, 10)}::date,
-                  ${d.category ?? null}, ${d.gst_treatment}, ${d.description ?? null})
+                  ${d.category ?? null}, ${d.gst_treatment}, ${d.gst_rate ?? null}, ${d.description ?? null})
           returning id`
         return made
       }),
@@ -116,6 +116,7 @@ export const personalExpensesRouter = new Hono<AppEnv>()
                  expense_date = coalesce(${d.expense_date ?? null}::date, expense_date),
                  category = coalesce(${d.category ?? null}, category),
                  gst_treatment = coalesce(${d.gst_treatment ?? null}, gst_treatment),
+                 gst_rate = coalesce(${d.gst_rate ?? null}::numeric, gst_rate),
                  description = coalesce(${d.description ?? null}, description)
            where id = ${id} and company_id = ${auth.companyId} and user_id = ${auth.userId}
            returning id`

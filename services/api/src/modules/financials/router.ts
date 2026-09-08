@@ -32,8 +32,11 @@ export const financialsRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, project_id, category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead
-          from expenses order by expense_date desc`,
+          select e.id, e.project_id, e.party_id, p.name as party_name, e.category, e.description,
+                 e.amount, e.expense_date, e.gst_treatment, e.gst_rate, e.is_fixed_overhead
+          from expenses e
+          left join parties p on p.id = e.party_id
+          order by e.expense_date desc`,
       ),
     )
     if (!rows) fail(400, 'We could not load expenses.')
@@ -48,7 +51,9 @@ export const financialsRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           insert into expenses ${sql({ ...parsed.data, company_id: auth.companyId, created_by: auth.userId })}
-          returning id, project_id, category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead`
+          returning id, project_id, party_id,
+                    (select name from parties where id = party_id) as party_name,
+                    category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead`
         return rows[0] ?? null
       }),
     )

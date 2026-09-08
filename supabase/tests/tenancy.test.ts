@@ -105,6 +105,7 @@ async function freshDb() {
   await db.exec(mig('0069_employee_compensation.sql'))
   await db.exec(mig('0070_overhead_allocation.sql'))
   await db.exec(mig('0071_crm_lead_contact_fields.sql'))
+  await db.exec(mig('0072_personal_expense_gst_rate.sql'))
   return db
 }
 
@@ -4612,5 +4613,63 @@ describe('Lovable parity round 2: overhead allocation and company settings', () 
       `select alternate_phone, city from crm_leads where phone = '9000000001';`,
     )
     expect(row.rows[0]).toEqual({ alternate_phone: '9000000002', city: 'Mumbai' })
+  })
+})
+
+/**
+ * Round 3 of the Lovable parity pass: parties (vendors/freelancers) were a
+ * completely orphaned table -- no route anywhere referenced them, despite
+ * both expense tables already joining to one for display. Both expense forms
+ * could never actually set party_id, gst_treatment (personal), gst_rate
+ * (personal), or expense_date (personal) -- everything below now round-trips
+ * because the form actually sends it.
+ */
+describe('Lovable parity round 3: parties and expense form completeness', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a party can be created, is unique enough to be useful, and a company expense can reference it', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const party = await db.query<{ id: string }>(
+      `insert into parties (company_id, name, kind) values ('${co}', 'Prop House', 'vendor') returning id;`,
+    )
+    await db.exec(`
+      insert into expenses (company_id, party_id, category, amount, gst_treatment, gst_rate)
+        values ('${co}', '${party.rows[0]!.id}', 'Props', 3000, 'gst_applicable', 12);
+    `)
+    const row = await db.query<{ party_name: string; gst_rate: string }>(`
+      select p.name as party_name, e.gst_rate from expenses e
+      join parties p on p.id = e.party_id where e.category = 'Props';
+    `)
+    expect(row.rows[0]).toEqual({ party_name: 'Prop House', gst_rate: '12.00' })
+  })
+
+  it('deleting a party in use leaves the expense in place with the reference cleared', async () => {
+    const partyId = (await db.query<{ id: string }>(`select party_id as id from expenses where category = 'Props';`)).rows[0]!.id
+    await db.exec(`delete from parties where id = '${partyId}';`)
+    const row = await db.query<{ category: string; party_id: string | null }>(`select category, party_id from expenses where category = 'Props';`)
+    expect(row.rows[0]).toEqual({ category: 'Props', party_id: null })
+  })
+
+  it('a personal expense carries its own date, party, and GST rate', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const party = (
+      await db.query<{ id: string }>(`insert into parties (company_id, name, kind) values ('${co}', 'Rental Co', 'vendor') returning id;`)
+    ).rows[0]!.id
+    await db.exec(`
+      insert into personal_expense (company_id, user_id, party_id, amount, expense_date, gst_treatment, gst_rate)
+        values ('${co}', '${OWNER}', '${party}', 750, '2026-03-01', 'gst_applicable', 5);
+    `)
+    const r = await db.query<{ v: { items: { party_name: string; expense_date: string; gst_rate: number }[] } }>(
+      `select list_personal_expenses(null, null, null, 10) as v;`,
+    )
+    const item = r.rows[0]!.v.items.find((i) => i.expense_date === '2026-03-01')
+    expect(item?.party_name).toBe('Rental Co')
+    expect(item?.gst_rate).toBe(5)
   })
 })
