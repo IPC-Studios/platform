@@ -102,6 +102,7 @@ async function freshDb() {
   await db.exec(mig('0066_crm_lead_event_fields.sql'))
   await db.exec(mig('0067_referral_slug.sql'))
   await db.exec(mig('0068_work_submission_reminders.sql'))
+  await db.exec(mig('0069_employee_compensation.sql'))
   return db
 }
 
@@ -4465,5 +4466,54 @@ describe('Lovable parity: work submission reminders', () => {
           and not exists (select 1 from team_work_submissions w where w.task_id = t.id and w.status <> 'rejected');`,
     )
     expect(rows.rows[0]!.count).toBe(0)
+  })
+})
+
+/**
+ * Employee compensation structure (0069). The old wizard's flexible pay
+ * model -- payout type, commission, stipend, an effective date range --
+ * reduced to a flat `salary` in the rebuild. Added as columns on `users`
+ * (0069's own comment explains why, not a new table): this proves they
+ * round-trip and that the date-range check constraint actually holds.
+ */
+describe('Lovable parity: employee compensation structure', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a per-shoot payout with a revenue commission and a stipend round-trips', async () => {
+    await db.exec(`
+      update users set payout_type = 'per_shoot', commission_pct = 12.5, commission_basis = 'revenue',
+        stipend_amount = 2000, pay_effective_from = '2026-01-01', compensation_notes = 'Second shooter rate'
+      where user_id = '${OWNER}';
+    `)
+    const row = await db.query<{
+      payout_type: string
+      commission_pct: string
+      commission_basis: string
+      stipend_amount: string
+    }>(`select payout_type, commission_pct, commission_basis, stipend_amount from users where user_id = '${OWNER}';`)
+    expect(row.rows[0]).toEqual({
+      payout_type: 'per_shoot',
+      commission_pct: '12.50',
+      commission_basis: 'revenue',
+      stipend_amount: '2000.00',
+    })
+  })
+
+  it('an effective-to date before effective-from is rejected', async () => {
+    await expect(
+      db.exec(`update users set pay_effective_from = '2026-06-01', pay_effective_to = '2026-01-01' where user_id = '${OWNER}';`),
+    ).rejects.toThrow()
+  })
+
+  it('an unrecognised payout type is rejected', async () => {
+    await expect(
+      db.exec(`update users set payout_type = 'whenever_i_feel_like_it' where user_id = '${OWNER}';`),
+    ).rejects.toThrow()
   })
 })

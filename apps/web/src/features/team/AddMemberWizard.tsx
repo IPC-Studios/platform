@@ -587,6 +587,9 @@ function DetailsStep({
   errors: FieldErrors<keyof MemberDraft>
 }) {
   const freelance = draft.engagement_type === 'freelancer'
+  const [showPayStructure, setShowPayStructure] = useState(
+    () => !!(draft.payout_type || draft.commission_pct || draft.stipend_amount),
+  )
   return (
     <>
       <StepHeader
@@ -618,6 +621,59 @@ function DetailsStep({
             placeholder="City or full address"
           />
         </Field>
+
+        {!showPayStructure ? (
+          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setShowPayStructure(true)}>
+            + Add a pay structure (commission, per-shoot rate, stipend)
+          </Button>
+        ) : (
+          <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+            <p className="text-xs text-muted-foreground">
+              For crew paid per shoot with a commission on top, or a fixed stipend — the figure above stays their
+              base rate.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Payout type" hint="How this person is actually paid.">
+                <Select value={draft.payout_type} onChange={(e) => set('payout_type', e.target.value as MemberDraft['payout_type'])}>
+                  <option value="">Same as above</option>
+                  <option value="salary">Salary</option>
+                  <option value="per_shoot">Per shoot</option>
+                  <option value="per_day">Per day</option>
+                  <option value="per_project">Per project</option>
+                  <option value="custom">Custom</option>
+                </Select>
+              </Field>
+              <Field label="Stipend (₹)" hint="A fixed amount on top, if any.">
+                <Input inputMode="numeric" value={draft.stipend_amount} onChange={(e) => set('stipend_amount', e.target.value)} placeholder="0" />
+              </Field>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Commission %" error={errors.commission_pct}>
+                <Input inputMode="numeric" value={draft.commission_pct} onChange={(e) => set('commission_pct', e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Commission basis">
+                <Select value={draft.commission_basis} onChange={(e) => set('commission_basis', e.target.value as MemberDraft['commission_basis'])}>
+                  <option value="">—</option>
+                  <option value="revenue">On project revenue</option>
+                  <option value="payment">On payment received</option>
+                  <option value="profit">On profit</option>
+                  <option value="manual">Manual</option>
+                </Select>
+              </Field>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Effective from">
+                <Input type="date" value={draft.pay_effective_from} onChange={(e) => set('pay_effective_from', e.target.value)} />
+              </Field>
+              <Field label="Effective to" hint="Leave blank if ongoing.">
+                <Input type="date" value={draft.pay_effective_to} onChange={(e) => set('pay_effective_to', e.target.value)} />
+              </Field>
+            </div>
+            <Field label="Notes">
+              <Input value={draft.compensation_notes} onChange={(e) => set('compensation_notes', e.target.value)} placeholder="e.g. Second-shooter rate for weddings" />
+            </Field>
+          </div>
+        )}
       </div>
     </>
   )

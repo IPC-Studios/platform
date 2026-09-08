@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { uuid, isoDateTime, money } from './shared/primitives'
+import { uuid, isoDate, isoDateTime, money } from './shared/primitives'
 
 /**
  * How a person is engaged. Drives which fields the directory asks for and how
@@ -80,6 +80,14 @@ export const directoryMember = z.object({
   login_enabled: z.boolean(),
   salary: z.number().nullable(),
   address: z.string().nullable(),
+  /** Freelance-friendly: salaried, or paid per shoot/day/project. */
+  payout_type: z.enum(['salary', 'per_shoot', 'per_day', 'per_project', 'custom']).nullable(),
+  commission_pct: z.number().min(0).max(100).nullable(),
+  commission_basis: z.enum(['revenue', 'payment', 'profit', 'manual']).nullable(),
+  stipend_amount: money.nullable(),
+  pay_effective_from: isoDate.nullable(),
+  pay_effective_to: isoDate.nullable(),
+  compensation_notes: z.string().nullable(),
   created_at: isoDateTime,
   role_names: z.array(z.string()),
   role_ids: z.array(uuid),
@@ -107,6 +115,13 @@ export const addMemberRequest = z
     role_ids: z.array(uuid).max(20).default([]),
     salary: money.optional(),
     address: z.string().trim().max(300).optional(),
+    payout_type: z.enum(['salary', 'per_shoot', 'per_day', 'per_project', 'custom']).optional(),
+    commission_pct: z.number().min(0).max(100).optional(),
+    commission_basis: z.enum(['revenue', 'payment', 'profit', 'manual']).optional(),
+    stipend_amount: money.optional(),
+    pay_effective_from: isoDate.optional(),
+    pay_effective_to: isoDate.optional(),
+    compensation_notes: z.string().trim().max(2000).optional(),
   })
   .superRefine((v, ctx) => {
     if (!v.create_login) return
@@ -140,6 +155,13 @@ export const updateMemberRequest = z.object({
   phone: z.string().trim().max(20).nullable().optional(),
   alternate_phone: z.string().trim().max(20).nullable().optional(),
   address: z.string().trim().max(300).nullable().optional(),
+  payout_type: z.enum(['salary', 'per_shoot', 'per_day', 'per_project', 'custom']).nullable().optional(),
+  commission_pct: z.number().min(0).max(100).nullable().optional(),
+  commission_basis: z.enum(['revenue', 'payment', 'profit', 'manual']).nullable().optional(),
+  stipend_amount: money.nullable().optional(),
+  pay_effective_from: isoDate.nullable().optional(),
+  pay_effective_to: isoDate.nullable().optional(),
+  compensation_notes: z.string().trim().max(2000).nullable().optional(),
 })
 export type UpdateMemberRequest = z.infer<typeof updateMemberRequest>
 

@@ -36,6 +36,13 @@ export interface MemberDraft {
   role_ids: string[]
   salary: string
   address: string
+  payout_type: '' | 'salary' | 'per_shoot' | 'per_day' | 'per_project' | 'custom'
+  commission_pct: string
+  commission_basis: '' | 'revenue' | 'payment' | 'profit' | 'manual'
+  stipend_amount: string
+  pay_effective_from: string
+  pay_effective_to: string
+  compensation_notes: string
 }
 
 export const EMPTY_DRAFT: MemberDraft = {
@@ -51,6 +58,13 @@ export const EMPTY_DRAFT: MemberDraft = {
   role_ids: [],
   salary: '',
   address: '',
+  payout_type: '',
+  commission_pct: '',
+  commission_basis: '',
+  stipend_amount: '',
+  pay_effective_from: '',
+  pay_effective_to: '',
+  compensation_notes: '',
 }
 
 type DraftField = keyof MemberDraft
@@ -68,6 +82,13 @@ const LABELS: Record<string, string> = {
   role_ids: 'Job roles',
   salary: 'Salary',
   address: 'Address',
+  payout_type: 'Payout type',
+  commission_pct: 'Commission',
+  commission_basis: 'Commission basis',
+  stipend_amount: 'Stipend',
+  pay_effective_from: 'Effective from',
+  pay_effective_to: 'Effective to',
+  compensation_notes: 'Pay notes',
 }
 
 /** Which answers a step is responsible for — used to scope its messages. */
@@ -76,7 +97,17 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
   login: ['create_login'],
   contact: ['name', 'phone', 'email', 'password', 'confirm_password'],
   role: ['role', 'role_ids'],
-  details: ['salary', 'address'],
+  details: [
+    'salary',
+    'address',
+    'payout_type',
+    'commission_pct',
+    'commission_basis',
+    'stipend_amount',
+    'pay_effective_from',
+    'pay_effective_to',
+    'compensation_notes',
+  ],
   review: [
     'name',
     'phone',
@@ -86,6 +117,9 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
     'role',
     'salary',
     'address',
+    'payout_type',
+    'commission_pct',
+    'stipend_amount',
   ],
 }
 
@@ -104,6 +138,13 @@ export function toPayload(d: MemberDraft): Record<string, unknown> {
     ...(d.create_login && d.password ? { password: d.password } : {}),
     ...(salary !== undefined ? { salary } : {}),
     ...(d.address.trim() ? { address: d.address.trim() } : {}),
+    ...(d.payout_type ? { payout_type: d.payout_type } : {}),
+    ...(d.commission_pct.trim() ? { commission_pct: Number(d.commission_pct) } : {}),
+    ...(d.commission_basis ? { commission_basis: d.commission_basis } : {}),
+    ...(d.stipend_amount.trim() ? { stipend_amount: Number(d.stipend_amount) } : {}),
+    ...(d.pay_effective_from ? { pay_effective_from: d.pay_effective_from } : {}),
+    ...(d.pay_effective_to ? { pay_effective_to: d.pay_effective_to } : {}),
+    ...(d.compensation_notes.trim() ? { compensation_notes: d.compensation_notes.trim() } : {}),
   }
 }
 
