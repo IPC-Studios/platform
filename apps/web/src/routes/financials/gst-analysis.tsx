@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { useGstAnalysis } from '@/features/gst-analysis/api'
+import { ErrorState } from '@/shared/ui/states'
 import { TrendingUp, TrendingDown, Receipt, Calculator, FileText } from 'lucide-react'
 
 function GstAnalysisContent() {
@@ -16,7 +17,7 @@ function GstAnalysisContent() {
   const [startDate, setStartDate] = useState(firstDay)
   const [endDate, setEndDate] = useState(lastDay)
 
-  const { data, isLoading } = useGstAnalysis(startDate, endDate)
+  const { data, isLoading, isError, refetch } = useGstAnalysis(startDate, endDate)
 
   if (isLoading) {
     return (
@@ -67,10 +68,18 @@ function GstAnalysisContent() {
         </CardContent>
       </Card>
 
+      {isError && !isLoading && (
+        <Card>
+          <CardContent className="py-2">
+            <ErrorState message="We could not work out the GST for this period." onRetry={() => void refetch()} />
+          </CardContent>
+        </Card>
+      )}
+
       {data && (
         <>
           {/* KPI Cards */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard label="Total Income" value={`₹${data.total_income.toLocaleString()}`} icon={TrendingUp} />
             <StatCard label="GST Collected" value={`₹${data.gst_collected.toLocaleString()}`} icon={Receipt} />
             <StatCard label="Input Tax Credit" value={`₹${data.input_tax_credit.toLocaleString()}`} icon={Calculator} />
@@ -80,6 +89,9 @@ function GstAnalysisContent() {
               icon={TrendingDown}
               className={data.net_gst_liability > 0 ? 'text-red-600' : 'text-green-600'}
             />
+            {/* Computed by the RPC and part of the contract, but previously not
+                shown anywhere on the page. */}
+            <StatCard label="Reverse Charge" value={`₹${data.reverse_charge.toLocaleString()}`} icon={FileText} />
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">
