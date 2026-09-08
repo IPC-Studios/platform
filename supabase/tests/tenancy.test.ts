@@ -101,6 +101,7 @@ async function freshDb() {
   await db.exec(mig('0065_client_fields.sql'))
   await db.exec(mig('0066_crm_lead_event_fields.sql'))
   await db.exec(mig('0067_referral_slug.sql'))
+  await db.exec(mig('0068_work_submission_reminders.sql'))
   return db
 }
 
@@ -4392,5 +4393,77 @@ describe('Lovable parity: custom task priorities', () => {
     await expect(
       db.exec(`insert into company_task_priorities (company_id, code, label) values (get_current_company_id(), 'rush', 'Also Rush');`),
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * Work submission reminders (0068). The setting, its default, and the sweep
+ * that turns an overdue-soon task with no submission into a notification --
+ * none of this existed before this session; the old app had the setting,
+ * the rebuild had neither the setting nor the sweep.
+ */
+describe('Lovable parity: work submission reminders', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('defaults to enabled with 7/3/1 day thresholds before any setting exists', async () => {
+    const r = await db.query<{ v: { enabled: boolean; reminder_days: number[] } }>(
+      `select get_work_submission_reminder_settings() as v;`,
+    )
+    expect(r.rows[0]!.v).toEqual({ enabled: true, reminder_days: [7, 3, 1] })
+  })
+
+  it('the owner can change the cadence, and it sticks', async () => {
+    await db.query(`select set_work_submission_reminder_settings(true, array[14,7,1,0]);`)
+    const r = await db.query<{ v: { reminder_days: number[] } }>(`select get_work_submission_reminder_settings() as v;`)
+    expect(r.rows[0]!.v.reminder_days).toEqual([14, 7, 1, 0])
+  })
+
+  it('nudges the assignee of a task due at a configured threshold with no submission yet, once per day', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into tasks (company_id, title, status, priority, due_date)
+        values ('${co}', 'Edit gallery', 'to_do', 'high', current_date + 1);
+      insert into task_assignees (company_id, task_id, user_id)
+        values ('${co}', (select id from tasks where title = 'Edit gallery'), '${OWNER}');
+    `)
+    const first = await db.query<{ v: { tasks_due: number; notifications_created: number } }>(
+      `select run_work_submission_reminder_cron(false) as v;`,
+    )
+    expect(first.rows[0]!.v.tasks_due).toBe(1)
+    expect(first.rows[0]!.v.notifications_created).toBe(1)
+
+    const second = await db.query<{ v: { notifications_created: number } }>(
+      `select run_work_submission_reminder_cron(false) as v;`,
+    )
+    expect(second.rows[0]!.v.notifications_created).toBe(0)
+  })
+
+  it('a task with an approved submission is not nudged again', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const taskId = (
+      await db.query<{ id: string }>(
+        `insert into tasks (company_id, title, status, priority, due_date)
+         values ('${co}', 'Deliver album', 'to_do', 'high', current_date + 1) returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(`
+      insert into task_assignees (company_id, task_id, user_id) values ('${co}', '${taskId}', '${OWNER}');
+      insert into team_work_submissions (company_id, task_id, submitted_by, submission_link, status)
+        values ('${co}', '${taskId}', '${OWNER}', 'https://example.com/album', 'approved');
+    `)
+    const rows = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+         join task_assignees a on a.task_id = t.id
+        where t.id = '${taskId}'
+          and not exists (select 1 from team_work_submissions w where w.task_id = t.id and w.status <> 'rejected');`,
+    )
+    expect(rows.rows[0]!.count).toBe(0)
   })
 })

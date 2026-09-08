@@ -28,3 +28,15 @@ export const reviewWorkRequest = z.object({
   review_notes: z.string().max(1000).optional(),
 })
 export type ReviewWorkRequest = z.infer<typeof reviewWorkRequest>
+
+export const workReminderSettings = z.object({
+  enabled: z.boolean(),
+  reminder_days: z.array(z.number().int()),
+})
+export type WorkReminderSettings = z.infer<typeof workReminderSettings>
+
+export const updateWorkReminderSettingsRequest = z.object({
+  enabled: z.boolean(),
+  reminder_days: z.array(z.number().int().min(0).max(60)).max(10),
+})
+export type UpdateWorkReminderSettingsRequest = z.infer<typeof updateWorkReminderSettingsRequest>

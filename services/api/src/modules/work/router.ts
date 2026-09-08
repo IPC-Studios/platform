@@ -1,14 +1,15 @@
 import { Hono } from 'hono'
 import { z } from '@ipc/contracts'
-import { reviewWorkRequest, submitWorkRequest, workSubmission } from '@ipc/contracts'
+import { reviewWorkRequest, submitWorkRequest, workReminderSettings, updateWorkReminderSettingsRequest, workSubmission } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
-import { requireAction } from '../../middleware/permissions'
+import { requireAction, requireOwner } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
 import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
+import { rpcJson } from '../../lib/rpc'
 
 const list = workSubmission.array()
 const deliverResponse = z.object({ token: z.string() })
@@ -94,4 +95,38 @@ export const workRouter = new Hono<AppEnv>()
     if (!token) fail(400, 'The submission must be approved before delivery.')
     await audit(c, { action: 'work.deliver', entityType: 'work_submission', entityId: id })
     return c.json(deliverResponse.parse({ token }))
+  })
+
+/**
+ * Owner-only: when a team member is nudged to submit pending work, and how
+ * many days before the task's due date. Read by anyone active; only the
+ * owner can change it, matching crm_settings' shape.
+ */
+export const workReminderSettingsRouter = new Hono<AppEnv>()
+  .use('*', requireAuth)
+  .get('/', async (c) => {
+    const row = await attempt(c, 'work.reminder_settings.get', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<{ get_work_submission_reminder_settings: unknown }[]>`
+          select get_work_submission_reminder_settings() as get_work_submission_reminder_settings`
+        return rows[0]?.get_work_submission_reminder_settings ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not load reminder settings.')
+    return c.json(workReminderSettings.parse(rpcJson(row, {})))
+  })
+
+  .patch('/', requireOwner(), async (c) => {
+    const parsed = updateWorkReminderSettingsRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the reminder settings.')
+    const ok = await attempt(c, 'work.reminder_settings.update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`select set_work_submission_reminder_settings(
+          p_enabled => ${parsed.data.enabled}, p_reminder_days => ${parsed.data.reminder_days}::int[])`
+        return true
+      }),
+    )
+    if (!ok) fail(400, 'We could not save reminder settings.')
+    await audit(c, { action: 'work_reminder_settings.update', entityType: 'company', entityId: c.get('auth').companyId, after: parsed.data })
+    return c.body(null, 204)
   })

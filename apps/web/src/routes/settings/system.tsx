@@ -14,12 +14,14 @@ import { Select } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
+import { Switch } from '@/shared/ui/switch'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
 import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
 import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
 import { useTaskPriorities, useCreateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
+import { useWorkReminderSettings, useUpdateWorkReminderSettings } from '@/features/work/api'
 import type { TaskPriorityTone } from '@ipc/contracts'
 
 const when = new Intl.DateTimeFormat('en-IN', {
@@ -68,6 +70,7 @@ function System() {
           <CustomLookups />
           <Services />
           <TaskPriorities />
+          <WorkReminders />
           <AuditLog />
           <CronRuns />
         </>
@@ -515,6 +518,79 @@ function TaskPriorities() {
             </ul>
           )}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const REMINDER_PRESET_DAYS = [14, 7, 3, 1, 0]
+
+/** When a team member gets nudged about work due soon, and how far ahead. */
+function WorkReminders() {
+  const { data, isLoading } = useWorkReminderSettings()
+  const update = useUpdateWorkReminderSettings()
+  const [enabled, setEnabled] = useState(true)
+  const [days, setDays] = useState<number[]>([7, 3, 1])
+  const [loaded, setLoaded] = useState(false)
+
+  if (data && !loaded) {
+    setEnabled(data.enabled)
+    setDays(data.reminder_days)
+    setLoaded(true)
+  }
+
+  function toggleDay(d: number) {
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]).sort((a, b) => b - a))
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Work Submission Reminders
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Nudge whoever a task is assigned to before its due date, if nothing has been submitted yet.
+        </p>
+
+        {isLoading ? (
+          <SkeletonList rows={2} columns={1} className="mt-4" />
+        ) : (
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="rounded-lg border border-border p-3">
+              <Switch checked={enabled} onChange={setEnabled} label="Enable reminders" />
+            </div>
+
+            <div>
+              <p className="text-sm font-medium">Remind this many days before the due date</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">0 means "on the due date".</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {REMINDER_PRESET_DAYS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => toggleDay(d)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      days.includes(d) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {d === 0 ? 'Due day' : `${d}d before`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => update.mutate({ enabled, reminder_days: days })}
+                disabled={update.isPending}
+              >
+                {update.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
