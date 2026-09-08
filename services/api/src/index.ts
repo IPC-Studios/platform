@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { allowedOrigins, isProduction } from './lib/allowed-origins'
 import type { AppEnv } from './context'
-import { errorBoundary } from './middleware/errors'
+import { errorHandler, notFoundHandler } from './middleware/errors'
 import { requestId } from './middleware/request-id'
 import { securityHeaders, rateLimit } from './middleware/security'
 import { setLogLevel } from './lib/log'
@@ -41,7 +41,8 @@ app.use('*', async (c, next) => {
 })
 app.use('*', requestId)
 app.use('*', securityHeaders)
-app.use('*', errorBoundary)
+// Registered below with app.onError, not here: Hono resolves a thrown error
+// at the depth it was thrown, so an enclosing try/catch never sees it.
 // CORS from an env allowlist. Fail-closed in production.
 app.use('*', (c, next) => {
   const allow = allowedOrigins(c.env)
@@ -134,5 +135,10 @@ app.route('/public', publicTeamTermsRouter)
 app.route('/public', publicDocumentsRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
+
+// Every failure leaves through here, in one JSON envelope the web client
+// can read. Hono's own handler would return the bare message instead.
+app.onError(errorHandler)
+app.notFound(notFoundHandler)
 
 export default app
