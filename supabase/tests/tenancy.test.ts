@@ -106,6 +106,7 @@ async function freshDb() {
   await db.exec(mig('0070_overhead_allocation.sql'))
   await db.exec(mig('0071_crm_lead_contact_fields.sql'))
   await db.exec(mig('0072_personal_expense_gst_rate.sql'))
+  await db.exec(mig('0073_work_submission_location.sql'))
   return db
 }
 
@@ -4671,5 +4672,63 @@ describe('Lovable parity round 3: parties and expense form completeness', () => 
     const item = r.rows[0]!.v.items.find((i) => i.expense_date === '2026-03-01')
     expect(item?.party_name).toBe('Rental Co')
     expect(item?.gst_rate).toBe(5)
+  })
+})
+
+/**
+ * Round 4: data custody linkage and the work-submission location note.
+ *
+ * The old data-management form linked every card to the shoot it came off;
+ * the rebuild's create form hardcoded shoot_id/project_id to null on every
+ * submission, so a logged card floated with no way to tell which project it
+ * belonged to. Same story for work submissions and location_note, which has
+ * existed on team_work_submissions since 0010 and was read by nothing.
+ */
+describe('Lovable parity round 4: data custody linkage, work location note', () => {
+  let db: PGlite
+  let projectId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into clients (company_id, name) values (get_current_company_id(), 'Acme');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values (get_current_company_id(), (select id from clients limit 1), 'Wedding', 100000, 'active');
+    `)
+    projectId = (await db.query<{ id: string }>(`select id from projects limit 1;`)).rows[0]!.id
+  })
+
+  it('a data record can be linked to the project it came from, and reads back joined', async () => {
+    await db.exec(`
+      insert into shoot_data_records (company_id, project_id, data_label, data_type, card_count, size_gb, copied_by_uid)
+        values (get_current_company_id(), '${projectId}', 'CF Card A', 'Photos (RAW)', 2, 64, '${OWNER}');
+    `)
+    const row = await db.query<{ project_name: string; data_type: string }>(`
+      select p.name as project_name, d.data_type from shoot_data_records d
+      join projects p on p.id = d.project_id where d.data_label = 'CF Card A';
+    `)
+    expect(row.rows[0]).toEqual({ project_name: 'Wedding', data_type: 'Photos (RAW)' })
+  })
+
+  it('submit_work has exactly one signature, and the API call shape (4 named args) resolves without ambiguity', async () => {
+    const overloads = await db.query<{ n: number }>(`select count(*)::int as n from pg_proc where proname = 'submit_work';`)
+    expect(overloads.rows[0]!.n).toBe(1)
+    const r = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => '${projectId}', p_link => 'https://drive.example.com/x', p_notes => 'test') as id;`,
+    )
+    expect(r.rows[0]!.id).toBeTruthy()
+  })
+
+  it('a work submission carries its location note separately from the link', async () => {
+    const r = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => '${projectId}', p_link => 'https://drive.example.com/y', p_notes => null, p_location_note => 'Backup HDD 3') as id;`,
+    )
+    const row = await db.query<{ location_note: string; submission_link: string }>(
+      `select location_note, submission_link from team_work_submissions where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ location_note: 'Backup HDD 3', submission_link: 'https://drive.example.com/y' })
   })
 })

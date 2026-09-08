@@ -1,15 +1,22 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { HardDrive, Plus, Check } from 'lucide-react'
-import type { CreateDataRecordRequest } from '@ipc/contracts'
+import { shootListItem, type CreateDataRecordRequest } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
-import { Input, Label } from '@/shared/ui/input'
+import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useDataRecords, useVerifyData, useCreateDataRecord } from '@/features/data/api'
+import { useProjects } from '@/features/projects/api'
+import { callApi } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthProvider'
+
+const DATA_TYPES = ['Photos (RAW)', 'Photos (JPEG)', 'Video', 'Audio', 'Mixed']
+const shootsList = shootListItem.array()
 
 const TONE = { pending: 'neutral', copied: 'warning', verified: 'success' } as const
 
@@ -44,6 +51,7 @@ function DataBoard() {
             <thead className="bg-muted/50 text-left text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 font-medium">Card / drive</th>
+                <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Size</th>
                 <th className="px-4 py-2 font-medium">Primary</th>
                 <th className="px-4 py-2 font-medium">Backup</th>
@@ -58,7 +66,9 @@ function DataBoard() {
                       <HardDrive className="size-4 text-muted-foreground" />
                       {r.data_label}
                     </span>
+                    {r.data_type && <span className="ml-6 text-xs text-muted-foreground">{r.data_type}</span>}
                   </td>
+                  <td className="px-4 py-2 text-muted-foreground">{r.project_name ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">
                     {r.size_gb} GB · {r.card_count} card(s)
                   </td>
@@ -96,28 +106,47 @@ function DataBoard() {
 
 function AddRecordDialog() {
   const create = useCreateDataRecord()
+  const { data: projects } = useProjects()
+  const { session } = useAuth()
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState('')
+  const [dataType, setDataType] = useState('')
   const [cards, setCards] = useState(1)
   const [size, setSize] = useState(0)
+  const [projectId, setProjectId] = useState('')
+  const [shootId, setShootId] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const shoots = useQuery({
+    queryKey: ['shoots', 'by-project', projectId],
+    queryFn: () => callApi(`/shoots?project_id=${projectId}`, { responseSchema: shootsList }),
+    enabled: !!session && !!projectId,
+  })
+
+  useEffect(() => {
+    setShootId('')
+  }, [projectId])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
       const body: CreateDataRecordRequest = {
-        shoot_id: null,
-        project_id: null,
+        shoot_id: shootId || null,
+        project_id: projectId || null,
         data_label: label.trim(),
+        ...(dataType ? { data_type: dataType } : {}),
         card_count: cards,
         size_gb: size,
       }
       await create.mutateAsync(body)
       setOpen(false)
       setLabel('')
+      setDataType('')
       setCards(1)
       setSize(0)
+      setProjectId('')
+      setShootId('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not log the card.')
     }
@@ -135,6 +164,41 @@ function AddRecordDialog() {
           <div className="flex flex-col gap-1.5">
             <Label>Label</Label>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="CF Card A (Cam 1)" required autoFocus />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Project</Label>
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">Not linked</option>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Shoot</Label>
+              <Select value={shootId} onChange={(e) => setShootId(e.target.value)} disabled={!projectId}>
+                <option value="">{projectId ? 'Whole project' : 'Pick a project first'}</option>
+                {(shoots.data ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Data type</Label>
+            <Select value={dataType} onChange={(e) => setDataType(e.target.value)}>
+              <option value="">Unspecified</option>
+              {DATA_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">

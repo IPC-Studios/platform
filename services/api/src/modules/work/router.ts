@@ -29,7 +29,7 @@ export const workRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) =>
-          sql`select id, project_id, task_id, submission_link, notes, status, review_notes, created_at
+          sql`select id, project_id, task_id, submission_link, location_note, notes, status, review_notes, created_at
               from team_work_submissions
               where ${userId ? sql`submitted_by = ${userId}` : sql`true`}
               order by created_at desc`,
@@ -49,7 +49,8 @@ export const workRouter = new Hono<AppEnv>()
             p_task_id => ${parsed.data.task_id},
             p_project_id => ${parsed.data.project_id},
             p_link => ${parsed.data.submission_link},
-            p_notes => ${parsed.data.notes ?? null}
+            p_notes => ${parsed.data.notes ?? null},
+            p_location_note => ${parsed.data.location_note ?? null}
           ) as id`
         return rows[0]?.id ?? null
       }),

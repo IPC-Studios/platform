@@ -21,10 +21,12 @@ export const dataRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, data_label, data_type, primary_status, backup_status, card_count, size_gb, verified_at
-          from shoot_data_records
-          where ${shoot ? sql`shoot_id = ${shoot}` : sql`true`}
-          order by created_at desc`,
+          select d.id, d.data_label, d.data_type, d.project_id, p.name as project_name, d.shoot_id,
+                 d.primary_status, d.backup_status, d.card_count, d.size_gb, d.verified_at
+          from shoot_data_records d
+          left join projects p on p.id = d.project_id
+          where ${shoot ? sql`d.shoot_id = ${shoot}` : sql`true`}
+          order by d.created_at desc`,
       ),
     )
     if (!rows) fail(400, 'We could not load data records.')
@@ -43,7 +45,9 @@ export const dataRouter = new Hono<AppEnv>()
             company_id: auth.companyId,
             copied_by_uid: auth.userId,
           })}
-          returning id, data_label, data_type, primary_status, backup_status, card_count, size_gb, verified_at`
+          returning id, data_label, data_type, project_id,
+                    (select name from projects where id = project_id) as project_name,
+                    shoot_id, primary_status, backup_status, card_count, size_gb, verified_at`
         return rows[0] ?? null
       }),
     )

@@ -8,6 +8,7 @@ export const workSubmission = z.object({
   project_id: uuid.nullable(),
   task_id: uuid.nullable(),
   submission_link: z.string().nullable(),
+  location_note: z.string().nullable(),
   notes: z.string().nullable(),
   status: workStatus,
   review_notes: z.string().nullable(),
@@ -19,6 +20,8 @@ export const submitWorkRequest = z.object({
   task_id: uuid.nullable().default(null),
   project_id: uuid.nullable().default(null),
   submission_link: z.string().trim().min(1).max(500),
+  /** Which physical drive or folder this actually lives on, if the link alone doesn't say. */
+  location_note: z.string().trim().max(200).optional(),
   notes: z.string().max(1000).optional(),
 })
 export type SubmitWorkRequest = z.infer<typeof submitWorkRequest>
