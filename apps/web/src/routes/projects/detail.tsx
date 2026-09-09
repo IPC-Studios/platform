@@ -518,6 +518,8 @@ function AddDeliverableDialog({ id }: { id: string }) {
   const [title, setTitle] = useState('')
   const [charge, setCharge] = useState(false)
   const [amount, setAmount] = useState(0)
+  const [workType, setWorkType] = useState('')
+  const [internalNotes, setInternalNotes] = useState('')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -529,12 +531,16 @@ function AddDeliverableDialog({ id }: { id: string }) {
       visibility_scope: 'client',
       show_on_quotation: true,
       start_rule: 'whole_project',
+      ...(workType.trim() ? { work_type: workType.trim() } : {}),
+      ...(internalNotes.trim() ? { internal_notes: internalNotes.trim() } : {}),
     }
     await add.mutateAsync(body)
     setOpen(false)
     setTitle('')
     setCharge(false)
     setAmount(0)
+    setWorkType('')
+    setInternalNotes('')
   }
 
   return (
@@ -550,6 +556,10 @@ function AddDeliverableDialog({ id }: { id: string }) {
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Work type (optional)</Label>
+            <Input value={workType} onChange={(e) => setWorkType(e.target.value)} placeholder="e.g. Editing, Album design" />
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={charge} onChange={(e) => setCharge(e.target.checked)} />
             Additional charge
@@ -560,6 +570,16 @@ function AddDeliverableDialog({ id }: { id: string }) {
               <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
             </div>
           )}
+          <div className="flex flex-col gap-1.5">
+            <Label>Internal notes (optional)</Label>
+            <textarea
+              value={internalNotes}
+              onChange={(e) => setInternalNotes(e.target.value)}
+              rows={2}
+              placeholder="Never shown to the client"
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
@@ -583,6 +603,8 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
   const [charge, setCharge] = useState(deliverable.is_additional_charge)
   const [amount, setAmount] = useState(deliverable.additional_charge_amount)
   const [showOnQuotation, setShowOnQuotation] = useState(deliverable.show_on_quotation)
+  const [workType, setWorkType] = useState(deliverable.work_type ?? '')
+  const [internalNotes, setInternalNotes] = useState(deliverable.internal_notes ?? '')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -593,6 +615,8 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
         is_additional_charge: charge,
         additional_charge_amount: amount,
         show_on_quotation: showOnQuotation,
+        work_type: workType.trim() || null,
+        internal_notes: internalNotes.trim() || null,
       },
     })
     setOpen(false)
@@ -611,6 +635,10 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Work type (optional)</Label>
+            <Input value={workType} onChange={(e) => setWorkType(e.target.value)} placeholder="e.g. Editing, Album design" />
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={charge} onChange={(e) => setCharge(e.target.checked)} />
             Additional charge
@@ -625,6 +653,16 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
             <input type="checkbox" checked={showOnQuotation} onChange={(e) => setShowOnQuotation(e.target.checked)} />
             Show on quotation
           </label>
+          <div className="flex flex-col gap-1.5">
+            <Label>Internal notes (optional)</Label>
+            <textarea
+              value={internalNotes}
+              onChange={(e) => setInternalNotes(e.target.value)}
+              rows={2}
+              placeholder="Never shown to the client"
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

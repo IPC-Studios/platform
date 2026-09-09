@@ -30,6 +30,7 @@ import { useClients } from '@/features/clients/api'
 import {
   useCadences,
   useConvertLead,
+  useContacts,
   useCrmCompanies,
   useCrmSettings,
   useEnrollWorkflow,
@@ -88,6 +89,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const move = useMoveStage()
   const { data: pipelines } = usePipelines()
   const { data: companies } = useCrmCompanies()
+  const { data: contacts } = useContacts()
   const { data: settings } = useCrmSettings()
   const [losingTo, setLosingTo] = useState<string | null>(null)
   const pipeline = (pipelines ?? []).find((p) => p.id === lead.pipeline_id) ?? (pipelines ?? []).find((p) => p.is_default)
@@ -288,6 +290,24 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                 {(companies ?? []).map((co) => (
                   <option key={co.id} value={co.id}>
                     {co.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-contact">Contact</Label>
+              <Select
+                id="lead-contact"
+                value={lead.contact_id ?? ''}
+                onChange={(e) => patch({ contact_id: e.target.value || null })}
+                disabled={update.isPending || !canEdit}
+              >
+                <option value="">None</option>
+                {(contacts ?? []).map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {ct.name ?? ct.phone ?? ct.email ?? 'Unnamed'}
                   </option>
                 ))}
               </Select>
