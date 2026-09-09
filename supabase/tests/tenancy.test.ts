@@ -119,6 +119,7 @@ async function freshDb() {
   await db.exec(mig('0083_profile_photo.sql'))
   await db.exec(mig('0084_lookup_categories_expansion.sql'))
   await db.exec(mig('0085_invoice_line_presets.sql'))
+  await db.exec(mig('0086_project_profitability_report.sql'))
   return db
 }
 
@@ -4906,6 +4907,133 @@ describe('Lovable parity round 2: overhead allocation and company settings', () 
       `select alternate_phone, city from crm_leads where phone = '9000000001';`,
     )
     expect(row.rows[0]).toEqual({ alternate_phone: '9000000002', city: 'Mumbai' })
+  })
+})
+
+/**
+ * Project profitability report ("Calculated Expenses" in the original, 0086):
+ * per-project income/expense/margin, sortable, date-windowed, paginated.
+ */
+describe('project profitability report (0086)', () => {
+  let db: PGlite
+  let co: string
+  let p1: string
+  let p2: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into clients (company_id, name) values ('${co}', 'Acme');`)
+    const clientId = (await db.query<{ id: string }>(`select id from clients where company_id = '${co}'`)).rows[0]!.id
+    p1 = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost, status) values ('${co}', '${clientId}', 'Wedding A', 100000, 'active') returning id;`,
+      )
+    ).rows[0]!.id
+    p2 = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost, status) values ('${co}', '${clientId}', 'Wedding B', 50000, 'active') returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(`insert into received_payments (company_id, project_id, amount, paid_on) values ('${co}', '${p1}', 60000, '2026-01-10');`)
+    await db.exec(`insert into received_payments (company_id, project_id, amount, paid_on) values ('${co}', '${p2}', 50000, '2026-02-05');`)
+    await db.exec(`insert into expenses (company_id, project_id, amount, expense_date, category) values ('${co}', '${p1}', 10000, '2026-01-15', 'travel');`)
+    await db.exec(`insert into expenses (company_id, project_id, is_fixed_overhead, amount, expense_date, category) values ('${co}', null, true, 2000, '2026-01-20', 'supplies');`)
+  })
+
+  it('splits paid income, receivables and project-plus-overhead expense the way the original did, plus the overhead share this app already allocates', async () => {
+    const r = await db.query<{ v: { items: Record<string, unknown>[]; summary: Record<string, unknown> } }>(
+      `select project_profitability_report() as v;`,
+    )
+    const byId = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_id, i]))
+    // Wedding A: 60k paid of 100k, 10k direct expense + a 1k/2 overhead share = 11k.
+    expect(byId[p1]).toMatchObject({
+      project_total_value: 100000,
+      paid_income: 60000,
+      receivables: 40000,
+      company_expense_total: 11000,
+      gross_profit: 49000,
+      balance_status: 'pending',
+      attention_flags: ['pending_receivable'],
+    })
+    // Wedding B: fully paid, no direct expense, still absorbs its overhead share.
+    expect(byId[p2]).toMatchObject({
+      project_total_value: 50000,
+      paid_income: 50000,
+      receivables: 0,
+      company_expense_total: 1000,
+      balance_status: 'settled',
+    })
+    expect(r.rows[0]!.v.summary).toMatchObject({
+      project_count: 2,
+      total_project_value: 150000,
+      total_paid_income: 110000,
+      total_company_expenses: 12000,
+      pending_project_count: 1,
+    })
+  })
+
+  it('a date window scopes payments and expenses only -- project value stays the full booking either way', async () => {
+    const r = await db.query<{ v: { items: Record<string, unknown>[] } }>(
+      `select project_profitability_report(p_date_from => '2026-02-01', p_date_to => '2026-02-28') as v;`,
+    )
+    const byId = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_id, i]))
+    // January's payment and both January expenses fall outside the window.
+    expect(byId[p1]).toMatchObject({ project_total_value: 100000, paid_income: 0, company_expense_total: 0 })
+    expect(byId[p2]).toMatchObject({ project_total_value: 50000, paid_income: 50000, company_expense_total: 0 })
+  })
+
+  it('sorts by any allowed column in either direction, and paginates the result', async () => {
+    const asc = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_sort_by => 'total_cost', p_sort_direction => 'asc') as v;`,
+    )
+    expect(asc.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding B', 'Wedding A'])
+
+    const desc = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_sort_by => 'total_cost', p_sort_direction => 'desc') as v;`,
+    )
+    expect(desc.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding A', 'Wedding B'])
+
+    // page_size is clamped to at least 10, same as the original's own floor.
+    const paged = await db.query<{ v: { pagination: { page_size: number; total_count: number; total_pages: number } } }>(
+      `select project_profitability_report(p_page_size => 1) as v;`,
+    )
+    expect(paged.rows[0]!.v.pagination).toEqual({ page: 1, page_size: 10, total_count: 2, total_pages: 1 })
+  })
+
+  it('filters by project, client, status and a name/client search', async () => {
+    const byProject = await db.query<{ v: { items: unknown[] } }>(
+      `select project_profitability_report(p_project_id => '${p1}') as v;`,
+    )
+    expect(byProject.rows[0]!.v.items).toHaveLength(1)
+
+    const bySearch = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_search => 'wedding b') as v;`,
+    )
+    expect(bySearch.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding B'])
+
+    const byStatus = await db.query<{ v: { items: unknown[] } }>(
+      `select project_profitability_report(p_status => 'cancelled') as v;`,
+    )
+    expect(byStatus.rows[0]!.v.items).toHaveLength(0)
+  })
+
+  it('a project running at a loss is flagged, and a cancelled project does not absorb overhead', async () => {
+    await db.exec(`
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co}', (select id from clients where company_id = '${co}'), 'Underwater', 1000, 'active');
+      insert into expenses (company_id, project_id, amount, expense_date, category)
+        values ('${co}', (select id from projects where name = 'Underwater'), 5000, '2026-01-15', 'equipment');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co}', (select id from clients where company_id = '${co}'), 'Called off', 1000, 'cancelled');
+    `)
+    const r = await db.query<{ v: { items: Record<string, unknown>[] } }>(`select project_profitability_report() as v;`)
+    const byName = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_name, i]))
+    expect(byName['Underwater']).toMatchObject({ profitability_status: 'loss', attention_flags: expect.arrayContaining(['loss_project']) })
+    expect(byName['Called off']).toMatchObject({ company_expense_total: 0 })
   })
 })
 

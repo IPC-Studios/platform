@@ -30,6 +30,7 @@ import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
 import { GopoPage } from '@/routes/financials/gopo'
 import { GstAnalysisPage } from '@/routes/financials/gst-analysis'
+import { CalculatedExpensesPage } from '@/routes/financials/calculated-expenses'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { CrmContactsPage } from '@/routes/crm/contacts'
 import { CrmCompaniesPage } from '@/routes/crm/companies'
@@ -181,6 +182,7 @@ const routeTree = rootRoute.addChildren([
   route('/financials', FinancialsPage),
   route('/financials/gopo', GopoPage),
   route('/financials/gst-analysis', GstAnalysisPage),
+  route('/financials/calculated-expenses', CalculatedExpensesPage),
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),

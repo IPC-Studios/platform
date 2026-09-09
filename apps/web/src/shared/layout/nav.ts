@@ -32,6 +32,7 @@ import {
   FileText,
   FileSignature,
   Eye,
+  Table2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -121,6 +122,7 @@ export const NAV: NavEntry[] = [
       leaf('GOPO Dashboard', '/financials/gopo', BarChart3, { module: 'financials' }),
       leaf('GST Analysis', '/financials/gst-analysis', Receipt, { module: 'financials' }),
       leaf('Profitability', '/financials', TrendingUp, { module: 'financials' }),
+      leaf('Profitability Report', '/financials/calculated-expenses', Table2, { module: 'financials' }),
     ],
   },
   {
