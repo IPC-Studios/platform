@@ -11,6 +11,7 @@ import {
   createLeadRequest,
   createLeadResponse,
   createQuoteRequest,
+  updateQuoteRequest,
   crmActivity,
   crmCompany,
   crmContact,
@@ -63,6 +64,7 @@ import {
   type CreateLostReasonRequest,
   type CreatePipelineRequest,
   type CreateQuoteRequest,
+  type UpdateQuoteRequest,
   type CreateSavedViewRequest,
   type CreateScoringRuleRequest,
   type CreateStageRequest,
@@ -784,6 +786,18 @@ export function useCreateQuote() {
         responseSchema: crmQuote,
       }),
     (q) => `Quote ${q.quote_number} created`,
+  )
+}
+
+export function useUpdateQuote() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateQuoteRequest }) =>
+      callApi(`/crm/quotes/${id}`, {
+        method: 'PATCH',
+        body: updateQuoteRequest.parse(patch),
+        responseSchema: crmQuote,
+      }),
+    (q) => `Quote ${q.quote_number} updated`,
   )
 }
 

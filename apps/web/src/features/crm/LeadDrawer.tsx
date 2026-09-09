@@ -16,7 +16,7 @@ import {
   Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CrmLead } from '@ipc/contracts'
+import type { CrmLead, CrmQuote } from '@ipc/contracts'
 import { REQUIRED_FIELD_LABEL, missingForStage, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
@@ -449,6 +449,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
   const { data: quotes } = useQuotes(lead.id)
   const [building, setBuilding] = useState(false)
+  const [editing, setEditing] = useState<CrmQuote | null>(null)
   const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
 
   return (
@@ -466,7 +467,7 @@ function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
       {rows.length > 0 ? (
         <ul className="mt-2 divide-y divide-border">
           {rows.map((q) => (
-            <QuoteRow key={q.id} quote={q} compact />
+            <QuoteRow key={q.id} quote={q} compact onEdit={q.status === 'draft' && canEdit ? () => setEditing(q) : undefined} />
           ))}
         </ul>
       ) : (
@@ -475,6 +476,7 @@ function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
         </p>
       )}
       {building && <QuoteBuilder lead={lead} open onClose={() => setBuilding(false)} />}
+      {editing && <QuoteBuilder lead={lead} quote={editing} open onClose={() => setEditing(null)} />}
     </div>
   )
 }

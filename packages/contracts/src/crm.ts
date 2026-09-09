@@ -1303,6 +1303,10 @@ export const createQuoteRequest = z.object({
 })
 export type CreateQuoteRequest = z.infer<typeof createQuoteRequest>
 
+/** Same shape as creation, minus the lead (a quote never moves to a different deal): an edit resends title, terms, and lines together. */
+export const updateQuoteRequest = createQuoteRequest.omit({ lead_id: true })
+export type UpdateQuoteRequest = z.infer<typeof updateQuoteRequest>
+
 export const sendQuoteRequest = z.object({
   /** Also deliver the link on WhatsApp (Cloud API when connected, else a wa.me link) or by email. */
   channel: z.enum(['none', 'whatsapp', 'email']).default('none'),

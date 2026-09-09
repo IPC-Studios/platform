@@ -108,6 +108,7 @@ async function freshDb() {
   await db.exec(mig('0072_personal_expense_gst_rate.sql'))
   await db.exec(mig('0073_work_submission_location.sql'))
   await db.exec(mig('0074_invoice_edit.sql'))
+  await db.exec(mig('0075_quote_edit.sql'))
   return db
 }
 
@@ -3403,6 +3404,36 @@ describe('CRM quotes, preferences, lost analysis (0041)', () => {
     await db.exec(`insert into crm_user_prefs (company_id, user_id, prefs) values (get_current_company_id(), '${owner}', '{"columns":["name"]}') on conflict (company_id, user_id) do update set prefs = excluded.prefs;`)
     const p = await db.query<{ prefs: { columns: string[] } }>(`select prefs from crm_user_prefs where user_id = '${owner}';`)
     expect(p.rows[0]!.prefs.columns).toEqual(['name'])
+  })
+
+  it('a draft quote can be corrected in full -- title, lines, and notes together', async () => {
+    const lead = await add('Draft edit', '9876970020')
+    const q = await quote(lead)
+    const newItems = JSON.stringify([
+      { description: 'Photo + Video', quantity: 1, rate: 150000, amount: 150000, gst_rate: 18, taxable: 150000, cgst: 13500, sgst: 13500, igst: 0 },
+    ])
+    await db.query(`
+      select update_quote('${q.id}', 'Wedding package v2', current_date + 21, 'MH', true,
+        150000, 0, 150000, 27000, 177000, '${newItems}'::jsonb, 'Revised', 'Full in advance.');
+    `)
+    const row = await db.query<{ title: string; total: string; notes: string }>(
+      `select title, total, notes from crm_quotes where id = '${q.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ title: 'Wedding package v2', total: '177000.00', notes: 'Revised' })
+    const items = await db.query<{ description: string }>(`select description from crm_quote_items where quote_id = '${q.id}';`)
+    expect(items.rows.map((r) => r.description)).toEqual(['Photo + Video'])
+  })
+
+  it('a quote that has been sent can no longer be edited', async () => {
+    const lead = await add('Sent edit refused', '9876970021')
+    const q = await quote(lead)
+    await db.query(`select issue_quote_link('${q.id}', 48);`)
+    await expect(
+      db.query(`
+        select update_quote('${q.id}', 'x', null, 'MH', true, 0, 0, 0, 0, 0,
+          '[{"description":"x","quantity":1,"rate":1,"amount":1,"gst_rate":0,"taxable":1,"cgst":0,"sgst":0,"igst":0}]'::jsonb, null, null);
+      `),
+    ).rejects.toThrow(/cannot be edited/)
   })
 })
 
