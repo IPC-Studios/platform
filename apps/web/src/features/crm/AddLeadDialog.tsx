@@ -171,6 +171,11 @@ export function AddLeadDialog({
                 <option value="manual">Manual</option>
                 <option value="webform">Web form</option>
                 <option value="facebook">Facebook</option>
+                <option value="instagram">Instagram</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="google_form">Google Form</option>
+                <option value="csv_import">CSV import</option>
+                <option value="other">Other</option>
               </Select>
             </div>
           </div>

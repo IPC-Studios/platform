@@ -18,8 +18,27 @@ import { useLeads } from '@/features/crm/api'
 import { useProjects } from '@/features/projects/api'
 import { useClients } from '@/features/clients/api'
 import { useInvoices } from '@/features/billing/api'
-import { type CreateReminderRequest, type ReminderEntityType } from '@ipc/contracts'
+import { useEnquiries } from '@/features/enquiries/api'
+import { useTasks } from '@/features/tasks/api'
+import { useMembers } from '@/features/allocation/api'
+import { callApi } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useQuery } from '@tanstack/react-query'
+import { shootListItem, type CreateReminderRequest, type ReminderEntityType } from '@ipc/contracts'
 import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Bell, Link2 } from 'lucide-react'
+
+const shootsList = shootListItem.array()
+
+/** No dedicated hook exists outside the shoots route — a plain picker query is enough here. */
+function useShootsPicker(enabled: boolean) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['shoots'],
+    queryFn: () => callApi('/shoots', { responseSchema: shootsList }),
+    enabled: !!session && enabled,
+    staleTime: 30_000,
+  })
+}
 
 const ENTITY_LINK: Partial<
   Record<ReminderEntityType, (id: string) => { to: string; params: Record<string, string>; search?: Record<string, string> }>
@@ -42,6 +61,9 @@ function EntityPicker({
   const projects = useProjects()
   const clients = useClients()
   const invoices = useInvoices()
+  const enquiries = useEnquiries({})
+  const tasks = useTasks()
+  const shoots = useShootsPicker(entityType === 'shoot')
 
   if (!entityType || entityType === 'custom') return null
 
@@ -52,7 +74,13 @@ function EntityPicker({
         ? (projects.data ?? []).map((p) => ({ id: p.id, label: p.name }))
         : entityType === 'client'
           ? (clients.data ?? []).map((c) => ({ id: c.id, label: c.name }))
-          : (invoices.data ?? []).map((i) => ({ id: i.id, label: i.invoice_number }))
+          : entityType === 'invoice'
+            ? (invoices.data ?? []).map((i) => ({ id: i.id, label: i.invoice_number }))
+            : entityType === 'enquiry'
+              ? (enquiries.data?.pages.flatMap((p) => p.items) ?? []).map((e) => ({ id: e.id, label: e.name }))
+              : entityType === 'task'
+                ? (tasks.data ?? []).map((t) => ({ id: t.id, label: t.title }))
+                : (shoots.data ?? []).map((s) => ({ id: s.id, label: s.name }))
 
   return (
     <div>
@@ -79,19 +107,23 @@ function RemindersContent() {
     entity_type: null,
     entity_id: null,
     due_at: null,
+    assigned_to: null,
   })
 
+  const { session } = useAuth()
   const { data } = useReminders()
   const saveReminder = useSaveReminder()
   const updateStatus = useUpdateReminderStatus()
   const deleteReminder = useDeleteReminder()
+  const members = useMembers()
+  const memberName = (id: string | null) => members.data?.find((m) => m.user_id === id)?.name ?? null
 
   const items = data?.items ?? []
   const summary = data?.summary
 
   function openCreate() {
     setEditingId(null)
-    setForm({ title: '', description: null, priority: 'medium', entity_type: null, entity_id: null, due_at: null })
+    setForm({ title: '', description: null, priority: 'medium', entity_type: null, entity_id: null, due_at: null, assigned_to: null })
     setDialogOpen(true)
   }
 
@@ -104,6 +136,8 @@ function RemindersContent() {
       entity_type: reminder.entity_type as CreateReminderRequest['entity_type'],
       entity_id: reminder.entity_id,
       due_at: reminder.due_at,
+      // Prefill with the current owner so re-saving doesn't silently reassign it to whoever opened the dialog.
+      assigned_to: reminder.user_id,
     })
     setDialogOpen(true)
   }
@@ -164,6 +198,9 @@ function RemindersContent() {
                   {reminder.priority}
                 </Badge>
                 <span className="font-medium">{reminder.title}</span>
+                {reminder.user_id !== session?.user_id && (
+                  <Badge className="bg-purple-100 text-purple-800">for {memberName(reminder.user_id) ?? 'someone else'}</Badge>
+                )}
               </div>
               {reminder.description && (
                 <p className="mt-1 truncate text-sm text-muted-foreground">{reminder.description}</p>
@@ -257,6 +294,20 @@ function RemindersContent() {
               />
             </div>
             <div>
+              <label className="text-sm font-medium">Assign to</label>
+              <Select
+                value={form.assigned_to ?? ''}
+                onChange={(e) => setForm({ ...form, assigned_to: e.target.value || null })}
+              >
+                <option value="">Myself</option>
+                {(members.data ?? []).map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
               <label className="text-sm font-medium">Link to (optional)</label>
               <Select
                 value={form.entity_type ?? ''}
@@ -270,6 +321,9 @@ function RemindersContent() {
                 <option value="project">A project</option>
                 <option value="client">A client</option>
                 <option value="invoice">An invoice</option>
+                <option value="enquiry">An enquiry</option>
+                <option value="task">A task</option>
+                <option value="shoot">A shoot</option>
               </Select>
             </div>
             <EntityPicker

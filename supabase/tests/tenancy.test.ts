@@ -113,6 +113,8 @@ async function freshDb() {
   await db.exec(mig('0077_reminder_entity_name.sql'))
   await db.exec(mig('0078_invoice_template_link.sql'))
   await db.exec(mig('0079_attendance_fence_toggle.sql'))
+  await db.exec(mig('0080_lead_group_source.sql'))
+  await db.exec(mig('0081_reminder_assign_link.sql'))
   return db
 }
 
@@ -4490,6 +4492,29 @@ describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
     )
     expect(row.rows[0]!.event_type).toBe('Wedding')
     expect(row.rows[0]!.event_location).toBe('Taj Palace, Jaipur')
+  })
+
+  it('a lead can carry a free-text group tag, and its source covers every channel a studio hears from a client on', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const ids: string[] = []
+    for (const source of ['instagram', 'whatsapp', 'google_form', 'csv_import', 'other']) {
+      const inserted = await db.query<{ id: string }>(
+        `insert into crm_leads (company_id, phone, phone_norm, source) values ('${co}', '9${source.length}00000000', '9${source.length}00000000', '${source}') returning id;`,
+      )
+      ids.push(inserted.rows[0]!.id)
+    }
+    const rows = await db.query<{ source: string }>(`select source from crm_leads where id in (${ids.map((id) => `'${id}'`).join(',')});`)
+    expect(rows.rows.map((r) => r.source).sort()).toEqual(['csv_import', 'google_form', 'instagram', 'other', 'whatsapp'])
+
+    await expect(
+      db.exec(`insert into crm_leads (company_id, phone, phone_norm, source) values ('${co}', '9000000099', '9000000099', 'not_a_real_source');`),
+    ).rejects.toThrow()
+
+    const withGroup = await db.query<{ id: string }>(
+      `insert into crm_leads (company_id, phone, phone_norm, group_name) values ('${co}', '9000000098', '9000000098', 'Hot Lead, Already Booked') returning id;`,
+    )
+    const g = await db.query<{ group_name: string }>(`select group_name from crm_leads where id = '${withGroup.rows[0]!.id}';`)
+    expect(g.rows[0]!.group_name).toBe('Hot Lead, Already Booked')
   })
 
   it('generate_referral_slug is readable, unique, and stable to look up', async () => {

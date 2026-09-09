@@ -12,7 +12,18 @@ export const leadStatus = z.enum([
 ])
 export type LeadStatus = z.infer<typeof leadStatus>
 
-export const leadSource = z.enum(['facebook', 'webform', 'referral', 'manual', 'enquiry'])
+export const leadSource = z.enum([
+  'facebook',
+  'webform',
+  'referral',
+  'manual',
+  'enquiry',
+  'instagram',
+  'whatsapp',
+  'google_form',
+  'csv_import',
+  'other',
+])
 export type LeadSource = z.infer<typeof leadSource>
 
 export const crmLead = z.object({
@@ -59,6 +70,8 @@ export const crmLead = z.object({
   city: z.string().nullable().default(null),
   currency: z.string().default('INR'),
   score: z.number().int().default(0),
+  /** Free-text segment tag — "Hot Lead, Already Booked", "Referral VIP" — for quick filtering beyond the structured fields. */
+  group_name: z.string().nullable().default(null),
   created_at: isoDateTime,
 })
 export type CrmLead = z.infer<typeof crmLead>
@@ -108,6 +121,7 @@ export const updateLeadRequest = z
     currency: z.string().regex(/^[A-Z]{3}$/).optional(),
     contact_id: uuid.nullable().optional(),
     crm_company_id: uuid.nullable().optional(),
+    group_name: z.string().trim().max(120).nullable().optional(),
   })
   .refine(lostNeedsReason, {
     message: 'Tell us why it was lost (3+ chars).',
@@ -156,6 +170,7 @@ export const createLeadRequest = z.object({
   pipeline_id: uuid.optional(),
   stage_id: uuid.optional(),
   crm_company_id: uuid.optional(),
+  group_name: z.string().trim().max(120).optional(),
 })
 export type CreateLeadRequest = z.infer<typeof createLeadRequest>
 
