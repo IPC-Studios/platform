@@ -50,8 +50,8 @@ export function AcceptInvitePage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    if (password.length < 6) {
-      setError('Use at least 6 characters.')
+    if (password.length < 8) {
+      setError('Use at least 8 characters.')
       return
     }
     if (password !== confirmPassword) {
@@ -128,7 +128,7 @@ export function AcceptInvitePage() {
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="At least 6 characters"
+                      placeholder="At least 8 characters"
                       autoComplete="new-password"
                       autoFocus
                     />

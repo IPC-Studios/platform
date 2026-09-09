@@ -17,7 +17,7 @@ import {
 } from '@/features/referrals/api'
 import { type CreateReferralCampaignRequest } from '@ipc/contracts'
 import { toast } from 'sonner'
-import { Plus, Trash2, ExternalLink, Copy, Trophy, Users, TrendingUp, Target } from 'lucide-react'
+import { Plus, Trash2, Pencil, Copy, Trophy, Users, TrendingUp, Target } from 'lucide-react'
 
 function ReferralsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -133,8 +133,8 @@ function ReferralsContent() {
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(campaign)}>
-                  <ExternalLink className="h-4 w-4" />
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit campaign" onClick={() => openEdit(campaign)}>
+                  <Pencil className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -233,6 +233,14 @@ function ReferralsContent() {
                 min="0"
                 value={form.reward_value || ''}
                 onChange={(e) => setForm({ ...form, reward_value: Number(e.target.value) })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Reward description (optional)</label>
+              <Input
+                value={form.reward_description ?? ''}
+                onChange={(e) => setForm({ ...form, reward_description: e.target.value || null })}
+                placeholder="Shown on the public referral page — defaults to a sensible message if left blank"
               />
             </div>
           </div>

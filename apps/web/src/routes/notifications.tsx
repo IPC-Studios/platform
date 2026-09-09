@@ -18,6 +18,14 @@ function useMarkRead() {
   })
 }
 
+function useMarkAllRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => callApi('/notifications/read-all', { method: 'POST', responseSchema: z.any() }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+  })
+}
+
 /** Every member has alerts of their own; there is no module to gate this on. */
 export function NotificationsPage() {
   return <Notifications />
@@ -26,11 +34,22 @@ export function NotificationsPage() {
 function Notifications() {
   const { data, isLoading, isError, refetch } = useNotifications()
   const markRead = useMarkRead()
+  const markAllRead = useMarkAllRead()
   const unread = unreadCount(data)
 
   return (
     <>
-      <PageHeader title="Alerts" description={unread > 0 ? `${unread} unread` : 'All caught up.'} />
+      <PageHeader
+        title="Alerts"
+        description={unread > 0 ? `${unread} unread` : 'All caught up.'}
+        actions={
+          unread > 0 && (
+            <Button size="sm" variant="outline" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
+              <Check /> Mark all read
+            </Button>
+          )
+        }
+      />
       {isLoading ? (
         <SkeletonCards count={4} />
       ) : isError ? (
