@@ -7,6 +7,7 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
 import { useClients } from '@/features/clients/api'
 import { useProjects } from '@/features/projects/api'
+import { useInvoiceTemplates } from './api'
 
 export const GST_SLABS: GstSlab[] = [0, 5, 12, 18, 28]
 
@@ -21,6 +22,7 @@ export interface InvoiceFormValues {
   due_date: string
   discount: number
   notes: string
+  template_id: string
   lines: InvoiceLineInput[]
 }
 
@@ -34,6 +36,7 @@ export function emptyInvoiceForm(): InvoiceFormValues {
     due_date: '',
     discount: 0,
     notes: '',
+    template_id: '',
     lines: [{ description: '', quantity: 1, rate: 0, gst_rate: 18 }],
   }
 }
@@ -69,6 +72,7 @@ export function useInvoiceForm(initial: InvoiceFormValues) {
       due_date: values.due_date || undefined,
       discount: values.discount,
       notes: values.notes.trim() || undefined,
+      template_id: values.template_id || null,
       lines: values.lines.filter((l) => l.description.trim()),
     }
   }
@@ -91,6 +95,8 @@ export function InvoiceFormFields({
   const { values, set, patchLine, totals } = form
   const { data: clients } = useClients()
   const { data: projects } = useProjects()
+  const { data: templateData } = useInvoiceTemplates()
+  const templates = templateData?.items
   const clientProjects = (projects ?? []).filter((p) => !values.client_id || p.client_id === values.client_id)
 
   return (
@@ -161,6 +167,23 @@ export function InvoiceFormFields({
           Same state as studio (CGST + SGST)
         </label>
       </div>
+
+      {templates && templates.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Print layout</Label>
+          <Select value={values.template_id} onChange={(e) => set('template_id', e.target.value)}>
+            <option value="">
+              {templates.some((t) => t.is_default) ? "Company default" : 'Plain layout'}
+            </option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.is_default ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
 
       <div className="rounded-md border border-border">
         {values.lines.map((l, i) => (

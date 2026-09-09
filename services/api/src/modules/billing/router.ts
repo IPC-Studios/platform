@@ -87,7 +87,8 @@ export const billingRouter = new Hono<AppEnv>()
             p_tax => ${totals.tax},
             p_total => ${totals.total},
             p_items => ${sql.json(items)},
-            p_notes => ${req.notes ?? null}
+            p_notes => ${req.notes ?? null},
+            p_template_id => ${req.template_id ?? null}
           )`
         return rows[0] ?? null
       }),
@@ -108,9 +109,13 @@ export const billingRouter = new Hono<AppEnv>()
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
           select i.id, i.invoice_number, i.invoice_date, i.due_date, i.status, i.place_of_supply,
-                 i.intra_state, i.client_id, i.project_id,
+                 i.intra_state, i.client_id, i.project_id, i.template_id,
                  i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.notes, i.created_at,
                  cl.name as client_name, cl.gstin as client_gstin, cl.address as client_address,
+                 coalesce(
+                   (select it.layout_json from invoice_templates it where it.id = i.template_id),
+                   (select it.layout_json from invoice_templates it where it.company_id = i.company_id and it.is_default = true limit 1)
+                 ) as template_layout,
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
                      'id', it.id, 'description', it.description, 'quantity', it.quantity,
@@ -177,7 +182,8 @@ export const billingRouter = new Hono<AppEnv>()
             p_tax => ${totals.tax},
             p_total => ${totals.total},
             p_items => ${sql.json(items)},
-            p_notes => ${req.notes ?? null}
+            p_notes => ${req.notes ?? null},
+            p_template_id => ${req.template_id ?? null}
           )`
           return true
         }),

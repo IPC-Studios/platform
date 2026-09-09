@@ -111,6 +111,7 @@ async function freshDb() {
   await db.exec(mig('0075_quote_edit.sql'))
   await db.exec(mig('0076_work_submission_edit.sql'))
   await db.exec(mig('0077_reminder_entity_name.sql'))
+  await db.exec(mig('0078_invoice_template_link.sql'))
   return db
 }
 
@@ -764,6 +765,95 @@ describe('billing & invoicing (Phase 9)', () => {
     expect(attempted.rows.length).toBe(0)
     const stillThere = await db.query(`select id from invoices where id = '${id}';`)
     expect(stillThere.rows.length).toBe(1)
+  })
+
+  it('an invoice can be created and edited with a template, and the old no-template call shape still works', async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const tpl = await db.query<{ id: string }>(
+      `insert into invoice_templates (company_id, name, layout_json)
+       values ('${companyId}', 'Letterhead', '{"show_header": false}'::jsonb) returning id;`,
+    )
+    const templateId = tpl.rows[0]!.id
+
+    // The pre-0078 call shape (no p_template_id) must still resolve unambiguously.
+    const untemplated = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 180, p_total => 1180,
+        p_items => '[]'::jsonb, p_notes => 'no template'
+      );
+    `)
+    expect(
+      (await db.query<{ template_id: string | null }>(`select template_id from invoices where id = '${untemplated.rows[0]!.id}';`)).rows[0]!
+        .template_id,
+    ).toBeNull()
+
+    const created = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 180, p_total => 1180,
+        p_items => '[]'::jsonb, p_notes => 'with template', p_template_id => '${templateId}'
+      );
+    `)
+    const id = created.rows[0]!.id
+    expect((await db.query<{ template_id: string }>(`select template_id from invoices where id = '${id}';`)).rows[0]!.template_id).toBe(
+      templateId,
+    )
+
+    await db.query(`
+      select update_invoice(
+        p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+        p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+        p_subtotal => 2000, p_discount => 0, p_taxable => 2000, p_tax => 360, p_total => 2360,
+        p_items => '[]'::jsonb, p_notes => 'template cleared', p_template_id => null
+      );
+    `)
+    expect((await db.query<{ template_id: string | null }>(`select template_id from invoices where id = '${id}';`)).rows[0]!.template_id).toBeNull()
+  })
+
+  it("an invoice's template resolves to its own choice, else falls back to the company default", async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`update invoice_templates set is_default = false where company_id = '${companyId}';`)
+    await db.exec(
+      `insert into invoice_templates (company_id, name, layout_json, is_default)
+       values ('${companyId}', 'Default Layout', '{"show_gst": true}'::jsonb, true);`,
+    )
+    const own = await db.query<{ id: string }>(
+      `insert into invoice_templates (company_id, name, layout_json)
+       values ('${companyId}', 'No GST Layout', '{"show_gst": false}'::jsonb) returning id;`,
+    )
+
+    const withOwn = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null, p_subtotal => 500, p_discount => 0,
+        p_taxable => 500, p_tax => 0, p_total => 500, p_items => '[]'::jsonb,
+        p_notes => null, p_template_id => '${own.rows[0]!.id}'
+      );
+    `)
+    const withoutOwn = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null, p_subtotal => 500, p_discount => 0,
+        p_taxable => 500, p_tax => 0, p_total => 500, p_items => '[]'::jsonb, p_notes => null
+      );
+    `)
+
+    const resolve = async (invoiceId: string) =>
+      (
+        await db.query<{ show_gst_text: string }>(`
+          select coalesce(
+            (select it.layout_json from invoice_templates it where it.id = i.template_id),
+            (select it.layout_json from invoice_templates it where it.company_id = i.company_id and it.is_default = true limit 1)
+          ) ->> 'show_gst' as show_gst_text
+          from invoices i where i.id = '${invoiceId}';
+        `)
+      ).rows[0]!.show_gst_text
+
+    expect(await resolve(withOwn.rows[0]!.id)).toBe('false')
+    expect(await resolve(withoutOwn.rows[0]!.id)).toBe('true')
   })
 })
 

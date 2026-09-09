@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { uuid, isoDate, isoDateTime, money, gstRate } from './shared/primitives'
+import { invoiceTemplateLayout } from './invoice-templates'
 
 export const invoiceStatus = z.enum(['draft', 'sent', 'partial', 'paid', 'cancelled'])
 export type InvoiceStatus = z.infer<typeof invoiceStatus>
@@ -33,6 +34,8 @@ export const createInvoiceRequest = z.object({
   due_date: isoDate.optional(),
   discount: money.default(0),
   notes: z.string().max(1000).optional(),
+  /** Which saved layout this invoice prints with — omitted or null means the company's default (if any). */
+  template_id: uuid.nullable().optional(),
   lines: z.array(invoiceLineInput).min(1),
 })
 export type CreateInvoiceRequest = z.infer<typeof createInvoiceRequest>
@@ -66,6 +69,9 @@ export const invoiceDetail = z.object({
   client_gstin: z.string().nullable(),
   client_address: z.string().nullable(),
   notes: z.string().nullable(),
+  template_id: uuid.nullable(),
+  /** Resolved server-side: the invoice's own template, else the company's default, else null. */
+  template_layout: invoiceTemplateLayout.nullable(),
   subtotal: money,
   discount: money,
   taxable: money,

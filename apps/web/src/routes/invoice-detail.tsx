@@ -39,6 +39,18 @@ function InvoiceDoc() {
 
   const intraState = data.intra_state
   const editable = data.amount_paid === 0 && data.status !== 'cancelled'
+  // No template resolved (none picked, no company default) prints exactly as
+  // it always did — every layout field defaults to "show it".
+  const layout = data.template_layout ?? {
+    show_header: true,
+    show_footer: true,
+    show_gst: true,
+    show_bank_details: false,
+    header_text: null,
+    footer_text: null,
+    bank_details: null,
+    terms_and_conditions: null,
+  }
 
   return (
     <>
@@ -67,17 +79,22 @@ function InvoiceDoc() {
       <div className="print-invoice mx-auto max-w-3xl rounded-lg border border-border bg-card p-8 print:border-0 print:p-0">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-border pb-4">
-          <div>
-            <h1 className="text-xl font-bold">{company?.name ?? 'Your Studio'}</h1>
-            {company?.city && (
-              <p className="text-sm text-muted-foreground">
-                {[company.city, company.state, company.country].filter(Boolean).join(', ')}
-              </p>
-            )}
-            {company?.invoice_gst_number && (
-              <p className="text-sm text-muted-foreground">GSTIN: {company.invoice_gst_number}</p>
-            )}
-          </div>
+          {layout.show_header ? (
+            <div>
+              <h1 className="text-xl font-bold">{company?.name ?? 'Your Studio'}</h1>
+              {company?.city && (
+                <p className="text-sm text-muted-foreground">
+                  {[company.city, company.state, company.country].filter(Boolean).join(', ')}
+                </p>
+              )}
+              {company?.invoice_gst_number && (
+                <p className="text-sm text-muted-foreground">GSTIN: {company.invoice_gst_number}</p>
+              )}
+              {layout.header_text && <p className="mt-1 text-sm text-muted-foreground">{layout.header_text}</p>}
+            </div>
+          ) : (
+            <div />
+          )}
           <div className="text-right">
             <p className="text-lg font-semibold">TAX INVOICE</p>
             <p className="text-sm">{data.invoice_number}</p>
@@ -102,15 +119,16 @@ function InvoiceDoc() {
               <th className="py-2 font-medium">Description</th>
               <th className="py-2 text-right font-medium">Qty</th>
               <th className="py-2 text-right font-medium">Rate</th>
-              <th className="py-2 text-right font-medium">GST%</th>
-              {intraState ? (
-                <>
-                  <th className="py-2 text-right font-medium">CGST</th>
-                  <th className="py-2 text-right font-medium">SGST</th>
-                </>
-              ) : (
-                <th className="py-2 text-right font-medium">IGST</th>
-              )}
+              {layout.show_gst && <th className="py-2 text-right font-medium">GST%</th>}
+              {layout.show_gst &&
+                (intraState ? (
+                  <>
+                    <th className="py-2 text-right font-medium">CGST</th>
+                    <th className="py-2 text-right font-medium">SGST</th>
+                  </>
+                ) : (
+                  <th className="py-2 text-right font-medium">IGST</th>
+                ))}
               <th className="py-2 text-right font-medium">Amount</th>
             </tr>
           </thead>
@@ -120,15 +138,16 @@ function InvoiceDoc() {
                 <td className="py-2">{it.description}</td>
                 <td className="py-2 text-right">{it.quantity}</td>
                 <td className="py-2 text-right">{formatINR(it.rate)}</td>
-                <td className="py-2 text-right">{it.gst_rate}%</td>
-                {intraState ? (
-                  <>
-                    <td className="py-2 text-right">{formatINR(it.cgst)}</td>
-                    <td className="py-2 text-right">{formatINR(it.sgst)}</td>
-                  </>
-                ) : (
-                  <td className="py-2 text-right">{formatINR(it.igst)}</td>
-                )}
+                {layout.show_gst && <td className="py-2 text-right">{it.gst_rate}%</td>}
+                {layout.show_gst &&
+                  (intraState ? (
+                    <>
+                      <td className="py-2 text-right">{formatINR(it.cgst)}</td>
+                      <td className="py-2 text-right">{formatINR(it.sgst)}</td>
+                    </>
+                  ) : (
+                    <td className="py-2 text-right">{formatINR(it.igst)}</td>
+                  ))}
                 <td className="py-2 text-right">{formatINR(it.amount)}</td>
               </tr>
             ))}
@@ -140,8 +159,8 @@ function InvoiceDoc() {
           <div className="w-64 space-y-1 text-sm">
             <Row label="Subtotal" value={formatINR(data.subtotal)} />
             {data.discount > 0 && <Row label="Discount" value={`− ${formatINR(data.discount)}`} />}
-            <Row label="Taxable" value={formatINR(data.taxable)} />
-            <Row label="Tax" value={formatINR(data.tax)} />
+            {layout.show_gst && <Row label="Taxable" value={formatINR(data.taxable)} />}
+            {layout.show_gst && <Row label="Tax" value={formatINR(data.tax)} />}
             <div className="my-1 border-t border-border" />
             <Row label="Total" value={formatINR(data.total)} strong />
             <Row label="Paid" value={formatINR(data.amount_paid)} />
@@ -156,6 +175,24 @@ function InvoiceDoc() {
 
         {data.notes && (
           <p className="mt-3 whitespace-pre-line text-sm text-muted-foreground">{data.notes}</p>
+        )}
+
+        {layout.show_footer && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 text-sm">
+            {layout.show_bank_details && layout.bank_details && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Bank details</p>
+                <p className="whitespace-pre-line">{layout.bank_details}</p>
+              </div>
+            )}
+            {layout.terms_and_conditions && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Terms &amp; conditions</p>
+                <p className="whitespace-pre-line text-muted-foreground">{layout.terms_and_conditions}</p>
+              </div>
+            )}
+            {layout.footer_text && <p className="text-center text-xs text-muted-foreground">{layout.footer_text}</p>}
+          </div>
         )}
       </div>
 
@@ -187,6 +224,7 @@ function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
     due_date: invoice.due_date ?? '',
     discount: invoice.discount,
     notes: invoice.notes ?? '',
+    template_id: invoice.template_id ?? '',
     lines: invoice.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, gst_rate: i.gst_rate as GstSlab })),
   })
   const [error, setError] = useState<string | null>(null)

@@ -4,6 +4,7 @@ import {
   gstState,
   invoiceDetail,
   invoiceListItem,
+  invoiceTemplateList,
   type CreateInvoiceRequest,
   type RecordPaymentRequest,
   type UpdateInvoiceRequest,
@@ -35,6 +36,17 @@ export function useStates() {
     queryFn: () => callApi('/billing/states', { responseSchema: states }),
     enabled: !!session,
     staleTime: 300_000,
+  })
+}
+
+export function useInvoiceTemplates() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['billing', 'templates'],
+    queryFn: () => callApi('/billing/templates', { responseSchema: invoiceTemplateList }),
+    enabled: !!session && access.hasModule('billing'),
+    staleTime: 60_000,
   })
 }
 
