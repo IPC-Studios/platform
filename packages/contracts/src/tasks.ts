@@ -47,6 +47,7 @@ export const taskListItem = z.object({
   project_id: uuid.nullable(),
   project_name: z.string().nullable(),
   assignee_names: z.array(z.string()).default([]),
+  assignee_ids: z.array(uuid).default([]),
   sort_order: z.number().int().default(0),
 })
 export type TaskListItem = z.infer<typeof taskListItem>
@@ -66,6 +67,20 @@ export type CreateTaskRequest = z.infer<typeof createTaskRequest>
 
 export const updateTaskStatusRequest = z.object({ status: taskStatus })
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusRequest>
+
+/** Everything about a task the create form set, editable afterwards. Assignees are optional here — omit to leave them as-is, send a (possibly empty) array to replace the set. */
+export const updateTaskRequest = z.object({
+  project_id: uuid.nullable().optional(),
+  deliverable_id: uuid.nullable().optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  status: taskStatus.optional(),
+  priority: taskPriority.optional(),
+  custom_priority_code: z.string().nullable().optional(),
+  due_date: isoDate.nullable().optional(),
+  assignees: z.array(uuid).optional(),
+})
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequest>
 
 export const generateTasksRequest = z.object({
   project_id: uuid,

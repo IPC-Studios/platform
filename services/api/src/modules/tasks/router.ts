@@ -9,6 +9,7 @@ import {
   setBoardOrderRequest,
   taskBundle,
   taskListItem,
+  updateTaskRequest,
   updateTaskStatusRequest,
   z,
 } from '@ipc/contracts'
@@ -37,6 +38,7 @@ interface RawTask {
   custom_priority_label: string | null
   custom_priority_tone: string | null
   assignee_names: string[]
+  assignee_ids: string[]
 }
 
 function toItems(rows: RawTask[], order: Map<string, number>) {
@@ -53,7 +55,11 @@ const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
          coalesce(
            array_agg(u.name order by u.name) filter (where u.user_id is not null),
            '{}'::text[]
-         ) as assignee_names
+         ) as assignee_names,
+         coalesce(
+           array_agg(u.user_id order by u.name) filter (where u.user_id is not null),
+           '{}'::uuid[]
+         ) as assignee_ids
   from tasks t
   left join projects p on p.id = t.project_id
   left join task_assignees a on a.task_id = t.id
@@ -248,6 +254,45 @@ export const tasksRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not update the task.')
     if (!rows.length) fail(404, 'That task was not found.')
     await audit(c, { action: 'task.status', entityType: 'task', entityId: id, after: parsed.data })
+    return c.body(null, 204)
+  })
+
+  .patch('/:id', requireAction('tasks', 'edit'), async (c) => {
+    const parsed = updateTaskRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the task details.')
+    const { assignees, ...patch } = parsed.data
+    if (Object.keys(patch).length === 0 && assignees === undefined) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const found = await attempt(c, 'tasks.update', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const rows =
+          Object.keys(patch).length > 0
+            ? await sql<{ id: string }[]>`update tasks set ${sql(patch)} where id = ${id} returning id`
+            : await sql<{ id: string }[]>`select id from tasks where id = ${id}`
+        if (!rows.length) return false
+        if (assignees !== undefined) {
+          await sql`delete from task_assignees where task_id = ${id}`
+          for (const userId of assignees) {
+            await sql`insert into task_assignees (task_id, user_id, company_id) values (${id}, ${userId}, ${auth.companyId})`
+          }
+        }
+        return true
+      }),
+    )
+    if (!found) fail(404, 'That task was not found.')
+    await audit(c, { action: 'task.update', entityType: 'task', entityId: id, after: parsed.data })
+    return c.body(null, 204)
+  })
+
+  .delete('/:id', requireAction('tasks', 'delete'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'tasks.delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`delete from tasks where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this task.')
+    if (!rows.length) fail(404, 'That task was not found.')
+    await audit(c, { action: 'task.delete', entityType: 'task', entityId: id })
     return c.body(null, 204)
   })
 

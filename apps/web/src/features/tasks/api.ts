@@ -9,6 +9,7 @@ import {
   generateTasksRequest,
   taskBundle,
   taskListItem,
+  updateTaskRequest,
   z,
   type ApplyBundleRequest,
   type CreateBundleRequest,
@@ -17,6 +18,7 @@ import {
   type GenerateTasksRequest,
   type SetBoardOrderRequest,
   type TaskStatus,
+  type UpdateTaskRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -122,6 +124,22 @@ export function useSetTaskStatus() {
       }),
     'Task updated',
   )
+}
+
+export function useUpdateTask() {
+  return useTaskMutation(
+    ({ id, patch }: { id: string; patch: UpdateTaskRequest }) =>
+      callApi(`/tasks/${id}`, {
+        method: 'PATCH',
+        body: updateTaskRequest.parse(patch),
+        responseSchema: anySchema,
+      }),
+    'Task updated',
+  )
+}
+
+export function useDeleteTask() {
+  return useTaskMutation((id: string) => callApi(`/tasks/${id}`, { method: 'DELETE', responseSchema: anySchema }), 'Task deleted')
 }
 
 export function useCreateBundle() {

@@ -4877,3 +4877,63 @@ describe('Lovable parity round 5: editing a team member and a company expense', 
     expect(stillThere.rows.length).toBe(1)
   })
 })
+
+/**
+ * Round 6: a task could only be created and status-flipped -- a wrong title,
+ * priority, due date, or assignee list had no fix path short of deleting and
+ * recreating (and there was no delete either). PATCH /tasks/:id now covers
+ * the same fields the create form sets, plus replacing the assignee set.
+ */
+describe('Lovable parity round 6: editing and deleting a task', () => {
+  let db: PGlite
+  let taskId: string
+  const EMP_A = '77777777-7777-7777-7777-777777777771'
+  const EMP_B = '77777777-7777-7777-7777-777777777772'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into auth.users (id, email) values ('${EMP_A}', 'a@s.test'), ('${EMP_B}', 'b@s.test');
+      insert into users (user_id, company_id, role, name, email) values
+        ('${EMP_A}', '${companyId}', 'employee', 'Editor A', 'a@s.test'),
+        ('${EMP_B}', '${companyId}', 'employee', 'Editor B', 'b@s.test');
+    `)
+    const created = await db.query<{ id: string }>(
+      `select create_task_with_assignees(p_project_id => null, p_deliverable_id => null, p_title => 'Cull photos',
+         p_assignees => array['${EMP_A}']::uuid[]) as id;`,
+    )
+    taskId = created.rows[0]!.id
+  })
+
+  it('a task\'s title, priority, and due date can all be corrected after creation', async () => {
+    await db.exec(
+      `update tasks set title = 'Cull and select', priority = 'urgent', due_date = '2026-04-01' where id = '${taskId}';`,
+    )
+    const row = await db.query<{ title: string; priority: string; due_date: Date }>(
+      `select title, priority, due_date from tasks where id = '${taskId}';`,
+    )
+    expect(row.rows[0]!.title).toBe('Cull and select')
+    expect(row.rows[0]!.priority).toBe('urgent')
+    expect(row.rows[0]!.due_date.toISOString().slice(0, 10)).toBe('2026-04-01')
+  })
+
+  it('reassigning a task replaces the assignee set rather than adding to it', async () => {
+    await db.exec(`delete from task_assignees where task_id = '${taskId}';`)
+    await db.exec(`insert into task_assignees (task_id, user_id, company_id)
+      values ('${taskId}', '${EMP_B}', (select get_current_company_id()));`)
+    const assignees = await db.query<{ user_id: string }>(`select user_id from task_assignees where task_id = '${taskId}';`)
+    expect(assignees.rows.map((r) => r.user_id)).toEqual([EMP_B])
+  })
+
+  it('a deleted task takes its assignee rows with it, cascade, not left dangling', async () => {
+    const before = await db.query<{ n: string }>(`select count(*)::text as n from task_assignees where task_id = '${taskId}';`)
+    expect(Number(before.rows[0]!.n)).toBeGreaterThan(0)
+    await db.exec(`delete from tasks where id = '${taskId}';`)
+    const after = await db.query<{ n: string }>(`select count(*)::text as n from task_assignees where task_id = '${taskId}';`)
+    expect(Number(after.rows[0]!.n)).toBe(0)
+  })
+})

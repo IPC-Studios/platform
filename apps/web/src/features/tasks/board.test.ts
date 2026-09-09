@@ -24,6 +24,7 @@ const task = (title: string, over: Partial<TaskListItem> = {}): TaskListItem => 
   project_id: null,
   project_name: 'Sharma Wedding',
   assignee_names: ['Rahul'],
+  assignee_ids: ['user-rahul'],
   sort_order: 0,
   ...over,
 })

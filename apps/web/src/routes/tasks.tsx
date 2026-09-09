@@ -8,11 +8,12 @@ import {
   FolderOpen,
   ListChecks,
   Package,
+  Pencil,
   Plus,
   Sparkles,
   Trash2,
 } from 'lucide-react'
-import type { TaskListItem, TaskPriority, TaskStatus } from '@ipc/contracts'
+import type { DirectoryMember, TaskListItem, TaskPriority, TaskStatus } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
@@ -30,15 +31,18 @@ import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { AvatarGroup } from '@/shared/ui/avatar'
 import { CountUp } from '@/shared/ui/count-up'
 import { useProjects } from '@/features/projects/api'
+import { useDirectory } from '@/features/team/api'
 import {
   useApplyBundle,
   useBundles,
   useCreateBundle,
   useCreateTask,
   useDeleteBundle,
+  useDeleteTask,
   useSetTaskStatus,
   useTaskPriorities,
   useTasks,
+  useUpdateTask,
 } from '@/features/tasks/api'
 import {
   EMPTY_FILTERS,
@@ -276,7 +280,19 @@ function FeatureCard({
 
 function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: string }) {
   const setStatus = useSetTaskStatus()
+  const deleteTask = useDeleteTask()
+  const confirm = useConfirm()
   const isMobile = useIsMobile()
+
+  async function onDelete(t: TaskListItem) {
+    const yes = await confirm({
+      title: 'Delete this task?',
+      description: `${t.title}. This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    })
+    if (yes) deleteTask.mutate(t.id)
+  }
 
   const StatusSelect = ({ task }: { task: TaskListItem }) => (
     <Select
@@ -310,6 +326,19 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
               <StatusSelect task={t} />
               <DueBadge task={t} today={today} />
             </div>
+            <div className="mt-2 flex justify-end gap-1">
+              <EditTaskDialog
+                task={t}
+                trigger={
+                  <Button size="sm" variant="ghost">
+                    <Pencil />
+                  </Button>
+                }
+              />
+              <Button size="sm" variant="ghost" onClick={() => void onDelete(t)}>
+                <Trash2 />
+              </Button>
+            </div>
           </div>
         ))}
       </div>
@@ -327,6 +356,7 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
             <th className="px-4 py-2 font-medium">Priority</th>
             <th className="px-4 py-2 font-medium">Due</th>
             <th className="px-4 py-2 font-medium">Status</th>
+            <th className="px-4 py-2 text-right font-medium">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -360,6 +390,21 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
               <td className="px-4 py-2">
                 <StatusSelect task={t} />
               </td>
+              <td className="px-4 py-2 text-right">
+                <div className="flex justify-end gap-1">
+                  <EditTaskDialog
+                    task={t}
+                    trigger={
+                      <Button size="sm" variant="ghost" title="Edit">
+                        <Pencil />
+                      </Button>
+                    }
+                  />
+                  <Button size="sm" variant="ghost" title="Delete" onClick={() => void onDelete(t)}>
+                    <Trash2 />
+                  </Button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -379,6 +424,32 @@ function DueBadge({ task, today }: { task: TaskListItem; today: string }) {
   )
 }
 
+/** Checkbox list of active team members, for assigning a task to whoever's doing the work. */
+function AssigneePicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+  const { data: members } = useDirectory()
+  const active = (members ?? []).filter((m: DirectoryMember) => m.status === 'active')
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((i) => i !== id) : [...selected, id])
+  }
+
+  if (active.length === 0) return null
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>Assigned to</Label>
+      <div className="grid max-h-40 gap-1.5 overflow-y-auto sm:grid-cols-2">
+        {active.map((m) => (
+          <label key={m.user_id} className="flex items-center gap-2 rounded-md border border-border p-2 text-sm">
+            <input type="checkbox" checked={selected.includes(m.user_id)} onChange={() => toggle(m.user_id)} />
+            {m.name}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function NewTaskDialog() {
   const create = useCreateTask()
   const { data: projects } = useProjects()
@@ -390,6 +461,7 @@ function NewTaskDialog() {
   const [priority, setPriority] = useState<TaskPriority>('medium')
   const [customPriorityCode, setCustomPriorityCode] = useState('')
   const [dueDate, setDueDate] = useState('')
+  const [assignees, setAssignees] = useState<string[]>([])
 
   function reset() {
     setTitle('')
@@ -398,6 +470,7 @@ function NewTaskDialog() {
     setPriority('medium')
     setCustomPriorityCode('')
     setDueDate('')
+    setAssignees([])
   }
 
   function onSubmit(e: FormEvent) {
@@ -410,7 +483,7 @@ function NewTaskDialog() {
         status: 'to_do',
         priority,
         custom_priority_code: customPriorityCode || null,
-        assignees: [],
+        assignees,
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
       },
@@ -436,7 +509,7 @@ function NewTaskDialog() {
           <Plus /> New task
         </Button>
       </DialogTrigger>
-      <DialogContent title="New task" description="Assignees can be added from the production board.">
+      <DialogContent title="New task" description="Give it a title, assign it, and track it to done.">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>
@@ -459,6 +532,7 @@ function NewTaskDialog() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
+          <AssigneePicker selected={assignees} onChange={setAssignees} />
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <Label>Project</Label>
@@ -507,6 +581,116 @@ function NewTaskDialog() {
             </DialogClose>
             <Button type="submit" disabled={create.isPending || title.trim().length === 0}>
               {create.isPending ? 'Creating…' : 'Create task'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Everything the create form set, editable afterwards — same fields, plus who's assigned. */
+function EditTaskDialog({ task, trigger }: { task: TaskListItem; trigger: ReactNode }) {
+  const update = useUpdateTask()
+  const { data: projects } = useProjects()
+  const { data: customPriorities } = useTaskPriorities()
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState(task.title)
+  const [description, setDescription] = useState(task.description ?? '')
+  const [projectId, setProjectId] = useState(task.project_id ?? '')
+  const [priority, setPriority] = useState<TaskPriority>(task.priority)
+  const [customPriorityCode, setCustomPriorityCode] = useState(task.custom_priority_code ?? '')
+  const [dueDate, setDueDate] = useState(task.due_date ?? '')
+  const [assignees, setAssignees] = useState<string[]>(task.assignee_ids)
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    update.mutate(
+      {
+        id: task.id,
+        patch: {
+          title: title.trim(),
+          project_id: projectId || null,
+          priority,
+          custom_priority_code: customPriorityCode || null,
+          due_date: dueDate || null,
+          description: description.trim() || null,
+          assignees,
+        },
+      },
+      { onSuccess: () => setOpen(false) },
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent title="Edit task" description="Anything set when it was created can be corrected here.">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>
+              Title <span className="text-destructive">*</span>
+            </Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Description</Label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <AssigneePicker selected={assignees} onChange={setAssignees} />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Project</Label>
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">None</option>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Priority</Label>
+              <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
+                {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_LABEL[p]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Due date</Label>
+              <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            </div>
+          </div>
+          {customPriorities && customPriorities.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Custom label (optional)</Label>
+              <Select value={customPriorityCode} onChange={(e) => setCustomPriorityCode(e.target.value)}>
+                <option value="">None — use {PRIORITY_LABEL[priority]}</option>
+                {customPriorities.map((p) => (
+                  <option key={p.id} value={p.code}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={update.isPending || title.trim().length === 0}>
+              {update.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>
         </form>
