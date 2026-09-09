@@ -22,6 +22,66 @@ import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } fro
 import { useProjects } from '@/features/projects/api'
 import { PartyPicker } from '@/features/parties/PartyPicker'
 import { useConfirm } from '@/shared/ui/confirm'
+import { useActiveLookups, useCreateCustomLookup } from '@/features/settings/api'
+import { useAuth } from '@/shared/auth/AuthProvider'
+
+/** Pick a studio-defined expense category, or add one inline without leaving the form (owner only). */
+function ExpenseCategoryPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { session } = useAuth()
+  const { data: categories } = useActiveLookups('expense_category')
+  const createLookup = useCreateCustomLookup()
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+
+  async function onAdd() {
+    if (!name.trim()) return
+    await createLookup.mutateAsync({ category: 'expense_category', value: name.trim() })
+    onChange(name.trim())
+    setAdding(false)
+    setName('')
+  }
+
+  if (adding) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>New category</Label>
+        <div className="flex gap-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Travel" autoFocus />
+          <Button type="button" size="sm" onClick={() => void onAdd()} disabled={!name.trim() || createLookup.isPending}>
+            Add
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>Category</Label>
+      <Select
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === '__add__') setAdding(true)
+          else onChange(e.target.value)
+        }}
+      >
+        <option value="">Uncategorised</option>
+        {/* An older entry logged before a category was renamed or removed still shows its own text, unselected from the list. */}
+        {value && !(categories ?? []).some((c) => c.value === value) && <option value={value}>{value}</option>}
+        {(categories ?? []).map((c) => (
+          <option key={c.id} value={c.value}>
+            {c.value}
+          </option>
+        ))}
+        {/* Non-owners still see and use the list above -- adding a new one is a settings change. */}
+        {session?.is_owner && <option value="__add__">+ Add new category…</option>}
+      </Select>
+    </div>
+  )
+}
 
 export function CompanyExpensesPage() {
   return (
@@ -261,10 +321,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
       <DialogContent title={isEdit ? 'Edit expense' : 'Add expense'} description="Log a studio or project cost.">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Category</Label>
-              <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Travel" />
-            </div>
+            <ExpenseCategoryPicker value={category} onChange={setCategory} />
             <div className="flex flex-col gap-1.5">
               <Label>Amount ₹</Label>
               <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} required />

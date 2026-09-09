@@ -189,6 +189,26 @@ export const settingsRouter = new Hono<AppEnv>()
   })
 
   // ── Custom Lookups ─────────────────────────────────────────
+  // Managing the list is owner-only, but reading the active values is not --
+  // anyone logging an expense needs the category list, not just the owner.
+  .get('/lookups/active', async (c) => {
+    const category = c.req.query('category')
+    if (!category) fail(422, 'Category is required.')
+    const rows = await attempt(c, 'settings.lookups_active', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        return sql`
+          select id, category, value, sort_order
+            from custom_lookups
+           where company_id = ${c.get('auth').companyId}
+             and category = ${category}
+             and is_active = true
+           order by sort_order, value`
+      }),
+    )
+    if (!rows) fail(400, 'We could not load lookups.')
+    return c.json(rows)
+  })
+
   .get('/lookups', requireOwner(), async (c) => {
     const category = c.req.query('category')
     const rows = await attempt(c, 'settings.lookups', () =>
