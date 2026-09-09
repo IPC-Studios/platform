@@ -1,7 +1,7 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { HardDrive, Plus, Check } from 'lucide-react'
-import { shootListItem, type CreateDataRecordRequest } from '@ipc/contracts'
+import { HardDrive, Plus, Check, Pencil, Trash2 } from 'lucide-react'
+import { shootListItem, type CreateDataRecordRequest, type DataRecord } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
@@ -10,7 +10,8 @@ import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/d
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
-import { useDataRecords, useVerifyData, useCreateDataRecord } from '@/features/data/api'
+import { useConfirm } from '@/shared/ui/confirm'
+import { useDataRecords, useVerifyData, useCreateDataRecord, useUpdateDataRecord, useDeleteDataRecord } from '@/features/data/api'
 import { useProjects } from '@/features/projects/api'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -31,6 +32,18 @@ export function DataManagementPage() {
 function DataBoard() {
   const { data, isLoading, isError, refetch } = useDataRecords()
   const verify = useVerifyData()
+  const del = useDeleteDataRecord()
+  const confirm = useConfirm()
+
+  async function onDelete(r: DataRecord) {
+    const yes = await confirm({
+      title: 'Delete this record?',
+      description: `${r.data_label}. This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    })
+    if (yes) del.mutate(r.id)
+  }
 
   return (
     <>
@@ -79,20 +92,31 @@ function DataBoard() {
                     <StatusBadge tone={TONE[r.backup_status]}>{r.backup_status}</StatusBadge>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {(r.primary_status !== 'verified' || r.backup_status !== 'verified') && (
-                      <div className="flex justify-end gap-1">
-                        {r.primary_status !== 'verified' && (
-                          <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'primary' })}>
-                            <Check /> Primary
+                    <div className="flex justify-end gap-1">
+                      {r.primary_status !== 'verified' && (
+                        <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'primary' })}>
+                          <Check /> Primary
+                        </Button>
+                      )}
+                      {r.backup_status !== 'verified' && (
+                        <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'backup' })}>
+                          <Check /> Backup
+                        </Button>
+                      )}
+                      <AddRecordDialog
+                        record={r}
+                        trigger={
+                          <Button size="sm" variant="ghost" title="Edit">
+                            <Pencil />
                           </Button>
-                        )}
-                        {r.backup_status !== 'verified' && (
-                          <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'backup' })}>
-                            <Check /> Backup
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                        }
+                      />
+                      {r.primary_status === 'pending' && r.backup_status === 'pending' && (
+                        <Button size="sm" variant="ghost" title="Delete" onClick={() => void onDelete(r)}>
+                          <Trash2 />
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -104,17 +128,19 @@ function DataBoard() {
   )
 }
 
-function AddRecordDialog() {
+function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: React.ReactNode } = {}) {
+  const isEdit = !!record
   const create = useCreateDataRecord()
+  const update = useUpdateDataRecord()
   const { data: projects } = useProjects()
   const { session } = useAuth()
   const [open, setOpen] = useState(false)
-  const [label, setLabel] = useState('')
-  const [dataType, setDataType] = useState('')
-  const [cards, setCards] = useState(1)
-  const [size, setSize] = useState(0)
-  const [projectId, setProjectId] = useState('')
-  const [shootId, setShootId] = useState('')
+  const [label, setLabel] = useState(record?.data_label ?? '')
+  const [dataType, setDataType] = useState(record?.data_type ?? '')
+  const [cards, setCards] = useState(record?.card_count ?? 1)
+  const [size, setSize] = useState(record?.size_gb ?? 0)
+  const [projectId, setProjectId] = useState(record?.project_id ?? '')
+  const [shootId, setShootId] = useState(record?.shoot_id ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const shoots = useQuery({
@@ -122,10 +148,6 @@ function AddRecordDialog() {
     queryFn: () => callApi(`/shoots?project_id=${projectId}`, { responseSchema: shootsList }),
     enabled: !!session && !!projectId,
   })
-
-  useEffect(() => {
-    setShootId('')
-  }, [projectId])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -139,27 +161,34 @@ function AddRecordDialog() {
         card_count: cards,
         size_gb: size,
       }
-      await create.mutateAsync(body)
+      if (isEdit) await update.mutateAsync({ id: record.id, patch: body })
+      else await create.mutateAsync(body)
       setOpen(false)
-      setLabel('')
-      setDataType('')
-      setCards(1)
-      setSize(0)
-      setProjectId('')
-      setShootId('')
+      if (!isEdit) {
+        setLabel('')
+        setDataType('')
+        setCards(1)
+        setSize(0)
+        setProjectId('')
+        setShootId('')
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not log the card.')
+      setError(err instanceof Error ? err.message : `Could not ${isEdit ? 'update' : 'log'} the card.`)
     }
   }
+
+  const busy = create.isPending || update.isPending
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus /> Log card
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus /> Log card
+          </Button>
+        )}
       </DialogTrigger>
-      <DialogContent title="Log a card" description="Record footage as it comes off a shoot.">
+      <DialogContent title={isEdit ? 'Edit card' : 'Log a card'} description="Record footage as it comes off a shoot.">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Label</Label>
@@ -168,7 +197,13 @@ function AddRecordDialog() {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Project</Label>
-              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <Select
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value)
+                  setShootId('')
+                }}
+              >
                 <option value="">Not linked</option>
                 {(projects ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
@@ -221,8 +256,8 @@ function AddRecordDialog() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? 'Saving…' : 'Log card'}
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Log card'}
             </Button>
           </div>
         </form>

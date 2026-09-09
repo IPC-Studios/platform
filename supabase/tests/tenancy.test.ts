@@ -4822,4 +4822,58 @@ describe('Lovable parity round 5: editing a team member and a company expense', 
     const row = await db.query(`select id from expenses where id = '${id}';`)
     expect(row.rows.length).toBe(0)
   })
+
+  it('a misspelled vendor name can be corrected in place, so every expense already pointing at it picks up the fix', async () => {
+    const party = await db.query<{ id: string }>(
+      `insert into parties (company_id, name, kind) values ('${companyId}', 'Prop Hosue', 'vendor') returning id;`,
+    )
+    const id = party.rows[0]!.id
+    await db.exec(`insert into expenses (company_id, party_id, category, amount) values ('${companyId}', '${id}', 'Props', 500);`)
+    await db.exec(`update parties set name = 'Prop House', kind = 'freelancer' where id = '${id}';`)
+    const row = await db.query<{ party_name: string }>(
+      `select p.name as party_name from expenses e join parties p on p.id = e.party_id where e.category = 'Props';`,
+    )
+    expect(row.rows[0]).toEqual({ party_name: 'Prop House' })
+  })
+
+  it('a data record\'s label, size, and project link can all be corrected after logging', async () => {
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Data client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Data client';`)
+    const proj = await db.query<{ id: string }>(
+      `insert into projects (company_id, client_id, name, package_cost, status)
+       values ('${companyId}', '${client.rows[0]!.id}', 'Data Wedding', 50000, 'active') returning id;`,
+    )
+    const projectId = proj.rows[0]!.id
+    const record = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, data_type, card_count, size_gb, copied_by_uid)
+       values ('${companyId}', 'CF Card X', 'Photos (RAW)', 1, 32, '${OWNER}') returning id;`,
+    )
+    const id = record.rows[0]!.id
+    await db.exec(
+      `update shoot_data_records set data_label = 'CF Card X (relabeled)', size_gb = 64, project_id = '${projectId}' where id = '${id}';`,
+    )
+    const row = await db.query<{ data_label: string; size_gb: string; project_id: string }>(
+      `select data_label, size_gb, project_id from shoot_data_records where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ data_label: 'CF Card X (relabeled)', size_gb: '64.00', project_id: projectId })
+  })
+
+  it('an unverified data record can be deleted outright, but one with a confirmed copy cannot', async () => {
+    const pending = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, card_count, size_gb, copied_by_uid)
+       values ('${companyId}', 'CF Card Pending', 1, 10, '${OWNER}') returning id;`,
+    )
+    const verified = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, card_count, size_gb, copied_by_uid, primary_status)
+       values ('${companyId}', 'CF Card Verified', 1, 10, '${OWNER}', 'verified') returning id;`,
+    )
+    const guardedDelete = `delete from shoot_data_records
+      where id = $1 and primary_status = 'pending' and backup_status = 'pending' returning id;`
+    const okDelete = await db.query(guardedDelete.replace('$1', `'${pending.rows[0]!.id}'`))
+    expect(okDelete.rows.length).toBe(1)
+    const blockedDelete = await db.query(guardedDelete.replace('$1', `'${verified.rows[0]!.id}'`))
+    expect(blockedDelete.rows.length).toBe(0)
+    const stillThere = await db.query(`select id from shoot_data_records where id = '${verified.rows[0]!.id}';`)
+    expect(stillThere.rows.length).toBe(1)
+  })
 })

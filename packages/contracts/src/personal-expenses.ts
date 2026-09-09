@@ -28,6 +28,12 @@ export const createPartyRequest = z.object({
 })
 export type CreatePartyRequest = z.infer<typeof createPartyRequest>
 
+export const updatePartyRequest = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  kind: z.enum(['vendor', 'freelancer', 'other']).optional(),
+})
+export type UpdatePartyRequest = z.infer<typeof updatePartyRequest>
+
 export const personalExpense = z.object({
   id: uuid,
   company_id: uuid,

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { party, type CreatePartyRequest } from '@ipc/contracts'
+import { party, type CreatePartyRequest, type UpdatePartyRequest } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 
@@ -21,6 +21,18 @@ export function useCreateParty() {
     mutationFn: (input: CreatePartyRequest) => callApi('/parties', { method: 'POST', body: input, responseSchema: party }),
     onSuccess: () => {
       toast.success('Party added')
+      void qc.invalidateQueries({ queryKey: ['parties'] })
+    },
+  })
+}
+
+export function useUpdateParty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdatePartyRequest }) =>
+      callApi(`/parties/${id}`, { method: 'PATCH', body: patch, responseSchema: party }),
+    onSuccess: () => {
+      toast.success('Party updated')
       void qc.invalidateQueries({ queryKey: ['parties'] })
     },
   })

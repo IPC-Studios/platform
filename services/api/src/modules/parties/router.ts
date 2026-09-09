@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createPartyRequest, party } from '@ipc/contracts'
+import { createPartyRequest, updatePartyRequest, party } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
@@ -42,6 +42,25 @@ export const partiesRouter = new Hono<AppEnv>()
     if (!row) fail(400, 'We could not add this party.')
     await audit(c, { action: 'party.create', entityType: 'party', entityId: row.id, after: parsed.data })
     return c.json(party.parse(row), 201)
+  })
+
+  .patch('/:id', async (c) => {
+    const parsed = updatePartyRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the party details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const row = await attempt(c, 'parties.update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          update parties set ${sql(parsed.data)} where id = ${id}
+          returning id, name, kind`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That party was not found.')
+    const updated = party.parse(row)
+    await audit(c, { action: 'party.update', entityType: 'party', entityId: id, after: parsed.data })
+    return c.json(updated)
   })
 
   // Both expense tables reference a party with ON DELETE SET NULL: a past
