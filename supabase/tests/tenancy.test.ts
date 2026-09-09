@@ -115,6 +115,7 @@ async function freshDb() {
   await db.exec(mig('0079_attendance_fence_toggle.sql'))
   await db.exec(mig('0080_lead_group_source.sql'))
   await db.exec(mig('0081_reminder_assign_link.sql'))
+  await db.exec(mig('0082_referral_event_fields.sql'))
   return db
 }
 
@@ -4542,6 +4543,46 @@ describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
     )
     const lookup = await db.query<{ v: unknown }>(`select get_public_referral_campaign('${made.rows[0]!.slug}') as v;`)
     expect(lookup.rows[0]!.v).toBeNull()
+  })
+
+  it('a referral submission can carry the event type, date and function count the original form asked for', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const campaign = await db.query<{ id: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Friend Referral', generate_referral_slug('Friend Referral')) returning id;`,
+    )
+    const campaignId = campaign.rows[0]!.id
+
+    const submitted = await db.query<{ submit_referral: string }>(`
+      select submit_referral(
+        p_campaign_id => '${campaignId}'::uuid,
+        p_client_name => 'Riya Shah',
+        p_client_phone => '9000001234',
+        p_event_type => 'Wedding',
+        p_event_date => '2027-02-14',
+        p_functions_count => 4
+      ) as submit_referral;`)
+    const row = await db.query<{ event_type: string; event_date: Date; functions_count: number }>(
+      `select event_type, event_date, functions_count from referral_submissions where id = '${submitted.rows[0]!.submit_referral}';`,
+    )
+    expect({ ...row.rows[0], event_date: row.rows[0]!.event_date.toISOString().slice(0, 10) }).toEqual({
+      event_type: 'Wedding',
+      event_date: '2027-02-14',
+      functions_count: 4,
+    })
+
+    // Every field here is optional -- a friend who only leaves a name and phone still goes through.
+    const bare = await db.query<{ submit_referral: string }>(`
+      select submit_referral(p_campaign_id => '${campaignId}'::uuid, p_client_name => 'Anon Friend', p_client_phone => '9000005678') as submit_referral;`)
+    const bareRow = await db.query<{ event_type: string | null; functions_count: number | null }>(
+      `select event_type, functions_count from referral_submissions where id = '${bare.rows[0]!.submit_referral}';`,
+    )
+    expect(bareRow.rows[0]).toEqual({ event_type: null, functions_count: null })
+
+    await expect(
+      db.exec(
+        `insert into referral_submissions (company_id, campaign_id, client_name, functions_count) values ('${co}', '${campaignId}', 'Bad Count', 21);`,
+      ),
+    ).rejects.toThrow()
   })
 
   it('the service catalog rejects a duplicate name per company', async () => {

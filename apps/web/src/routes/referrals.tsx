@@ -183,6 +183,17 @@ function ReferralsContent() {
                   {sub.client_phone && (
                     <p className="text-xs text-muted-foreground">Phone: {sub.client_phone}</p>
                   )}
+                  {(sub.event_type || sub.event_date || sub.functions_count != null) && (
+                    <p className="text-xs text-muted-foreground">
+                      {[
+                        sub.event_type,
+                        sub.event_date && new Date(sub.event_date).toLocaleDateString(),
+                        sub.functions_count != null && `${sub.functions_count} function${sub.functions_count === 1 ? '' : 's'}`,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  )}
                 </div>
                 <Select value={sub.status} onChange={(e) => updateStatus.mutate({ id: sub.id, status: e.target.value })} className="w-32">
                   <option value="pending">Pending</option>
