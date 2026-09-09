@@ -34,4 +34,16 @@ describe('updateClientRequest', () => {
   it('an empty patch is still valid — the edit dialog may resend no changes', () => {
     expect(updateClientRequest.safeParse({}).success).toBe(true)
   })
+
+  it('checks a GSTIN\'s format when one is given, upper-cased, but leaves it out entirely', () => {
+    const lower = updateClientRequest.safeParse({ gstin: '27abcde1234f1z5' })
+    expect(lower.success).toBe(true)
+    if (lower.success) expect(lower.data.gstin).toBe('27ABCDE1234F1Z5')
+
+    expect(updateClientRequest.safeParse({ gstin: 'not-a-gstin' }).success).toBe(false)
+
+    const cleared = updateClientRequest.safeParse({ gstin: '' })
+    expect(cleared.success).toBe(true)
+    if (cleared.success) expect(cleared.data.gstin).toBe('')
+  })
 })

@@ -118,6 +118,7 @@ async function freshDb() {
   await db.exec(mig('0082_referral_event_fields.sql'))
   await db.exec(mig('0083_profile_photo.sql'))
   await db.exec(mig('0084_lookup_categories_expansion.sql'))
+  await db.exec(mig('0085_invoice_line_presets.sql'))
   return db
 }
 
@@ -5350,12 +5351,18 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
       'lead_source',
       'payment_type',
       'enquiry_source',
+      'invoice_line_preset',
     ].sort())
 
     const paymentTypes = await db.query<{ value: string }>(
       `select value from custom_lookups where company_id = '${companyId}' and category = 'payment_type' order by sort_order;`,
     )
     expect(paymentTypes.rows.map((r) => r.value)).toEqual(['UPI', 'Cash', 'Bank transfer', 'Cheque'])
+
+    const presetCount = await db.query<{ n: string }>(
+      `select count(*)::text as n from custom_lookups where company_id = '${companyId}' and category = 'invoice_line_preset';`,
+    )
+    expect(presetCount.rows[0]!.n).toBe('14')
   })
 
   it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {

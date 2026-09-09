@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { GSTIN_PATTERN } from './shared/primitives'
 
 export const companyProfile = z.object({
   name: z.string(),
@@ -26,7 +27,9 @@ export const updateCompanyRequest = z.object({
   state: z.string().trim().max(120).optional(),
   country: z.string().trim().max(80).optional(),
   website: z.string().trim().max(200).optional(),
-  invoice_gst_number: z.string().trim().max(20).optional(),
+  invoice_gst_number: z.string().trim().toUpperCase().max(20)
+    .refine((v) => !v || GSTIN_PATTERN.test(v), 'Invalid GSTIN format')
+    .optional(),
   avatar_url: z.string().trim().max(500).optional(),
   invoice_number_prefix: z.string().trim().min(1).max(20).optional(),
   invoice_next_number: z.number().int().min(1).optional(),

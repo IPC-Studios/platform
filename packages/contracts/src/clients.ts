@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { uuid, isoDateTime, email as emailSchema } from './shared/primitives'
+import { uuid, isoDateTime, email as emailSchema, GSTIN_PATTERN } from './shared/primitives'
+
+/** Format-checked when given; blank clears the field either way. */
+const gstinInput = z.string().trim().toUpperCase().max(20)
+  .refine((v) => !v || GSTIN_PATTERN.test(v), 'Invalid GSTIN format')
 
 export const client = z.object({
   id: uuid,
@@ -27,7 +31,7 @@ export const createClientRequest = z.object({
   address: z.string().trim().max(400).optional(),
   city: z.string().trim().max(120).optional(),
   relation: z.string().trim().max(60).optional(),
-  gstin: z.string().trim().max(20).optional(),
+  gstin: gstinInput.optional(),
   notes: z.string().trim().max(2000).optional(),
 })
 export type CreateClientRequest = z.infer<typeof createClientRequest>
@@ -41,7 +45,7 @@ export const updateClientRequest = z.object({
   address: z.string().trim().max(400).nullable().optional(),
   city: z.string().trim().max(120).nullable().optional(),
   relation: z.string().trim().max(60).nullable().optional(),
-  gstin: z.string().trim().max(20).nullable().optional(),
+  gstin: gstinInput.nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
 })
 export type UpdateClientRequest = z.infer<typeof updateClientRequest>

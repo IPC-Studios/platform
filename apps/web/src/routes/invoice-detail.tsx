@@ -222,7 +222,10 @@ function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
     intra_state: invoice.intra_state,
     invoice_date: invoice.invoice_date,
     due_date: invoice.due_date ?? '',
+    // Re-editing always works off the flat rupee figure it was saved as -- a percent
+    // entry is not remembered as a percent once the invoice is created.
     discount: invoice.discount,
+    discount_type: 'flat',
     notes: invoice.notes ?? '',
     template_id: invoice.template_id ?? '',
     lines: invoice.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, gst_rate: i.gst_rate as GstSlab })),

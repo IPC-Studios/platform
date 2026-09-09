@@ -58,7 +58,7 @@ export const billingRouter = new Hono<AppEnv>()
     // The one source of GST truth — same tested engine everywhere.
     const totals = computeInvoice(
       req.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-      { intraState: req.intra_state, discount: req.discount },
+      { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
       description: l.description,
@@ -149,7 +149,7 @@ export const billingRouter = new Hono<AppEnv>()
 
     const totals = computeInvoice(
       req.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-      { intraState: req.intra_state, discount: req.discount },
+      { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
       description: l.description,

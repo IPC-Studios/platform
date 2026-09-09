@@ -33,6 +33,8 @@ export const createInvoiceRequest = z.object({
   invoice_date: isoDate.optional(),
   due_date: isoDate.optional(),
   discount: money.default(0),
+  /** Whether `discount` is a flat rupee amount or a percent of the subtotal. Only the flat figure it resolves to is ever persisted. */
+  discount_type: z.enum(['flat', 'percent']).default('flat'),
   notes: z.string().max(1000).optional(),
   /** Which saved layout this invoice prints with — omitted or null means the company's default (if any). */
   template_id: uuid.nullable().optional(),

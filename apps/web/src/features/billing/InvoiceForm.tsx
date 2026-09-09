@@ -5,8 +5,11 @@ import type { CreateInvoiceRequest, GstState, InvoiceLineInput } from '@ipc/cont
 import { Button } from '@/shared/ui/button'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useActiveLookups, useCreateCustomLookup } from '@/features/settings/api'
 import { useClients } from '@/features/clients/api'
-import { useProjects } from '@/features/projects/api'
+import { useProjects, useProject } from '@/features/projects/api'
+import { useConfirm } from '@/shared/ui/confirm'
 import { useInvoiceTemplates } from './api'
 
 export const GST_SLABS: GstSlab[] = [0, 5, 12, 18, 28]
@@ -21,6 +24,7 @@ export interface InvoiceFormValues {
   invoice_date: string
   due_date: string
   discount: number
+  discount_type: 'flat' | 'percent'
   notes: string
   template_id: string
   lines: InvoiceLineInput[]
@@ -35,6 +39,7 @@ export function emptyInvoiceForm(): InvoiceFormValues {
     invoice_date: todayISO(),
     due_date: '',
     discount: 0,
+    discount_type: 'flat',
     notes: '',
     template_id: '',
     lines: [{ description: '', quantity: 1, rate: 0, gst_rate: 18 }],
@@ -57,9 +62,9 @@ export function useInvoiceForm(initial: InvoiceFormValues) {
     () =>
       computeInvoice(
         values.lines.filter((l) => l.description.trim()).map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-        { intraState: values.intra_state, discount: values.discount },
+        { intraState: values.intra_state, discount: values.discount, discountType: values.discount_type },
       ),
-    [values.lines, values.intra_state, values.discount],
+    [values.lines, values.intra_state, values.discount, values.discount_type],
   )
 
   function toRequest(): CreateInvoiceRequest {
@@ -71,6 +76,7 @@ export function useInvoiceForm(initial: InvoiceFormValues) {
       invoice_date: values.invoice_date || undefined,
       due_date: values.due_date || undefined,
       discount: values.discount,
+      discount_type: values.discount_type,
       notes: values.notes.trim() || undefined,
       template_id: values.template_id || null,
       lines: values.lines.filter((l) => l.description.trim()),
@@ -82,6 +88,56 @@ export function useInvoiceForm(initial: InvoiceFormValues) {
   }
 
   return { values, set, patchLine, totals, toRequest, reset }
+}
+
+/** A studio-defined shortcut that appends one line item with that name, without leaving the form. */
+function QuickAddLine({ onAdd }: { onAdd: (description: string) => void }) {
+  const { session } = useAuth()
+  const { data: presets } = useActiveLookups('invoice_line_preset')
+  const createLookup = useCreateCustomLookup()
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+
+  async function onSaveNew() {
+    if (!name.trim()) return
+    await createLookup.mutateAsync({ category: 'invoice_line_preset', value: name.trim() })
+    onAdd(name.trim())
+    setAdding(false)
+    setName('')
+  }
+
+  if (adding) {
+    return (
+      <div className="flex items-center gap-2">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Second Photographer" autoFocus className="w-56" />
+        <Button type="button" size="sm" onClick={() => void onSaveNew()} disabled={!name.trim() || createLookup.isPending}>
+          Add
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>
+          Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <Select
+      value=""
+      onChange={(e) => {
+        if (e.target.value === '__add__') setAdding(true)
+        else if (e.target.value) onAdd(e.target.value)
+      }}
+      className="w-56"
+    >
+      <option value="">Quick add…</option>
+      {(presets ?? []).map((p) => (
+        <option key={p.id} value={p.value}>
+          {p.value}
+        </option>
+      ))}
+      {session?.is_owner && <option value="__add__">+ Add new preset…</option>}
+    </Select>
+  )
 }
 
 /** Every field the create form sets, shared verbatim by the edit dialog. */
@@ -98,6 +154,53 @@ export function InvoiceFormFields({
   const { data: templateData } = useInvoiceTemplates()
   const templates = templateData?.items
   const clientProjects = (projects ?? []).filter((p) => !values.client_id || p.client_id === values.client_id)
+  const linkedProject = useProject(values.project_id)
+  const confirm = useConfirm()
+
+  // Appends rather than replaces, so importing twice (package, then balance) builds
+  // one invoice out of both — but a second import onto lines someone already typed
+  // by hand is worth a check first.
+  async function importFromProject(kind: 'package' | 'deliverables' | 'balance') {
+    const p = linkedProject.data
+    if (!p) return
+    if (values.lines.some((l) => l.description.trim())) {
+      const yes = await confirm({
+        title: 'Add to the existing line items?',
+        description: 'This adds new lines alongside what is already here, rather than replacing them.',
+        confirmLabel: 'Add',
+      })
+      if (!yes) return
+    }
+    if (kind === 'package') {
+      if (p.package_cost <= 0) return
+      set('lines', [...values.lines, { description: `${p.name} — Package`, quantity: 1, rate: p.package_cost, gst_rate: 18 }])
+    } else if (kind === 'deliverables') {
+      const extra = p.deliverables.filter((d) => d.is_additional_charge && d.additional_charge_amount > 0)
+      if (extra.length === 0) return
+      set('lines', [
+        ...values.lines,
+        ...extra.map((d) => ({ description: d.title, quantity: 1, rate: d.additional_charge_amount, gst_rate: 18 as GstSlab })),
+      ])
+    } else {
+      const received = p.payments.reduce((s, pay) => s + pay.amount, 0)
+      const balance = Math.max(0, p.total_cost - received)
+      if (balance <= 0) return
+      set('lines', [...values.lines, { description: `${p.name} — Balance due`, quantity: 1, rate: balance, gst_rate: 0 }])
+    }
+  }
+
+  // Fills the first blank row rather than always appending, so picking a preset
+  // right after opening the form (still just the one empty starter line) does
+  // the obvious thing instead of leaving an empty row above the new one.
+  function quickAdd(description: string) {
+    const blank = values.lines.findIndex((l) => !l.description.trim())
+    set(
+      'lines',
+      blank !== -1
+        ? values.lines.map((l, i) => (i === blank ? { ...l, description } : l))
+        : [...values.lines, { description, quantity: 1, rate: 0, gst_rate: 18 }],
+    )
+  }
 
   return (
     <>
@@ -134,6 +237,21 @@ export function InvoiceFormFields({
           </Select>
         </div>
       </div>
+
+      {values.project_id && linkedProject.data && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Import from project</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => void importFromProject('package')}>
+            Package
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void importFromProject('deliverables')}>
+            Billable deliverables
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void importFromProject('balance')}>
+            Balance due
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
@@ -213,7 +331,7 @@ export function InvoiceFormFields({
             </Button>
           </div>
         ))}
-        <div className="p-2">
+        <div className="flex flex-wrap items-center gap-2 p-2">
           <Button
             type="button"
             variant="outline"
@@ -222,13 +340,29 @@ export function InvoiceFormFields({
           >
             <Plus /> Add line
           </Button>
+          <QuickAddLine onAdd={quickAdd} />
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Label>Discount ₹</Label>
-          <Input type="number" min={0} value={values.discount} onChange={(e) => set('discount', Number(e.target.value))} className="w-32" />
+          <Label>Discount</Label>
+          <Input
+            type="number"
+            min={0}
+            max={values.discount_type === 'percent' ? 100 : undefined}
+            value={values.discount}
+            onChange={(e) => set('discount', Number(e.target.value))}
+            className="w-28"
+          />
+          <Select
+            value={values.discount_type}
+            onChange={(e) => set('discount_type', e.target.value as InvoiceFormValues['discount_type'])}
+            className="w-20"
+          >
+            <option value="flat">₹</option>
+            <option value="percent">%</option>
+          </Select>
         </div>
         <div className="text-right text-sm">
           <p className="text-muted-foreground">

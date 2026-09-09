@@ -271,6 +271,7 @@ const LOOKUP_CATEGORIES = [
   { value: 'expense_category', label: 'Expense Categories' },
   { value: 'enquiry_source', label: 'Enquiry Sources' },
   { value: 'payment_type', label: 'Payment Types' },
+  { value: 'invoice_line_preset', label: 'Invoice Line Presets' },
   { value: 'project_type', label: 'Project Types' },
   { value: 'currency', label: 'Currencies' },
 ]
