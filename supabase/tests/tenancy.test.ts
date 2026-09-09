@@ -110,6 +110,7 @@ async function freshDb() {
   await db.exec(mig('0074_invoice_edit.sql'))
   await db.exec(mig('0075_quote_edit.sql'))
   await db.exec(mig('0076_work_submission_edit.sql'))
+  await db.exec(mig('0077_reminder_entity_name.sql'))
   return db
 }
 
@@ -5256,5 +5257,56 @@ describe('team members picker excludes deactivated staff, not just removed staff
     const names = rows.rows.map((r) => r.name)
     expect(names).toContain('Active Ana')
     expect(names).not.toContain('Inactive Ivan')
+  })
+})
+
+/**
+ * list_reminders() carried entity_type/entity_id since 0060 but never
+ * resolved a display name for the link -- the UI had nothing to show but a
+ * raw type and a uuid, so it never built a picker for it either (0077).
+ */
+describe('reminders resolve a display name for whatever they are linked to', () => {
+  let db: PGlite
+  let companyId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+  })
+
+  it('resolves a lead, a project, a client, and an invoice by name, and leaves an unlinked reminder alone', async () => {
+    await db.exec(`insert into crm_leads (company_id, phone, phone_norm, name) values ('${companyId}', '9000000010', '9000000010', 'Sharma Deal');`)
+    const lead = (await db.query<{ id: string }>(`select id from crm_leads where phone = '9000000010';`)).rows[0]!.id
+
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Verma Client');`)
+    const client = (await db.query<{ id: string }>(`select id from clients where name = 'Verma Client';`)).rows[0]!.id
+    const project = (await db.query<{ id: string }>(`select create_project_with_details('${client}', 'Verma Wedding', 50000) as id;`)).rows[0]!.id
+    const invoice = (
+      await db.query<{ id: string }>(
+        `select id from create_invoice('${client}', null, '27', current_date, null, 1000, 0, 1000, 180, 1180, '[]'::jsonb);`,
+      )
+    ).rows[0]!.id
+
+    await db.exec(`
+      insert into reminders (company_id, user_id, title, priority, entity_type, entity_id) values
+        ('${companyId}', '${OWNER}', 'Follow up on deal', 'high', 'lead', '${lead}'),
+        ('${companyId}', '${OWNER}', 'Check on project', 'medium', 'project', '${project}'),
+        ('${companyId}', '${OWNER}', 'Call client', 'low', 'client', '${client}'),
+        ('${companyId}', '${OWNER}', 'Chase invoice', 'urgent', 'invoice', '${invoice}'),
+        ('${companyId}', '${OWNER}', 'Buy printer paper', 'low', null, null);
+    `)
+
+    const result = await db.query<{ v: { items: { title: string; entity_type: string | null; entity_name: string | null }[] } }>(
+      `select list_reminders() as v;`,
+    )
+    const byTitle = new Map(result.rows[0]!.v.items.map((i) => [i.title, i]))
+    expect(byTitle.get('Follow up on deal')?.entity_name).toBe('Sharma Deal')
+    expect(byTitle.get('Check on project')?.entity_name).toBe('Verma Wedding')
+    expect(byTitle.get('Call client')?.entity_name).toBe('Verma Client')
+    expect(byTitle.get('Chase invoice')?.entity_name).toMatch(/^INV-/)
+    expect(byTitle.get('Buy printer paper')?.entity_name).toBeNull()
   })
 })

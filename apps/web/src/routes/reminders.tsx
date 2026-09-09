@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -13,8 +14,57 @@ import {
   useUpdateReminderStatus,
   useDeleteReminder,
 } from '@/features/reminders/api'
-import { type CreateReminderRequest } from '@ipc/contracts'
-import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Bell } from 'lucide-react'
+import { useLeads } from '@/features/crm/api'
+import { useProjects } from '@/features/projects/api'
+import { useClients } from '@/features/clients/api'
+import { useInvoices } from '@/features/billing/api'
+import { type CreateReminderRequest, type ReminderEntityType } from '@ipc/contracts'
+import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Bell, Link2 } from 'lucide-react'
+
+const ENTITY_LINK: Partial<Record<ReminderEntityType, (id: string) => { to: string; params: Record<string, string> }>> = {
+  project: (id) => ({ to: '/projects/$id', params: { id } }),
+}
+
+/** Which entity is picked determines which list is fetched — no point loading all four. */
+function EntityPicker({
+  entityType,
+  entityId,
+  onChangeId,
+}: {
+  entityType: ReminderEntityType | null | undefined
+  entityId: string | null | undefined
+  onChangeId: (id: string | null) => void
+}) {
+  const leads = useLeads()
+  const projects = useProjects()
+  const clients = useClients()
+  const invoices = useInvoices()
+
+  if (!entityType || entityType === 'custom') return null
+
+  const options =
+    entityType === 'lead'
+      ? (leads.data ?? []).map((l) => ({ id: l.id, label: l.name ?? l.phone ?? 'Unnamed deal' }))
+      : entityType === 'project'
+        ? (projects.data ?? []).map((p) => ({ id: p.id, label: p.name }))
+        : entityType === 'client'
+          ? (clients.data ?? []).map((c) => ({ id: c.id, label: c.name }))
+          : (invoices.data ?? []).map((i) => ({ id: i.id, label: i.invoice_number }))
+
+  return (
+    <div>
+      <label className="text-sm font-medium">Linked {entityType}</label>
+      <Select value={entityId ?? ''} onChange={(e) => onChangeId(e.target.value || null)}>
+        <option value="">Select…</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </div>
+  )
+}
 
 function RemindersContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -120,6 +170,22 @@ function RemindersContent() {
                   Due: {new Date(reminder.due_at).toLocaleDateString()}
                 </p>
               )}
+              {reminder.entity_type && reminder.entity_name && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <Link2 className="h-3 w-3" />
+                  {(() => {
+                    const link = reminder.entity_id && ENTITY_LINK[reminder.entity_type]?.(reminder.entity_id)
+                    return link ? (
+                      <Link to={link.to} params={link.params} className="hover:underline">
+                        {reminder.entity_name}
+                      </Link>
+                    ) : (
+                      <span>{reminder.entity_name}</span>
+                    )
+                  })()}
+                  <span>({reminder.entity_type})</span>
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-1">
               {reminder.status === 'active' && (
@@ -187,6 +253,27 @@ function RemindersContent() {
                 onChange={(e) => setForm({ ...form, due_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
               />
             </div>
+            <div>
+              <label className="text-sm font-medium">Link to (optional)</label>
+              <Select
+                value={form.entity_type ?? ''}
+                onChange={(e) => {
+                  const next = (e.target.value || null) as ReminderEntityType | null
+                  setForm({ ...form, entity_type: next, entity_id: null })
+                }}
+              >
+                <option value="">Nothing — just a note</option>
+                <option value="lead">A deal</option>
+                <option value="project">A project</option>
+                <option value="client">A client</option>
+                <option value="invoice">An invoice</option>
+              </Select>
+            </div>
+            <EntityPicker
+              entityType={form.entity_type}
+              entityId={form.entity_id}
+              onChangeId={(id) => setForm({ ...form, entity_id: id })}
+            />
           </div>
           <div className="mt-6 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
