@@ -4,6 +4,9 @@ import { uuid, isoDateTime, money } from './shared/primitives'
 export const slotStatus = z.enum(['booked', 'released', 'cancelled'])
 export type SlotStatus = z.infer<typeof slotStatus>
 
+export const slotCostStatus = z.enum(['tentative', 'final', 'not_decided'])
+export type SlotCostStatus = z.infer<typeof slotCostStatus>
+
 export const teamSlot = z.object({
   id: uuid,
   user_id: uuid,
@@ -14,8 +17,20 @@ export const teamSlot = z.object({
   end_at: isoDateTime,
   status: slotStatus,
   estimated_cost: money.nullable(),
+  final_cost: money.nullable(),
+  cost_status: slotCostStatus,
+  cost_notes: z.string().nullable(),
 })
 export type TeamSlot = z.infer<typeof teamSlot>
+
+/** Cost is bookkeeping the studio settles, kept separate from the booking itself. */
+export const setSlotCostRequest = z.object({
+  estimated_cost: money.nullish(),
+  final_cost: money.nullish(),
+  cost_status: slotCostStatus.nullish(),
+  cost_notes: z.string().trim().max(500).nullish(),
+})
+export type SetSlotCostRequest = z.infer<typeof setSlotCostRequest>
 
 export const bookSlotRequest = z.object({
   user_id: uuid,

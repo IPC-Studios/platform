@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { CalendarClock, ChevronLeft, ChevronRight, UserPlus, X } from 'lucide-react'
+import { CalendarClock, ChevronLeft, ChevronRight, IndianRupee, UserPlus, X } from 'lucide-react'
 import { findConflicts, overlaps } from '@ipc/domain'
 import { shootListItem, type BookSlotRequest, type ShootListItem, type TeamSlot } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -19,7 +19,7 @@ import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { formatINR } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
-import { useSlots, useMembers, useBookSlot, useSetSlotStatus, ApiError } from '@/features/allocation/api'
+import { useSlots, useMembers, useBookSlot, useSetSlotStatus, useSetSlotCost, ApiError } from '@/features/allocation/api'
 
 export function TeamAllocationPage() {
   return (
@@ -291,6 +291,101 @@ function Stepper({
  * Bookings match a requirement by service name — the same name the shoot card
  * wrote — so "Candid Photographer 1/2" reads as one short of the plan.
  */
+const COST_STATUS_TONE = { not_decided: 'neutral', tentative: 'warning', final: 'success' } as const
+
+/** Cost is settled separately from the booking -- what a shoot day is worth to pay out. */
+function EditSlotCostDialog({ slot }: { slot: TeamSlot }) {
+  const setCost = useSetSlotCost()
+  const [open, setOpen] = useState(false)
+  const [estimated, setEstimated] = useState(String(slot.estimated_cost ?? ''))
+  const [final, setFinal] = useState(String(slot.final_cost ?? ''))
+  const [status, setStatus] = useState(slot.cost_status)
+  const [notes, setNotes] = useState(slot.cost_notes ?? '')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setEstimated(String(slot.estimated_cost ?? ''))
+    setFinal(String(slot.final_cost ?? ''))
+    setStatus(slot.cost_status)
+    setNotes(slot.cost_notes ?? '')
+    setError(null)
+  }, [open, slot])
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    try {
+      await setCost.mutateAsync({
+        id: slot.id,
+        patch: {
+          estimated_cost: estimated.trim() ? Number(estimated) : undefined,
+          final_cost: final.trim() ? Number(final) : undefined,
+          cost_status: status,
+          cost_notes: notes.trim() || undefined,
+        },
+      })
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'We could not save the cost.')
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-4" title="Edit cost">
+          <IndianRupee className="size-3" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title={`Cost — ${slot.user_name ?? 'this booking'}`}
+        description={slot.service_name ?? undefined}
+      >
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Estimated (₹)</Label>
+              <Input type="number" min={0} value={estimated} onChange={(e) => setEstimated(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Final (₹)</Label>
+              <Input type="number" min={0} value={final} onChange={(e) => setFinal(e.target.value)} placeholder="Once agreed" />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Status</Label>
+            <Select value={status} onChange={(e) => setStatus(e.target.value as TeamSlot['cost_status'])}>
+              <option value="not_decided">Not decided</option>
+              <option value="tentative">Tentative</option>
+              <option value="final">Final</option>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Notes</Label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="How this figure was agreed" />
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={setCost.isPending}>
+              {setCost.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ShootRow({
   shoot,
   slots,
@@ -406,6 +501,12 @@ function ShootRow({
               >
                 {s.user_name ?? 'Member'}
                 {s.service_name ? ` · ${s.service_name}` : ''}
+                {s.cost_status !== 'not_decided' && (
+                  <StatusBadge tone={COST_STATUS_TONE[s.cost_status]} className="px-1.5 py-0 text-[0.65rem]">
+                    {formatINR(s.final_cost ?? s.estimated_cost ?? 0)}
+                  </StatusBadge>
+                )}
+                <EditSlotCostDialog slot={s} />
                 <Button
                   variant="ghost"
                   size="icon"

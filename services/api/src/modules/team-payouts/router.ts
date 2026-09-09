@@ -3,6 +3,9 @@ import {
   createTeamPayoutRequest,
   updateTeamPayoutRequest,
   teamPayoutList,
+  createPayoutSettlementRequest,
+  payoutSettlementList,
+  createPayoutSettlementResponse,
   z,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
@@ -13,6 +16,7 @@ import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
+import { rpcJson } from '../../lib/rpc'
 
 const okResponse = z.object({ ok: z.boolean() })
 
@@ -134,4 +138,51 @@ export const teamPayoutsRouter = new Hono<AppEnv>()
     if (!rows.length) fail(404, 'We could not find that payout.')
     await audit(c, { action: 'team_payout.delete', entityType: 'team_payout', entityId: id })
     return c.json(okResponse.parse({ ok: true }))
+  })
+
+  // ── Shoot-derived tracker: a cash ledger against booked slots ────
+  // Kept alongside the manual payouts above, not replacing them -- neither
+  // reads nor writes team_assignment_slots' own cost fields.
+  .get('/settlements', async (c) => {
+    const raw = c.req.query('slot_ids')
+    const slotIds = raw ? raw.split(',').filter(Boolean) : null
+    const data = await attempt(c, 'team-payouts.settlements_list', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ list_payout_settlements: unknown }[]>`
+          select list_payout_settlements(${slotIds}::uuid[]) as list_payout_settlements`
+        return rpcJson(result[0]?.list_payout_settlements, { entries: [], aggregates: [] })
+      }),
+    )
+    if (!data) fail(400, 'We could not load settlements.')
+    return c.json(payoutSettlementList.parse(data))
+  })
+
+  .post('/settlements', async (c) => {
+    const parsed = createPayoutSettlementRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the settlement details.')
+    const d = parsed.data
+    const row = await attempt(
+      c,
+      'team-payouts.settlement_create',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const rows = await sql<{ id: string; paid_total: string; amount_due: string }[]>`
+            select * from create_payout_settlement(
+              p_slot_id => ${d.slot_id},
+              p_amount_paid => ${d.amount_paid},
+              p_paid_date => ${d.paid_date ?? null},
+              p_payment_mode => ${d.payment_mode ?? null},
+              p_payment_reference => ${d.payment_reference ?? null},
+              p_notes => ${d.notes ?? null},
+              p_entry_type => ${d.entry_type},
+              p_reverses_settlement_id => ${d.reverses_settlement_id ?? null}
+            )`
+          return rows[0] ?? null
+        }),
+      { onCode: (code, err) => (String((err as { message?: string })?.message ?? '').includes('exceed amount due') ? 'over_due' : undefined) },
+    )
+    if (row === 'over_due') fail(409, 'That payment would exceed the amount due for this slot.')
+    if (!row) fail(400, 'We could not save this settlement.')
+    await audit(c, { action: 'payout_settlement.create', entityType: 'team_slot_settlement', entityId: row.id, after: d })
+    return c.json(createPayoutSettlementResponse.parse(row), 201)
   })

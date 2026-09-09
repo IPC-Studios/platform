@@ -123,6 +123,7 @@ async function freshDb() {
   await db.exec(mig('0087_invoice_number_override.sql'))
   await db.exec(mig('0088_invoice_item_title.sql'))
   await db.exec(mig('0089_invoice_note_templates.sql'))
+  await db.exec(mig('0090_team_payout_settlements.sql'))
   return db
 }
 
@@ -5719,5 +5720,102 @@ describe('reminders resolve a display name for whatever they are linked to', () 
     expect(byTitle.get('Call client')?.entity_name).toBe('Verma Client')
     expect(byTitle.get('Chase invoice')?.entity_name).toMatch(/^INV-/)
     expect(byTitle.get('Buy printer paper')?.entity_name).toBeNull()
+  })
+})
+
+/**
+ * Team payouts, shoot-derived tracker (0090): a settlement ledger kept
+ * alongside the existing manual team_payouts table, not replacing it.
+ */
+describe('team payout settlements (0090)', () => {
+  let db: PGlite
+  let companyId: string
+  const member = '55555555-5555-5555-5555-555555555555'
+  let slotId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${member}', 'm@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', '${companyId}', 'employee', 'Shooter', 'm@s.test');`,
+    )
+    const slot = await db.query<{ book_team_slot: string }>(
+      `select book_team_slot('${member}', null, 'Photographer',
+        '2026-07-01T04:00:00Z', '2026-07-01T12:00:00Z', 8000);`,
+    )
+    slotId = slot.rows[0]!.book_team_slot
+  })
+
+  it('a slot carries its own cost status and notes, separate from the booking itself', async () => {
+    await db.query(
+      `select set_slot_cost(p_slot_id => '${slotId}', p_final_cost => 7500, p_cost_status => 'final', p_cost_notes => 'Agreed on the day');`,
+    )
+    const row = await db.query<{ final_cost: string; cost_status: string; cost_notes: string }>(
+      `select final_cost, cost_status, cost_notes from team_assignment_slots where id = '${slotId}';`,
+    )
+    expect(Number(row.rows[0]!.final_cost)).toBe(7500)
+    expect(row.rows[0]!.cost_status).toBe('final')
+    expect(row.rows[0]!.cost_notes).toBe('Agreed on the day')
+
+    await expect(
+      db.query(`select set_slot_cost(p_slot_id => '${slotId}', p_cost_status => 'not_a_real_status');`),
+    ).rejects.toThrow()
+  })
+
+  it('a partial payment, then the rest, settles the slot -- and a third payment is refused as over-collection', async () => {
+    const first = await db.query<{ paid_total: string; amount_due: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 5000, p_payment_mode => 'upi');`,
+    )
+    expect(Number(first.rows[0]!.paid_total)).toBe(5000)
+    expect(Number(first.rows[0]!.amount_due)).toBe(7500)
+
+    const second = await db.query<{ paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 2500, p_payment_mode => 'cash');`,
+    )
+    expect(Number(second.rows[0]!.paid_total)).toBe(7500)
+
+    await expect(
+      db.query(`select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 1, p_payment_mode => 'cash');`),
+    ).rejects.toThrow(/exceed amount due/i)
+  })
+
+  it('a reversal corrects a mistaken payment, but cannot push the paid total negative', async () => {
+    const rev = await db.query<{ id: string; paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 2500, p_entry_type => 'reversal', p_notes => 'wrong amount');`,
+    )
+    expect(Number(rev.rows[0]!.paid_total)).toBe(5000)
+
+    await expect(
+      db.query(`select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 999999, p_entry_type => 'reversal');`),
+    ).rejects.toThrow(/negative/i)
+  })
+
+  it('lists every entry for a slot plus its paid-total aggregate, and never touches the slot itself', async () => {
+    const before = await db.query<{ final_cost: string }>(`select final_cost from team_assignment_slots where id = '${slotId}';`)
+
+    const listed = await db.query<{
+      v: { entries: { entry_type: string; amount_paid: string }[]; aggregates: { slot_id: string; paid_total: string; entries_count: number }[] }
+    }>(`select list_payout_settlements(array['${slotId}']::uuid[]) as v;`)
+    expect(listed.rows[0]!.v.entries).toHaveLength(3) // payment, payment, reversal
+    const agg = listed.rows[0]!.v.aggregates.find((a) => a.slot_id === slotId)
+    expect(Number(agg!.paid_total)).toBe(5000)
+    expect(agg!.entries_count).toBe(3)
+
+    // Settlement bookkeeping is deliberately inert against the slot's own cost fields.
+    const after = await db.query<{ final_cost: string }>(`select final_cost from team_assignment_slots where id = '${slotId}';`)
+    expect(after.rows[0]!.final_cost).toBe(before.rows[0]!.final_cost)
+  })
+
+  it('an adjustment is not blocked by the overpay guard, the way a plain payment is', async () => {
+    const adj = await db.query<{ paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 4000, p_entry_type => 'adjustment', p_notes => 'correction');`,
+    )
+    // 5000 (running total) + 4000 adjustment = 9000, over the 7500 due -- allowed for an adjustment.
+    expect(Number(adj.rows[0]!.paid_total)).toBe(9000)
   })
 })
