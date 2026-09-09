@@ -120,6 +120,8 @@ async function freshDb() {
   await db.exec(mig('0084_lookup_categories_expansion.sql'))
   await db.exec(mig('0085_invoice_line_presets.sql'))
   await db.exec(mig('0086_project_profitability_report.sql'))
+  await db.exec(mig('0087_invoice_number_override.sql'))
+  await db.exec(mig('0088_invoice_item_title.sql'))
   return db
 }
 
@@ -689,6 +691,58 @@ describe('billing & invoicing (Phase 9)', () => {
       `select count(*) as n from invoice_items where invoice_id = '${r1.rows[0]!.id}';`,
     )
     expect(Number(it.rows[0]!.n)).toBe(1)
+  })
+
+  it('a custom invoice number does not consume the auto-numbered sequence, and a duplicate is refused', async () => {
+    const items = JSON.stringify([
+      { description: 'Custom-numbered', quantity: 1, rate: 1000, amount: 1000, gst_rate: 0, taxable: 1000, cgst: 0, sgst: 0, igst: 0 },
+    ])
+    const custom = await db.query<{ invoice_number: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => current_date, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 0, p_total => 1000,
+        p_items => '${items}'::jsonb, p_invoice_number => 'CUSTOM-001'
+      );`)
+    expect(custom.rows[0]!.invoice_number).toBe('CUSTOM-001')
+
+    const auto = await db.query<{ invoice_number: string }>(
+      `select * from create_invoice('${clientId}', null, '27', current_date, null,
+        1000, 0, 1000, 0, 1000, '${items}'::jsonb, null);`,
+    )
+    // Still the next sequential number -- the custom one above did not burn a slot.
+    expect(auto.rows[0]!.invoice_number).toBe('INV-0003')
+
+    await expect(
+      db.query(`
+        select * from create_invoice(
+          p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+          p_invoice_date => current_date, p_due_date => null,
+          p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 0, p_total => 1000,
+          p_items => '${items}'::jsonb, p_invoice_number => 'CUSTOM-001'
+        );`),
+    ).rejects.toThrow()
+  })
+
+  it('a line item keeps its subtext underneath the description, and an old line without one round-trips as null', async () => {
+    const items = JSON.stringify([
+      { description: 'Wedding Photography Package', subtext: 'Haldi + Wedding + Reception coverage', quantity: 1, rate: 1000, amount: 1000, gst_rate: 0, taxable: 1000, cgst: 0, sgst: 0, igst: 0 },
+      { description: 'Travel Charges', quantity: 1, rate: 500, amount: 500, gst_rate: 0, taxable: 500, cgst: 0, sgst: 0, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => current_date, p_due_date => null,
+        p_subtotal => 1500, p_discount => 0, p_taxable => 1500, p_tax => 0, p_total => 1500,
+        p_items => '${items}'::jsonb
+      );`)
+    const rows = await db.query<{ description: string; subtext: string | null }>(
+      `select description, subtext from invoice_items where invoice_id = '${inv.rows[0]!.id}' order by sort_order;`,
+    )
+    expect(rows.rows).toEqual([
+      { description: 'Wedding Photography Package', subtext: 'Haldi + Wedding + Reception coverage' },
+      { description: 'Travel Charges', subtext: null },
+    ])
   })
 
   it('records payments and moves status partial -> paid', async () => {

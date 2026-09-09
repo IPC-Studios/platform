@@ -61,6 +61,7 @@ export const billingRouter = new Hono<AppEnv>()
       { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
+      subtext: l.subtext ?? null,
       description: l.description,
       quantity: l.quantity,
       rate: l.rate,
@@ -72,9 +73,12 @@ export const billingRouter = new Hono<AppEnv>()
       igst: l.igst,
     }))
 
-    const row = await attempt(c, 'billing.invoice_create', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        const rows = await sql<{ id: string; invoice_number: string }[]>`
+    const row = await attempt(
+      c,
+      'billing.invoice_create',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const rows = await sql<{ id: string; invoice_number: string }[]>`
           select * from create_invoice(
             p_client_id => ${req.client_id},
             p_project_id => ${req.project_id},
@@ -88,11 +92,14 @@ export const billingRouter = new Hono<AppEnv>()
             p_total => ${totals.total},
             p_items => ${sql.json(items)},
             p_notes => ${req.notes ?? null},
-            p_template_id => ${req.template_id ?? null}
+            p_template_id => ${req.template_id ?? null},
+            p_invoice_number => ${req.invoice_number ?? null}
           )`
-        return rows[0] ?? null
-      }),
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
     )
+    if (row === 'taken') fail(409, 'An invoice with this number already exists.')
     if (!row) fail(400, 'We could not create the invoice.')
     await audit(c, {
       action: 'invoice.create',
@@ -118,7 +125,7 @@ export const billingRouter = new Hono<AppEnv>()
                  ) as template_layout,
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
-                     'id', it.id, 'description', it.description, 'quantity', it.quantity,
+                     'id', it.id, 'description', it.description, 'subtext', it.subtext, 'quantity', it.quantity,
                      'rate', it.rate, 'amount', it.amount, 'gst_rate', it.gst_rate,
                      'cgst', it.cgst, 'sgst', it.sgst, 'igst', it.igst) order by it.id)
                    from invoice_items it where it.invoice_id = i.id
@@ -152,6 +159,7 @@ export const billingRouter = new Hono<AppEnv>()
       { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
+      subtext: l.subtext ?? null,
       description: l.description,
       quantity: l.quantity,
       rate: l.rate,

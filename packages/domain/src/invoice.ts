@@ -3,6 +3,8 @@ import { roundINR, sumINR } from './money'
 
 export interface InvoiceLineInput {
   description: string
+  /** The subtext line underneath the description. */
+  subtext?: string | undefined
   quantity: number
   rate: number
   gst_rate: GstSlab

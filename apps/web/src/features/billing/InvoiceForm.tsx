@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Plus, Search, Trash2 } from 'lucide-react'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
-import type { CreateInvoiceRequest, GstState, InvoiceLineInput } from '@ipc/contracts'
+import type { Client, CreateInvoiceRequest, GstState, InvoiceLineInput } from '@ipc/contracts'
+import { cn } from '@/shared/ui/cn'
 import { Button } from '@/shared/ui/button'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
@@ -27,6 +28,8 @@ export interface InvoiceFormValues {
   discount_type: 'flat' | 'percent'
   notes: string
   template_id: string
+  /** Create only -- blank means auto-numbered. Never sent on an edit. */
+  invoice_number: string
   lines: InvoiceLineInput[]
 }
 
@@ -42,6 +45,7 @@ export function emptyInvoiceForm(): InvoiceFormValues {
     discount_type: 'flat',
     notes: '',
     template_id: '',
+    invoice_number: '',
     lines: [{ description: '', quantity: 1, rate: 0, gst_rate: 18 }],
   }
 }
@@ -79,6 +83,7 @@ export function useInvoiceForm(initial: InvoiceFormValues) {
       discount_type: values.discount_type,
       notes: values.notes.trim() || undefined,
       template_id: values.template_id || null,
+      invoice_number: values.invoice_number.trim() || undefined,
       lines: values.lines.filter((l) => l.description.trim()),
     }
   }
@@ -140,13 +145,109 @@ function QuickAddLine({ onAdd }: { onAdd: (description: string) => void }) {
   )
 }
 
+/** A searchable dropdown over the client list -- matches by name, phone or email. */
+function ClientCombobox({
+  clients,
+  value,
+  onChange,
+}: {
+  clients: Client[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const root = useRef<HTMLDivElement>(null)
+  const search = useRef<HTMLInputElement>(null)
+
+  const selected = clients.find((c) => c.id === value)
+
+  useEffect(() => {
+    if (open) search.current?.focus()
+    else setQuery('')
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [open])
+
+  const q = query.trim().toLowerCase()
+  const matches = q
+    ? clients.filter((c) => c.name.toLowerCase().includes(q) || (c.phone ?? '').includes(q) || (c.email ?? '').toLowerCase().includes(q))
+    : clients
+
+  return (
+    <div ref={root} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className={cn(
+          'flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-left text-sm shadow-sm',
+          !value && 'text-muted-foreground',
+        )}
+      >
+        <span className="truncate">{selected ? selected.name : 'Select a client…'}</span>
+        <Search className="size-4 shrink-0 opacity-50" aria-hidden />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="ipc-menu absolute left-0 top-full z-40 mt-1 w-full min-w-64 overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+        >
+          <div className="border-b border-border p-2">
+            <Input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, phone or email…" />
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1.5">
+            {matches.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">No client matches "{query}".</p>
+            ) : (
+              matches.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="option"
+                  aria-selected={c.id === value}
+                  onClick={() => {
+                    onChange(c.id)
+                    setOpen(false)
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{c.name}</p>
+                    {(c.phone || c.email) && (
+                      <p className="truncate text-xs text-muted-foreground">{[c.phone, c.email].filter(Boolean).join(' · ')}</p>
+                    )}
+                  </div>
+                  {c.id === value && <Check className="size-4 shrink-0" aria-hidden />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Every field the create form sets, shared verbatim by the edit dialog. */
 export function InvoiceFormFields({
   form,
   states,
+  isEdit = false,
 }: {
   form: ReturnType<typeof useInvoiceForm>
   states: GstState[] | undefined
+  /** A number only ever applies once, at creation -- hides the override field on an edit. */
+  isEdit?: boolean
 }) {
   const { values, set, patchLine, totals } = form
   const { data: clients } = useClients()
@@ -209,21 +310,14 @@ export function InvoiceFormFields({
           <Label>
             Client <span className="text-destructive">*</span>
           </Label>
-          <Select
+          <ClientCombobox
+            clients={clients ?? []}
             value={values.client_id}
-            onChange={(e) => {
-              set('client_id', e.target.value)
+            onChange={(id) => {
+              set('client_id', id)
               set('project_id', '')
             }}
-            aria-invalid={!values.client_id}
-          >
-            <option value="">Select a client…</option>
-            {(clients ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label>Project (optional)</Label>
@@ -269,6 +363,17 @@ export function InvoiceFormFields({
         </div>
       </div>
 
+      {!isEdit && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Invoice number (optional)</Label>
+          <Input
+            value={values.invoice_number}
+            onChange={(e) => set('invoice_number', e.target.value)}
+            placeholder="Leave blank to auto-number"
+          />
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
           <Label>Place of supply</Label>
@@ -305,30 +410,38 @@ export function InvoiceFormFields({
 
       <div className="rounded-md border border-border">
         {values.lines.map((l, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2 border-b border-border p-2 last:border-0">
+          <div key={i} className="flex flex-col gap-2 border-b border-border p-2 last:border-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                placeholder="Description"
+                value={l.description}
+                onChange={(e) => patchLine(i, { description: e.target.value })}
+                className="min-w-40 flex-1"
+              />
+              <Input type="number" min={0} value={l.quantity} onChange={(e) => patchLine(i, { quantity: Number(e.target.value) })} className="w-16" />
+              <Input type="number" min={0} value={l.rate} onChange={(e) => patchLine(i, { rate: Number(e.target.value) })} className="w-28" placeholder="Rate" />
+              <Select value={l.gst_rate} onChange={(e) => patchLine(i, { gst_rate: Number(e.target.value) as GstSlab })} className="w-20">
+                {GST_SLABS.map((g) => (
+                  <option key={g} value={g}>
+                    {g}%
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => set('lines', values.lines.filter((_, idx) => idx !== i))}
+              >
+                <Trash2 />
+              </Button>
+            </div>
             <Input
-              placeholder="Description"
-              value={l.description}
-              onChange={(e) => patchLine(i, { description: e.target.value })}
-              className="min-w-40 flex-1"
+              placeholder="Details shown under the description (optional)"
+              value={l.subtext ?? ''}
+              onChange={(e) => patchLine(i, { subtext: e.target.value || undefined })}
+              className="ml-0"
             />
-            <Input type="number" min={0} value={l.quantity} onChange={(e) => patchLine(i, { quantity: Number(e.target.value) })} className="w-16" />
-            <Input type="number" min={0} value={l.rate} onChange={(e) => patchLine(i, { rate: Number(e.target.value) })} className="w-28" placeholder="Rate" />
-            <Select value={l.gst_rate} onChange={(e) => patchLine(i, { gst_rate: Number(e.target.value) as GstSlab })} className="w-20">
-              {GST_SLABS.map((g) => (
-                <option key={g} value={g}>
-                  {g}%
-                </option>
-              ))}
-            </Select>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => set('lines', values.lines.filter((_, idx) => idx !== i))}
-            >
-              <Trash2 />
-            </Button>
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-2 p-2">

@@ -17,7 +17,10 @@ export const invoiceListItem = z.object({
 export type InvoiceListItem = z.infer<typeof invoiceListItem>
 
 export const invoiceLineInput = z.object({
+  /** The short, bold label a client sees -- e.g. "Wedding Photography Package". */
   description: z.string().trim().min(1).max(200),
+  /** The subtext line underneath it -- e.g. "Haldi + Wedding + Reception coverage". Optional. */
+  subtext: z.string().trim().max(200).optional(),
   quantity: z.number().positive(),
   rate: money,
   gst_rate: gstRate,
@@ -38,12 +41,14 @@ export const createInvoiceRequest = z.object({
   notes: z.string().max(1000).optional(),
   /** Which saved layout this invoice prints with — omitted or null means the company's default (if any). */
   template_id: uuid.nullable().optional(),
+  /** Overrides the auto-numbered sequence, which is left untouched when this is blank. Create only -- a number never changes on edit. */
+  invoice_number: z.string().trim().max(40).optional(),
   lines: z.array(invoiceLineInput).min(1),
 })
 export type CreateInvoiceRequest = z.infer<typeof createInvoiceRequest>
 
-/** Same shape as creation: an edit resends the whole invoice, header and lines together. */
-export const updateInvoiceRequest = createInvoiceRequest
+/** Same shape as creation minus the number override, which only ever applies once, at creation. */
+export const updateInvoiceRequest = createInvoiceRequest.omit({ invoice_number: true })
 export type UpdateInvoiceRequest = z.infer<typeof updateInvoiceRequest>
 
 export const recordPaymentRequest = z.object({
@@ -86,6 +91,7 @@ export const invoiceDetail = z.object({
     z.object({
       id: uuid,
       description: z.string(),
+      subtext: z.string().nullable(),
       quantity: z.number(),
       rate: money,
       amount: money,
