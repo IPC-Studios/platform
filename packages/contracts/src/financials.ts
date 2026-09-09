@@ -31,6 +31,19 @@ export const createExpenseRequest = z.object({
 })
 export type CreateExpenseRequest = z.infer<typeof createExpenseRequest>
 
+export const updateExpenseRequest = z.object({
+  project_id: uuid.nullable().optional(),
+  party_id: uuid.nullable().optional(),
+  category: z.string().max(80).nullable().optional(),
+  description: z.string().max(400).nullable().optional(),
+  amount: money.optional(),
+  expense_date: isoDate.optional(),
+  gst_treatment: gstTreatment.optional(),
+  gst_rate: gstRate.nullable().optional(),
+  is_fixed_overhead: z.boolean().optional(),
+})
+export type UpdateExpenseRequest = z.infer<typeof updateExpenseRequest>
+
 /** One row of the project_financials view + derived gross/balance. */
 export const projectFinancials = z.object({
   project_id: uuid,

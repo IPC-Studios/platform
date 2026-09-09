@@ -4732,3 +4732,94 @@ describe('Lovable parity round 4: data custody linkage, work location note', () 
     expect(row.rows[0]).toEqual({ location_note: 'Backup HDD 3', submission_link: 'https://drive.example.com/y' })
   })
 })
+
+/**
+ * Round 5: post-creation editability. The audit that produced rounds 1-4
+ * checked that every create form had the right fields; this round checks the
+ * matching claim -- that a team member or a company expense entered wrong can
+ * actually be corrected afterwards, not just created. No new migration: both
+ * routes patch columns that already existed.
+ */
+describe('Lovable parity round 5: editing a team member and a company expense', () => {
+  let db: PGlite
+  let companyId: string
+  const MEMBER = '99999999-9999-9999-9999-999999999999'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${MEMBER}', 'member@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email, phone, engagement_type)
+       values ('${MEMBER}', '${companyId}', 'employee', 'Rahul Sharma', 'member@s.test', '9000000001', 'in_house');`,
+    )
+  })
+
+  it('a misspelled team member name and a wrong engagement type can both be corrected', async () => {
+    await db.exec(
+      `update users set name = 'Rahul Verma', engagement_type = 'freelancer', phone = '9000000099' where user_id = '${MEMBER}';`,
+    )
+    const row = await db.query<{ name: string; engagement_type: string; phone: string }>(
+      `select name, engagement_type, phone from users where user_id = '${MEMBER}';`,
+    )
+    expect(row.rows[0]).toEqual({ name: 'Rahul Verma', engagement_type: 'freelancer', phone: '9000000099' })
+  })
+
+  it('a company expense logged with the wrong amount, date, and GST rate can be corrected', async () => {
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, category, amount, expense_date, gst_treatment, gst_rate)
+       values ('${companyId}', 'Travel', 500, '2026-01-01', 'non_gst', 0) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(
+      `update expenses set amount = 750, expense_date = '2026-01-02', gst_treatment = 'gst_applicable', gst_rate = 5 where id = '${id}';`,
+    )
+    const row = await db.query<{ amount: string; expense_date: Date; gst_treatment: string; gst_rate: string }>(
+      `select amount, expense_date, gst_treatment, gst_rate from expenses where id = '${id}';`,
+    )
+    expect({ ...row.rows[0], expense_date: row.rows[0]!.expense_date.toISOString().slice(0, 10) }).toEqual({
+      amount: '750.00',
+      expense_date: '2026-01-02',
+      gst_treatment: 'gst_applicable',
+      gst_rate: '5.00',
+    })
+  })
+
+  it('an expense logged against the wrong project can be re-pointed to another, or unlinked to become an overhead cost', async () => {
+    const [projA, projB] = await Promise.all(
+      ['Wedding A', 'Wedding B'].map(async (name) => {
+        await db.exec(`insert into clients (company_id, name) values ('${companyId}', '${name} client');`)
+        const client = await db.query<{ id: string }>(`select id from clients where name = '${name} client';`)
+        const proj = await db.query<{ id: string }>(
+          `insert into projects (company_id, client_id, name, package_cost, status)
+           values ('${companyId}', '${client.rows[0]!.id}', '${name}', 50000, 'active') returning id;`,
+        )
+        return proj.rows[0]!.id
+      }),
+    )
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, project_id, category, amount) values ('${companyId}', '${projA}', 'Venue', 1000) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(`update expenses set project_id = '${projB}' where id = '${id}';`)
+    expect((await db.query<{ project_id: string }>(`select project_id from expenses where id = '${id}';`)).rows[0]!.project_id).toBe(projB)
+    await db.exec(`update expenses set project_id = null, is_fixed_overhead = true where id = '${id}';`)
+    const unlinked = await db.query<{ project_id: string | null; is_fixed_overhead: boolean }>(
+      `select project_id, is_fixed_overhead from expenses where id = '${id}';`,
+    )
+    expect(unlinked.rows[0]).toEqual({ project_id: null, is_fixed_overhead: true })
+  })
+
+  it('a deleted expense is gone, not merely hidden', async () => {
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, category, amount) values ('${companyId}', 'Misc', 100) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(`delete from expenses where id = '${id}';`)
+    const row = await db.query(`select id from expenses where id = '${id}';`)
+    expect(row.rows.length).toBe(0)
+  })
+})

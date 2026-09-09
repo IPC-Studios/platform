@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { Plus, Wallet } from 'lucide-react'
-import type { CreateExpenseRequest } from '@ipc/contracts'
+import { Plus, Wallet, Pencil, Trash2 } from 'lucide-react'
+import type { CreateExpenseRequest, Expense } from '@ipc/contracts'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const GST_RATES = [0, 5, 12, 18, 28]
@@ -18,9 +18,10 @@ import { formatINR, humanize } from '@/shared/ui/format'
 import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { groupBy, monthlySeries } from '@/shared/ui/chart-geometry'
-import { useExpenses, useCreateExpense } from '@/features/financials/api'
+import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } from '@/features/financials/api'
 import { useProjects } from '@/features/projects/api'
 import { PartyPicker } from '@/features/parties/PartyPicker'
+import { useConfirm } from '@/shared/ui/confirm'
 
 export function CompanyExpensesPage() {
   return (
@@ -32,8 +33,20 @@ export function CompanyExpensesPage() {
 
 function Expenses() {
   const { data, isLoading, isError, refetch } = useExpenses()
+  const del = useDeleteExpense()
+  const confirm = useConfirm()
   const isMobile = useIsMobile()
   const total = (data ?? []).reduce((s, e) => s + e.amount, 0)
+
+  async function onDelete(e: Expense) {
+    const yes = await confirm({
+      title: 'Delete this expense?',
+      description: `${e.category ?? 'Uncategorised'} · ${formatINR(e.amount)}. This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    })
+    if (yes) del.mutate(e.id)
+  }
 
   return (
     <>
@@ -94,6 +107,21 @@ function Expenses() {
                   { label: 'GST', value: humanize(e.gst_treatment) },
                   { label: 'Amount', value: formatINR(e.amount), strong: true },
                 ]}
+                actions={
+                  <div className="flex gap-1">
+                    <AddExpenseDialog
+                      expense={e}
+                      trigger={
+                        <Button variant="outline" size="icon">
+                          <Pencil />
+                        </Button>
+                      }
+                    />
+                    <Button variant="outline" size="icon" onClick={() => void onDelete(e)}>
+                      <Trash2 />
+                    </Button>
+                  </div>
+                }
               />
             ))}
           </RecordCards>
@@ -107,6 +135,7 @@ function Expenses() {
                 <th className="px-4 py-2 font-medium">Date</th>
                 <th className="px-4 py-2 font-medium">GST</th>
                 <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <th className="px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -123,6 +152,21 @@ function Expenses() {
                   <td className="px-4 py-2 text-muted-foreground">{e.expense_date}</td>
                   <td className="px-4 py-2 text-muted-foreground">{humanize(e.gst_treatment)}</td>
                   <td className="px-4 py-2 text-right font-medium">{formatINR(e.amount)}</td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <AddExpenseDialog
+                        expense={e}
+                        trigger={
+                          <Button size="sm" variant="ghost" title="Edit">
+                            <Pencil />
+                          </Button>
+                        }
+                      />
+                      <Button size="sm" variant="ghost" title="Delete" onClick={() => void onDelete(e)}>
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -136,19 +180,21 @@ function Expenses() {
   )
 }
 
-function AddExpenseDialog() {
+function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: React.ReactNode } = {}) {
+  const isEdit = !!expense
   const create = useCreateExpense()
+  const update = useUpdateExpense()
   const { data: projects } = useProjects()
   const [open, setOpen] = useState(false)
-  const [category, setCategory] = useState('')
-  const [description, setDescription] = useState('')
-  const [amount, setAmount] = useState(0)
-  const [expenseDate, setExpenseDate] = useState(todayISO())
-  const [projectId, setProjectId] = useState('')
-  const [partyId, setPartyId] = useState('')
-  const [overhead, setOverhead] = useState(false)
-  const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>('non_gst')
-  const [gstRate, setGstRate] = useState(18)
+  const [category, setCategory] = useState(expense?.category ?? '')
+  const [description, setDescription] = useState(expense?.description ?? '')
+  const [amount, setAmount] = useState(expense?.amount ?? 0)
+  const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? todayISO())
+  const [projectId, setProjectId] = useState(expense?.project_id ?? '')
+  const [partyId, setPartyId] = useState(expense?.party_id ?? '')
+  const [overhead, setOverhead] = useState(expense?.is_fixed_overhead ?? false)
+  const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>(expense?.gst_treatment ?? 'non_gst')
+  const [gstRate, setGstRate] = useState(expense?.gst_rate ?? 18)
   const [error, setError] = useState<string | null>(null)
 
   function reset() {
@@ -181,22 +227,27 @@ function AddExpenseDialog() {
         ...(category.trim() ? { category: category.trim() } : {}),
         ...(description.trim() ? { description: description.trim() } : {}),
       }
-      await create.mutateAsync(body)
+      if (isEdit) await update.mutateAsync({ id: expense.id, patch: body })
+      else await create.mutateAsync(body)
       setOpen(false)
-      reset()
+      if (!isEdit) reset()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add the expense.')
+      setError(err instanceof Error ? err.message : `Could not ${isEdit ? 'update' : 'add'} the expense.`)
     }
   }
+
+  const busy = create.isPending || update.isPending
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus /> Add expense
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus /> Add expense
+          </Button>
+        )}
       </DialogTrigger>
-      <DialogContent title="Add expense" description="Log a studio or project cost.">
+      <DialogContent title={isEdit ? 'Edit expense' : 'Add expense'} description="Log a studio or project cost.">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
@@ -280,8 +331,8 @@ function AddExpenseDialog() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? 'Saving…' : 'Add'}
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Add'}
             </Button>
           </div>
         </form>

@@ -149,8 +149,10 @@ export const addMemberResponse = z.object({
 export type AddMemberResponse = z.infer<typeof addMemberResponse>
 
 export const updateMemberRequest = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
   status: memberStatus.optional(),
   role: assignableRole.optional(),
+  engagement_type: engagementType.optional(),
   salary: money.nullable().optional(),
   phone: z.string().trim().max(20).nullable().optional(),
   alternate_phone: z.string().trim().max(20).nullable().optional(),
