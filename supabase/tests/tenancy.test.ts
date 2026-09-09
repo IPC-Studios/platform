@@ -5221,3 +5221,40 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
     await expect(db.query(`select update_work_submission('${id}', 'https://drive.example.com/after');`)).rejects.toThrow(/cannot be edited/)
   })
 })
+
+/**
+ * GET /team/members backs every "who can this go to" picker in the CRM --
+ * deal owner, distribution rota, workflow assign/notify steps, timeline
+ * actor, booking slots. It filtered only deleted_at, so a member the studio
+ * deactivated (status = 'inactive', not removed) still showed up as
+ * assignable everywhere, even though they can no longer log in to act on it.
+ */
+describe('team members picker excludes deactivated staff, not just removed staff', () => {
+  let db: PGlite
+  const owner = '99999999-1111-1111-1111-999999999999'
+  const active = '99999999-1111-1111-1111-999999999901'
+  const inactive = '99999999-1111-1111-1111-999999999902'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@picker.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Picker Studio','Owner');`)
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into auth.users (id, email) values ('${active}', 'active@picker.test'), ('${inactive}', 'inactive@picker.test');
+      insert into users (user_id, company_id, role, name, email, status) values
+        ('${active}', '${companyId}', 'employee', 'Active Ana', 'active@picker.test', 'active'),
+        ('${inactive}', '${companyId}', 'employee', 'Inactive Ivan', 'inactive@picker.test', 'inactive');
+    `)
+  })
+
+  it('the picker query returns only active, non-deleted members', async () => {
+    const rows = await db.query<{ name: string }>(
+      `select name from users where deleted_at is null and status = 'active' order by name;`,
+    )
+    const names = rows.rows.map((r) => r.name)
+    expect(names).toContain('Active Ana')
+    expect(names).not.toContain('Inactive Ivan')
+  })
+})

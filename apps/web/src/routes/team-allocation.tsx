@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { CalendarClock, ChevronLeft, ChevronRight, UserPlus } from 'lucide-react'
+import { CalendarClock, ChevronLeft, ChevronRight, UserPlus, X } from 'lucide-react'
 import { findConflicts, overlaps } from '@ipc/domain'
 import { shootListItem, type BookSlotRequest, type ShootListItem, type TeamSlot } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -16,9 +16,10 @@ import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/d
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
+import { useConfirm } from '@/shared/ui/confirm'
 import { formatINR } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
-import { useSlots, useMembers, useBookSlot, ApiError } from '@/features/allocation/api'
+import { useSlots, useMembers, useBookSlot, useSetSlotStatus, ApiError } from '@/features/allocation/api'
 
 export function TeamAllocationPage() {
   return (
@@ -299,8 +300,20 @@ function ShootRow({
   slots: readonly TeamSlot[]
   onAssign: () => void
 }) {
+  const setStatus = useSetSlotStatus()
+  const confirm = useConfirm()
   const mine = slots.filter((s) => s.shoot_id === shoot.id)
   const filledFor = (name: string) => mine.filter((s) => same(s.service_name, name)).length
+
+  async function onCancel(s: TeamSlot) {
+    const yes = await confirm({
+      title: `Cancel ${s.user_name ?? 'this'}'s booking?`,
+      description: s.service_name ? `${s.service_name} on ${shoot.name}.` : `On ${shoot.name}.`,
+      confirmLabel: 'Cancel booking',
+      destructive: true,
+    })
+    if (yes) setStatus.mutate({ id: s.id, status: 'cancelled' })
+  }
   const needed = shoot.requirements.reduce((n, r) => n + r.quantity, 0)
   const filled = shoot.requirements.reduce((n, r) => n + Math.min(r.quantity, filledFor(r.name)), 0)
   const date = shoot.shoot_date ? new Date(`${shoot.shoot_date}T00:00:00`) : null
@@ -384,9 +397,28 @@ function ShootRow({
         </div>
 
         {mine.length > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Booked: {mine.map((s) => s.user_name ?? 'Member').join(', ')}
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Booked:</span>
+            {mine.map((s) => (
+              <span
+                key={s.id}
+                className="flex items-center gap-1 rounded-full border border-border bg-muted/50 py-0.5 pl-2 pr-1 text-xs"
+              >
+                {s.user_name ?? 'Member'}
+                {s.service_name ? ` · ${s.service_name}` : ''}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-4"
+                  title="Cancel this booking"
+                  onClick={() => void onCancel(s)}
+                  disabled={setStatus.isPending}
+                >
+                  <X className="size-3" />
+                </Button>
+              </span>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>

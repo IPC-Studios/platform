@@ -49,12 +49,17 @@ async function companyName(c: Context<AppEnv>): Promise<string> {
 export const teamRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
+  // Every caller of this endpoint uses it as a "who can this go to" picker
+  // (a deal owner, a distribution rota, a workflow step, a booking slot) --
+  // never a place to see who used to work here, so a deactivated member
+  // (status = 'inactive', deleted_at still null) is excluded the same as a
+  // removed one.
   .get('/members', async (c) => {
     const rows = await attempt(c, 'team.members', () =>
       withUser(
         c.env,
         c.get('auth').userId,
-        (sql) => sql`select user_id, name, role from users where deleted_at is null order by name`,
+        (sql) => sql`select user_id, name, role from users where deleted_at is null and status = 'active' order by name`,
       ),
     )
     if (!rows) fail(400, 'We could not load the team.')
