@@ -699,9 +699,12 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
 function AddShootMenu({
   shoots,
   onAdd,
+  extraNames = [],
 }: {
   shoots: ShootDraft[]
   onAdd: (name: string) => void
+  /** This studio's own saved shoot names, merged into the common list. */
+  extraNames?: readonly string[]
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -731,7 +734,7 @@ function AddShootMenu({
   }, [open])
 
   const taken = new Set(shoots.map((s) => s.name.trim().toLowerCase()))
-  const matches = matchShootTypes(query)
+  const matches = matchShootTypes(query, extraNames)
   const custom = query.trim()
   const free = matches.filter((m) => !taken.has(m.toLowerCase()))
 
@@ -909,7 +912,11 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <AddShootMenu shoots={draft.shoots} onAdd={addNamed} />
+          <AddShootMenu
+            shoots={draft.shoots}
+            onAdd={addNamed}
+            extraNames={(shootPresets.data ?? []).map((p) => p.name)}
+          />
           <PresetMenu
             label="Apply preset"
             presets={shootPresets.data ?? []}
