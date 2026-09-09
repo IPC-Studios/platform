@@ -132,7 +132,7 @@ export const hrRouter = new Hono<AppEnv>()
   .get('/location', async (c) => {
     const row = await attempt(c, 'hr.location', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const rows = await sql`select lat, lng, radius_m, timezone from company_location`
+        const rows = await sql`select lat, lng, radius_m, timezone, is_active from company_location`
         return rows[0] ?? null
       }),
     )
@@ -149,7 +149,7 @@ export const hrRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'hr.location_set', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
-          select * from set_company_location(${v.lat}, ${v.lng}, ${v.radius_m}, ${v.timezone})`
+          select * from set_company_location(${v.lat}, ${v.lng}, ${v.radius_m}, ${v.timezone}, ${v.is_active})`
         return rows[0] ?? null
       }),
     )

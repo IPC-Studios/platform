@@ -112,6 +112,7 @@ async function freshDb() {
   await db.exec(mig('0076_work_submission_edit.sql'))
   await db.exec(mig('0077_reminder_entity_name.sql'))
   await db.exec(mig('0078_invoice_template_link.sql'))
+  await db.exec(mig('0079_attendance_fence_toggle.sql'))
   return db
 }
 
@@ -1976,6 +1977,20 @@ describe('attendance check-out and fence (0030)', () => {
   it('keeps the fence out once it is set', async () => {
     // Same coordinates the fence was just moved away from.
     await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow()
+  })
+
+  it('a fence can be turned off without deleting it, and back on again', async () => {
+    // The fence is currently at Delhi (28.6139, 77.209); Mumbai (19.076, 72.8777) is outside it.
+    await db.query(`select set_company_location(28.6139, 77.209, 300, 'Asia/Kolkata', false);`)
+    const id = (await db.query<{ id: string }>(`select check_in(19.076, 72.8777) as id;`)).rows[0]!.id
+    expect(id).toBeTruthy()
+    await db.exec(`delete from attendance where id = '${id}';`) // undo, so the next test starts clean
+
+    await db.query(`select set_company_location(28.6139, 77.209, 300, 'Asia/Kolkata', true);`)
+    await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow(/outside_fence/)
+
+    const row = await db.query<{ is_active: boolean }>(`select is_active from company_location;`)
+    expect(row.rows[0]!.is_active).toBe(true)
   })
 })
 
