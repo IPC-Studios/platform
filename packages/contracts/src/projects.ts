@@ -29,6 +29,22 @@ export const deliverableInput = z.object({
 })
 export type DeliverableInput = z.infer<typeof deliverableInput>
 
+export const updateDeliverableRequest = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  list_key: z.string().min(1).max(40).optional(),
+  is_additional_charge: z.boolean().optional(),
+  additional_charge_amount: money.optional(),
+  visibility_scope: deliverableVisibility.optional(),
+  show_on_quotation: z.boolean().optional(),
+  estimated_date: isoDate.nullable().optional(),
+  start_rule: deliverableStartRule.optional(),
+  delivery_days_after_start: z.number().int().min(0).nullable().optional(),
+  work_type: z.string().max(80).nullable().optional(),
+  internal_notes: z.string().max(2000).nullable().optional(),
+})
+export type UpdateDeliverableRequest = z.infer<typeof updateDeliverableRequest>
+
 export const paymentInput = z.object({
   amount: money,
   paid_on: isoDate.optional(),
@@ -92,6 +108,7 @@ export const deliverable = z.object({
   internal_notes: z.string().nullish(),
   status: z.string(),
 })
+export type Deliverable = z.infer<typeof deliverable>
 
 export const projectDetail = z.object({
   id: uuid,

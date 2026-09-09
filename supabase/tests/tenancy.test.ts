@@ -5030,3 +5030,37 @@ describe('Lovable parity round 6: editing and deleting a task', () => {
     expect(Number(after.rows[0]!.n)).toBe(0)
   })
 })
+
+describe('Lovable parity round 7: editing a project deliverable', () => {
+  let db: PGlite
+  let projectId: string
+  let deliverableId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`insert into clients (company_id, name) values (get_current_company_id(), 'Deliverable client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Deliverable client';`)
+    const proj = await db.query<{ id: string }>(
+      `select create_project_with_details('${client.rows[0]!.id}', 'Deliverable Proj', 50000) as id;`,
+    )
+    projectId = proj.rows[0]!.id
+    await db.exec(
+      `insert into deliverables (company_id, project_id, title, show_on_quotation)
+       values (get_current_company_id(), '${projectId}', 'Album', true);`,
+    )
+    deliverableId = (await db.query<{ id: string }>(`select id from deliverables where project_id = '${projectId}';`)).rows[0]!.id
+  })
+
+  it('a deliverable\'s title and quotation visibility can be corrected without touching the others', async () => {
+    await db.exec(
+      `update deliverables set title = 'Wedding Album (Premium)', show_on_quotation = false where id = '${deliverableId}';`,
+    )
+    const row = await db.query<{ title: string; show_on_quotation: boolean }>(
+      `select title, show_on_quotation from deliverables where id = '${deliverableId}';`,
+    )
+    expect(row.rows[0]).toEqual({ title: 'Wedding Album (Premium)', show_on_quotation: false })
+  })
+})

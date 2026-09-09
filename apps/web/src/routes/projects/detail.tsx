@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import type {
+  Deliverable,
   DeliverableInput,
   PaymentInput,
   ProjectStatus,
@@ -43,6 +44,7 @@ import {
   useProject,
   useUpdateProject,
   useAddDeliverable,
+  useUpdateDeliverable,
   useDeleteDeliverable,
   useAddPayment,
   useDeleteProject,
@@ -318,6 +320,7 @@ function ProjectDetail() {
                       {d.is_additional_charge && (
                         <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>
                       )}
+                      {canEdit && <EditDeliverableDialog id={id} deliverable={d} />}
                       {canEdit && (
                         <Button variant="ghost" size="icon" onClick={() => void removeDeliverable(d.id, d.title)}>
                           <Trash2 />
@@ -565,6 +568,71 @@ function AddDeliverableDialog({ id }: { id: string }) {
             </DialogClose>
             <Button type="submit" disabled={add.isPending}>
               {add.isPending ? 'Adding…' : 'Add'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: Deliverable }) {
+  const update = useUpdateDeliverable(id)
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState(deliverable.title)
+  const [charge, setCharge] = useState(deliverable.is_additional_charge)
+  const [amount, setAmount] = useState(deliverable.additional_charge_amount)
+  const [showOnQuotation, setShowOnQuotation] = useState(deliverable.show_on_quotation)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    await update.mutateAsync({
+      deliverableId: deliverable.id,
+      patch: {
+        title: title.trim(),
+        is_additional_charge: charge,
+        additional_charge_amount: amount,
+        show_on_quotation: showOnQuotation,
+      },
+    })
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" title="Edit">
+          <Pencil />
+        </Button>
+      </DialogTrigger>
+      <DialogContent title="Edit deliverable">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Title</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={charge} onChange={(e) => setCharge(e.target.checked)} />
+            Additional charge
+          </label>
+          {charge && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Amount (₹)</Label>
+              <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={showOnQuotation} onChange={(e) => setShowOnQuotation(e.target.checked)} />
+            Show on quotation
+          </label>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>
         </form>
