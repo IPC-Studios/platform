@@ -13,9 +13,10 @@ import {
   useReferralSubmissions,
   useSaveReferralCampaign,
   useDeleteReferralCampaign,
+  useUpdateReferralCampaignStatus,
   useUpdateSubmissionStatus,
 } from '@/features/referrals/api'
-import { type CreateReferralCampaignRequest } from '@ipc/contracts'
+import { type CreateReferralCampaignRequest, type ReferralCampaignStatus } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { Plus, Trash2, Pencil, Copy, Trophy, Users, TrendingUp, Target } from 'lucide-react'
 
@@ -34,6 +35,7 @@ function ReferralsContent() {
   const { data: submissionData, fetchNextPage, hasNextPage, isFetchingNextPage } = useReferralSubmissions()
   const saveCampaign = useSaveReferralCampaign()
   const deleteCampaign = useDeleteReferralCampaign()
+  const updateCampaignStatus = useUpdateReferralCampaignStatus()
   const updateStatus = useUpdateSubmissionStatus()
 
   const campaigns = campaignData?.campaigns ?? []
@@ -109,9 +111,6 @@ function ReferralsContent() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{campaign.name}</span>
-                  <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
-                    {campaign.status}
-                  </Badge>
                 </div>
                 {campaign.description && (
                   <p className="mt-1 truncate text-sm text-muted-foreground">{campaign.description}</p>
@@ -136,6 +135,18 @@ function ReferralsContent() {
                 <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit campaign" onClick={() => openEdit(campaign)}>
                   <Pencil className="h-4 w-4" />
                 </Button>
+                <Select
+                  value={campaign.status}
+                  onChange={(e) =>
+                    updateCampaignStatus.mutate({ id: campaign.id, status: e.target.value as ReferralCampaignStatus })
+                  }
+                  className="h-8 w-24"
+                  aria-label={`Status for ${campaign.name}`}
+                >
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                  <option value="ended">Ended</option>
+                </Select>
                 <Button
                   variant="ghost"
                   size="icon"

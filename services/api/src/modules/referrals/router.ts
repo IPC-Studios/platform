@@ -3,6 +3,7 @@ import {
   createReferralCampaignRequest,
   publicReferralCampaign,
   referralCampaignList,
+  referralCampaignStatus,
   referralSubmissionList,
   submitReferralRequest,
   z,
@@ -87,6 +88,30 @@ export const referralsRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not save this campaign.')
     if (!rows.length) fail(404, 'We could not find that campaign.')
     await audit(c, { action: 'referral_campaign.update', entityType: 'referral_campaign', entityId: id, after: d })
+    return c.json(okResponse.parse({ ok: true }))
+  })
+
+  // A paused/ended campaign fails closed on both public routes above
+  // (get_public_referral_campaign and submit_referral each check
+  // status = 'active') -- stopping a live link is a status flip, not a
+  // delete, which would otherwise erase the campaign's own submission
+  // history along with it.
+  .patch('/:id/status', requireAction('referrals', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const parsed = referralCampaignStatus.safeParse((await c.req.json().catch(() => ({})) as { status?: unknown }).status)
+    if (!parsed.success) fail(422, 'Invalid status.')
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'referrals.campaign_status', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          update referral_campaigns set status = ${parsed.data}
+          where id = ${id} and company_id = ${auth.companyId}
+          returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not update this campaign.')
+    if (!rows.length) fail(404, 'We could not find that campaign.')
+    await audit(c, { action: 'referral_campaign.status', entityType: 'referral_campaign', entityId: id, after: { status: parsed.data } })
     return c.json(okResponse.parse({ ok: true }))
   })
 

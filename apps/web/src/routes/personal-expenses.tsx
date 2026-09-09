@@ -18,6 +18,7 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import {
   usePersonalExpenses,
+  usePersonalExpenseReport,
   useSavePersonalExpense,
   useDeletePersonalExpense,
 } from '@/features/personal-expenses/api'
@@ -107,9 +108,12 @@ function PersonalExpensesContent() {
         title="Personal Expenses"
         description="Track your personal expenses"
         actions={
-          <Button onClick={openCreate} size="sm">
-            <Plus className="mr-1 h-4 w-4" /> Add Expense
-          </Button>
+          <div className="flex gap-2">
+            <ReportDialog />
+            <Button onClick={openCreate} size="sm">
+              <Plus className="mr-1 h-4 w-4" /> Add Expense
+            </Button>
+          </div>
         }
       />
 
@@ -271,6 +275,94 @@ function PersonalExpensesContent() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function firstOfMonth(): string {
+  const d = new Date()
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+}
+
+/** Category and day breakdown for a date range — the backend's had this since round 1, the UI never asked for it. */
+function ReportDialog() {
+  const [open, setOpen] = useState(false)
+  const [startDate, setStartDate] = useState(firstOfMonth())
+  const [endDate, setEndDate] = useState(todayISO())
+  const { data, isLoading, isError } = usePersonalExpenseReport(open ? startDate : '', open ? endDate : '')
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <BarChart3 className="mr-1 h-4 w-4" /> Report
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent title="Personal expense report" description="Category and day-by-day breakdown for a date range.">
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">From</label>
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} max={endDate} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">To</label>
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} />
+            </div>
+          </div>
+
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : isError ? (
+            <p className="text-sm text-destructive">Could not load the report.</p>
+          ) : !data ? null : (
+            <>
+              <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Total, {data.period_start} to {data.period_end}</p>
+                <p className="text-xl font-semibold">₹{data.total_amount.toLocaleString()}</p>
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-medium">By category</p>
+                {data.by_category.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No expenses in this range.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {data.by_category.map((c) => (
+                      <li key={c.category ?? '—'} className="flex items-center justify-between text-sm">
+                        <span>
+                          {c.category ?? 'Uncategorised'} <span className="text-muted-foreground">({c.count})</span>
+                        </span>
+                        <span className="font-medium">₹{c.amount.toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {data.daily_breakdown.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-medium">By day</p>
+                  <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                    {data.daily_breakdown.map((d) => (
+                      <li key={d.date} className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{d.date}</span>
+                        <span>₹{d.amount.toLocaleString()} · {d.count} {d.count === 1 ? 'expense' : 'expenses'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
