@@ -2034,8 +2034,8 @@ function DeliverableRow({
           </Select>
         </Field>
 
-        {item.due_basis === 'custom' && (
-          <Field label="Estimated date">
+        {(item.due_basis === 'custom' || item.due_basis === 'custom_after') && (
+          <Field label={item.due_basis === 'custom_after' ? 'Count days from' : 'Estimated date'}>
             <Input
               type="date"
               value={item.custom_date}
@@ -2482,7 +2482,7 @@ function AddDeliverableDialog({
       description: description.trim(),
       due_days: dueDays.trim(),
       due_basis: dueBasis,
-      custom_date: dueBasis === 'custom' ? customDate : '',
+      custom_date: dueBasis === 'custom' || dueBasis === 'custom_after' ? customDate : '',
       visibility_scope: onQuotation ? 'client' : 'internal',
       show_on_quotation: onQuotation,
       // Only internal work waits on data. A client line is a promise, not a
@@ -2555,9 +2555,9 @@ function AddDeliverableDialog({
             </div>
           </div>
 
-          {dueBasis === 'custom' && (
+          {(dueBasis === 'custom' || dueBasis === 'custom_after') && (
             <div className="flex flex-col gap-1.5">
-              <Label>Estimated date</Label>
+              <Label>{dueBasis === 'custom_after' ? 'Count days from' : 'Estimated date'}</Label>
               <Input
                 type="date"
                 value={customDate}

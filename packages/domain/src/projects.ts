@@ -118,12 +118,14 @@ export type DueBasis =
   | 'after_last_shoot'
   | 'after_project_created'
   | 'custom'
+  | 'custom_after'
 
 export const DUE_BASIS_OPTIONS: ReadonlyArray<{ value: DueBasis; label: string }> = [
   { value: 'after_wedding_day', label: 'After Wedding Day' },
   { value: 'after_last_shoot', label: 'After Last Shoot' },
   { value: 'after_project_created', label: 'After Project Created' },
   { value: 'custom', label: 'Custom Date' },
+  { value: 'custom_after', label: 'Days After a Custom Date' },
 ]
 
 export interface NamedShootDate extends ShootDate {
@@ -153,7 +155,7 @@ export function dueBasisAnchor(
   shoots: ReadonlyArray<NamedShootDate>,
   today: string,
 ): string | null {
-  if (basis === 'custom') return null
+  if (basis === 'custom' || basis === 'custom_after') return null
   if (basis === 'after_project_created') return today
   if (basis === 'after_wedding_day') return findWeddingShoot(shoots)?.shoot_date ?? null
   const dated = shoots.map((s) => s.shoot_date).filter((d): d is string => !!d)
@@ -173,6 +175,10 @@ export function deliverableDueDate(
   today: string,
 ): string | null {
   if (basis === 'custom') return customDate?.trim() ? customDate : null
+  if (basis === 'custom_after') {
+    if (!customDate?.trim() || dueDays === undefined) return null
+    return addDays(customDate, dueDays)
+  }
   const anchor = dueBasisAnchor(basis, shoots, today)
   if (anchor === null || dueDays === undefined) return null
   return addDays(anchor, dueDays)

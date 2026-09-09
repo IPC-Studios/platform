@@ -164,6 +164,12 @@ describe('due basis — what the client was promised', () => {
     expect(deliverableDueDate('custom', shoots, 45, '', '2026-09-07')).toBeNull()
   })
 
+  it('counts the day count from a custom date, unlike plain "custom"', () => {
+    expect(deliverableDueDate('custom_after', shoots, 45, '2027-02-01', '2026-09-07')).toBe('2027-03-18')
+    expect(deliverableDueDate('custom_after', shoots, undefined, '2027-02-01', '2026-09-07')).toBeNull()
+    expect(deliverableDueDate('custom_after', shoots, 45, '', '2026-09-07')).toBeNull()
+  })
+
   it('has no answer when the anchor day is unknown', () => {
     const undated = [{ name: 'Wedding Day', shoot_date: null }]
     expect(deliverableDueDate('after_wedding_day', undated, 45, null, '2026-09-07')).toBeNull()
