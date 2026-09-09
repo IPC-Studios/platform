@@ -107,6 +107,7 @@ async function freshDb() {
   await db.exec(mig('0071_crm_lead_contact_fields.sql'))
   await db.exec(mig('0072_personal_expense_gst_rate.sql'))
   await db.exec(mig('0073_work_submission_location.sql'))
+  await db.exec(mig('0074_invoice_edit.sql'))
   return db
 }
 
@@ -699,6 +700,67 @@ describe('billing & invoicing (Phase 9)', () => {
     row = await db.query(`select status, balance_due from invoices where id = '${id}';`)
     expect(row.rows[0]!.status).toBe('paid')
     expect(Number(row.rows[0]!.balance_due)).toBe(0)
+  })
+
+  it('a mistake on a freshly created invoice -- wrong client, wrong line item -- can still be corrected', async () => {
+    const wrongClient = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'Wrong Client') returning id;`,
+    )
+    const items = JSON.stringify([
+      { description: 'Typo Package', quantity: 1, rate: 5000, amount: 5000, gst_rate: 18, taxable: 5000, cgst: 450, sgst: 450, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(
+      `select id from create_invoice('${wrongClient.rows[0]!.id}', null, '27', current_date, null,
+        5000, 0, 5000, 900, 5900, '${items}'::jsonb, 'v1');`,
+    )
+    const id = inv.rows[0]!.id
+
+    const newItems = JSON.stringify([
+      { description: 'Wedding Package', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    ])
+    await db.query(`
+      select update_invoice(
+        p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+        p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+        p_subtotal => 100000, p_discount => 0, p_taxable => 100000, p_tax => 18000, p_total => 118000,
+        p_items => '${newItems}'::jsonb, p_notes => 'v2'
+      );
+    `)
+    const row = await db.query<{ client_id: string; total: string; notes: string }>(
+      `select client_id, total, notes from invoices where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ client_id: clientId, total: '118000.00', notes: 'v2' })
+    const lineItems = await db.query<{ description: string }>(`select description from invoice_items where invoice_id = '${id}';`)
+    expect(lineItems.rows.map((r) => r.description)).toEqual(['Wedding Package'])
+  })
+
+  it('an invoice with a recorded payment can no longer be edited or deleted', async () => {
+    const items = JSON.stringify([
+      { description: 'Retainer', quantity: 1, rate: 20000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(
+      `select id from create_invoice('${clientId}', null, '27', current_date, null,
+        20000, 0, 20000, 3600, 23600, '${items}'::jsonb, null);`,
+    )
+    const id = inv.rows[0]!.id
+    await db.query(`select record_invoice_payment('${id}', 5000);`)
+
+    await expect(
+      db.query(`
+        select update_invoice(
+          p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+          p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+          p_subtotal => 0, p_discount => 0, p_taxable => 0, p_tax => 0, p_total => 0,
+          p_items => '[]'::jsonb, p_notes => null
+        );
+      `),
+    ).rejects.toThrow(/cannot be edited/)
+
+    // The API's delete guard mirrors update_invoice's own rule (amount_paid = 0).
+    const attempted = await db.query(`delete from invoices where id = '${id}' and amount_paid = 0 returning id;`)
+    expect(attempted.rows.length).toBe(0)
+    const stillThere = await db.query(`select id from invoices where id = '${id}';`)
+    expect(stillThere.rows.length).toBe(1)
   })
 })
 

@@ -37,6 +37,10 @@ export const createInvoiceRequest = z.object({
 })
 export type CreateInvoiceRequest = z.infer<typeof createInvoiceRequest>
 
+/** Same shape as creation: an edit resends the whole invoice, header and lines together. */
+export const updateInvoiceRequest = createInvoiceRequest
+export type UpdateInvoiceRequest = z.infer<typeof updateInvoiceRequest>
+
 export const recordPaymentRequest = z.object({
   amount: money.refine((v) => v > 0, 'amount must be positive'),
   paid_on: isoDate.optional(),
@@ -55,6 +59,9 @@ export const invoiceDetail = z.object({
   due_date: isoDate.nullable(),
   status: invoiceStatus,
   place_of_supply: z.string().nullable(),
+  intra_state: z.boolean(),
+  client_id: uuid.nullable(),
+  project_id: uuid.nullable(),
   client_name: z.string().nullable(),
   client_gstin: z.string().nullable(),
   client_address: z.string().nullable(),

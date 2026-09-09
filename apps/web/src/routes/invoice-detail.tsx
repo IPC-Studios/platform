@@ -1,16 +1,20 @@
+import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useParams } from '@tanstack/react-router'
-import { Printer, ArrowLeft, Download } from 'lucide-react'
-import { amountInWords } from '@ipc/domain'
-import { companyProfile } from '@ipc/contracts'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { Printer, ArrowLeft, Download, Pencil, Trash2 } from 'lucide-react'
+import { amountInWords, type GstSlab } from '@ipc/domain'
+import { companyProfile, type InvoiceDetail } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState } from '@/shared/ui/states'
+import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
+import { useConfirm } from '@/shared/ui/confirm'
 import { formatINR, humanize } from '@/shared/ui/format'
-import { useInvoice } from '@/features/billing/api'
+import { useInvoice, useUpdateInvoice, useDeleteInvoice, useStates } from '@/features/billing/api'
+import { useInvoiceForm, InvoiceFormFields } from '@/features/billing/InvoiceForm'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
 
@@ -33,7 +37,8 @@ function InvoiceDoc() {
   if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
-  const intraState = data.items.some((i) => i.cgst > 0 || i.sgst > 0)
+  const intraState = data.intra_state
+  const editable = data.amount_paid === 0 && data.status !== 'cancelled'
 
   return (
     <>
@@ -44,6 +49,12 @@ function InvoiceDoc() {
           </Link>
         </Button>
         <div className="flex gap-2">
+          {editable && (
+            <>
+              <EditInvoiceDialog invoice={data} />
+              <DeleteInvoiceButton invoiceId={data.id} />
+            </>
+          )}
           <Button size="sm" variant="outline" onClick={() => window.print()}>
             <Download /> Download PDF
           </Button>
@@ -160,6 +171,93 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
       <span className="text-muted-foreground">{label}</span>
       <span className={strong ? 'text-base font-semibold' : 'font-medium'}>{value}</span>
     </div>
+  )
+}
+
+function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
+  const update = useUpdateInvoice(invoice.id)
+  const { data: states } = useStates()
+  const [open, setOpen] = useState(false)
+  const form = useInvoiceForm({
+    client_id: invoice.client_id ?? '',
+    project_id: invoice.project_id ?? '',
+    place_of_supply: invoice.place_of_supply ?? '27',
+    intra_state: invoice.intra_state,
+    invoice_date: invoice.invoice_date,
+    due_date: invoice.due_date ?? '',
+    discount: invoice.discount,
+    notes: invoice.notes ?? '',
+    lines: invoice.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, gst_rate: i.gst_rate as GstSlab })),
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    try {
+      await update.mutateAsync(form.toRequest())
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the invoice.')
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Pencil /> Edit
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title="Edit invoice"
+        description="No payment is recorded yet, so the whole invoice can still be corrected."
+        className="max-w-2xl"
+      >
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <InvoiceFormFields form={form} states={states} />
+          {error && (
+            <p id="form-error" role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={update.isPending || form.totals.total <= 0 || !form.values.client_id}>
+              {update.isPending ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteInvoiceButton({ invoiceId }: { invoiceId: string }) {
+  const del = useDeleteInvoice()
+  const confirm = useConfirm()
+  const navigate = useNavigate()
+
+  async function onDelete() {
+    const yes = await confirm({
+      title: 'Delete this invoice?',
+      description: 'No payment has been recorded against it yet. This cannot be undone.',
+      destructive: true,
+      confirmLabel: 'Delete',
+    })
+    if (!yes) return
+    await del.mutateAsync(invoiceId)
+    void navigate({ to: '/billing' })
+  }
+
+  return (
+    <Button size="sm" variant="outline" onClick={() => void onDelete()} disabled={del.isPending}>
+      <Trash2 /> Delete
+    </Button>
   )
 }
 
