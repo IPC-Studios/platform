@@ -11,7 +11,7 @@ import { useActiveLookups, useCreateCustomLookup } from '@/features/settings/api
 import { useClients } from '@/features/clients/api'
 import { useProjects, useProject } from '@/features/projects/api'
 import { useConfirm } from '@/shared/ui/confirm'
-import { useInvoiceTemplates } from './api'
+import { useInvoiceTemplates, useInvoiceNoteTemplates, useCreateInvoiceNoteTemplate } from './api'
 
 export const GST_SLABS: GstSlab[] = [0, 5, 12, 18, 28]
 
@@ -234,6 +234,61 @@ function ClientCombobox({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** A "Templates ▾" picker that fills Notes from a saved snippet, plus a "+ Save" to add the current text as one. */
+function NoteTemplatePicker({ notes, onFill }: { notes: string; onFill: (content: string) => void }) {
+  const { data } = useInvoiceNoteTemplates()
+  const createTemplate = useCreateInvoiceNoteTemplate()
+  const [saving, setSaving] = useState(false)
+  const [title, setTitle] = useState('')
+  const templates = data?.items ?? []
+
+  async function onSave() {
+    if (!title.trim() || !notes.trim()) return
+    await createTemplate.mutateAsync({ title: title.trim(), content: notes.trim(), is_default: false })
+    setSaving(false)
+    setTitle('')
+  }
+
+  if (saving) {
+    return (
+      <div className="flex items-center gap-2">
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Template name" autoFocus className="h-7 w-40 text-xs" />
+        <Button type="button" size="sm" className="h-7" onClick={() => void onSave()} disabled={!title.trim() || createTemplate.isPending}>
+          Save
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => setSaving(false)}>
+          Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {templates.length > 0 && (
+        <Select
+          value=""
+          onChange={(e) => {
+            const t = templates.find((x) => x.id === e.target.value)
+            if (t) onFill(t.content)
+          }}
+          className="h-7 w-40 text-xs"
+        >
+          <option value="">Templates…</option>
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.title}
+            </option>
+          ))}
+        </Select>
+      )}
+      <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSaving(true)} disabled={!notes.trim()}>
+        + Save as template
+      </Button>
     </div>
   )
 }
@@ -486,7 +541,10 @@ export function InvoiceFormFields({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Notes (optional)</Label>
+        <div className="flex items-center justify-between">
+          <Label>Notes (optional)</Label>
+          <NoteTemplatePicker notes={values.notes} onFill={(content) => set('notes', content)} />
+        </div>
         <textarea
           value={values.notes}
           onChange={(e) => set('notes', e.target.value)}

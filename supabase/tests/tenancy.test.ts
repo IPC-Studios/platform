@@ -122,6 +122,7 @@ async function freshDb() {
   await db.exec(mig('0086_project_profitability_report.sql'))
   await db.exec(mig('0087_invoice_number_override.sql'))
   await db.exec(mig('0088_invoice_item_title.sql'))
+  await db.exec(mig('0089_invoice_note_templates.sql'))
   return db
 }
 
@@ -916,6 +917,30 @@ describe('billing & invoicing (Phase 9)', () => {
 
     expect(await resolve(withOwn.rows[0]!.id)).toBe('false')
     expect(await resolve(withoutOwn.rows[0]!.id)).toBe('true')
+  })
+
+  it('a Notes snippet library sits alongside print-layout templates, independent of them', async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const a = await db.query<{ id: string }>(
+      `insert into invoice_note_templates (company_id, title, content, is_default)
+       values ('${companyId}', 'Standard terms', 'Payment due within 15 days.', true) returning id;`,
+    )
+    await db.exec(
+      `insert into invoice_note_templates (company_id, title, content) values ('${companyId}', 'Thank you note', 'Thank you for booking with us!');`,
+    )
+    const active = await db.query<{ title: string }>(
+      `select title from invoice_note_templates where company_id = '${companyId}' and is_active = true order by is_default desc, created_at desc;`,
+    )
+    expect(active.rows.map((r) => r.title)).toEqual(['Standard terms', 'Thank you note'])
+
+    // Soft-deleted, not gone -- an invoice that already used its text keeps meaning what it said.
+    await db.exec(`update invoice_note_templates set is_active = false where id = '${a.rows[0]!.id}';`)
+    const stillActive = await db.query<{ title: string }>(
+      `select title from invoice_note_templates where company_id = '${companyId}' and is_active = true;`,
+    )
+    expect(stillActive.rows.map((r) => r.title)).toEqual(['Thank you note'])
+    const row = await db.query<{ content: string }>(`select content from invoice_note_templates where id = '${a.rows[0]!.id}';`)
+    expect(row.rows[0]!.content).toBe('Payment due within 15 days.')
   })
 })
 

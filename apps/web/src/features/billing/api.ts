@@ -5,6 +5,8 @@ import {
   invoiceDetail,
   invoiceListItem,
   invoiceTemplateList,
+  invoiceNoteTemplateList,
+  type CreateInvoiceNoteTemplateRequest,
   type CreateInvoiceRequest,
   type RecordPaymentRequest,
   type UpdateInvoiceRequest,
@@ -47,6 +49,29 @@ export function useInvoiceTemplates() {
     queryFn: () => callApi('/billing/templates', { responseSchema: invoiceTemplateList }),
     enabled: !!session && access.hasModule('billing'),
     staleTime: 60_000,
+  })
+}
+
+export function useInvoiceNoteTemplates() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['billing', 'note-templates'],
+    queryFn: () => callApi('/billing/note-templates', { responseSchema: invoiceNoteTemplateList }),
+    enabled: !!session && access.hasModule('billing'),
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateInvoiceNoteTemplate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateInvoiceNoteTemplateRequest) =>
+      callApi('/billing/note-templates', { method: 'POST', body: input, responseSchema: z.object({ id: z.string() }) }),
+    onSuccess: () => {
+      toast.success('Note template saved')
+      void qc.invalidateQueries({ queryKey: ['billing', 'note-templates'] })
+    },
   })
 }
 
