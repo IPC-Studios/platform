@@ -80,7 +80,7 @@ export const settingsRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'settings.profile', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
-          select name, email, phone, role, status from users where user_id = ${auth.userId}`
+          select name, email, phone, role, status, avatar_url from users where user_id = ${auth.userId}`
         return rows[0] ?? null
       }),
     )
@@ -97,7 +97,7 @@ export const settingsRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           update users set ${sql(parsed.data)} where user_id = ${auth.userId}
-          returning name, email, phone, role, status`
+          returning name, email, phone, role, status, avatar_url`
         return rows[0] ?? null
       }),
     )

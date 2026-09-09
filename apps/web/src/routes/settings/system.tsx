@@ -269,6 +269,8 @@ function CronRow({ run }: { run: CronRun }) {
 const LOOKUP_CATEGORIES = [
   { value: 'lead_source', label: 'Lead Sources' },
   { value: 'expense_category', label: 'Expense Categories' },
+  { value: 'enquiry_source', label: 'Enquiry Sources' },
+  { value: 'payment_type', label: 'Payment Types' },
   { value: 'project_type', label: 'Project Types' },
   { value: 'currency', label: 'Currencies' },
 ]

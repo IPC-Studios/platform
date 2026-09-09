@@ -67,6 +67,7 @@ import {
   useSaveDeliverableSet,
 } from '@/features/projects/api'
 import { useRoleLibrary } from '@/features/team/api'
+import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
 import {
   useDeleteShootPreset,
   useSaveShootPreset,
@@ -2208,15 +2209,7 @@ function BillingStep({
                 <Field label="Received on">
                   <Input type="date" value={p.paid_on} onChange={(e) => set(i, { paid_on: e.target.value })} />
                 </Field>
-                <Field label="Mode">
-                  <Select value={p.mode} onChange={(e) => set(i, { mode: e.target.value })}>
-                    <option value="">—</option>
-                    <option value="upi">UPI</option>
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank transfer</option>
-                    <option value="cheque">Cheque</option>
-                  </Select>
-                </Field>
+                <PaymentModePicker value={p.mode} onChange={(v) => set(i, { mode: v })} />
                 <Field label="Reference">
                   <Input
                     value={p.reference}

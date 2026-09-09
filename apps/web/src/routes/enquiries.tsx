@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ExternalLink, Inbox, Mail, Pencil, Phone, Plus, Trash2, UserPlus } from 'lucide-react'
 import type { Enquiry, EnquiryStatus, SaveEnquiryRequest } from '@ipc/contracts'
-import { ENQUIRY_SOURCES } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
@@ -18,7 +17,9 @@ import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
+import { useAuth } from '@/shared/auth/AuthProvider'
 import { useDirectory } from '@/features/team/api'
+import { useActiveLookups, useCreateCustomLookup } from '@/features/settings/api'
 import {
   useConvertEnquiry,
   useDeleteEnquiry,
@@ -42,6 +43,63 @@ const TABS: { value: EnquiryStatus | 'all'; label: string }[] = [
   { value: 'converted', label: 'Converted' },
   { value: 'closed', label: 'Closed' },
 ]
+
+/** Pick a studio-defined enquiry source, or add one inline without leaving the form (owner only). */
+function EnquirySourcePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { session } = useAuth()
+  const { data: sources } = useActiveLookups('enquiry_source')
+  const createLookup = useCreateCustomLookup()
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+
+  async function onAdd() {
+    if (!name.trim()) return
+    await createLookup.mutateAsync({ category: 'enquiry_source', value: name.trim() })
+    onChange(name.trim())
+    setAdding(false)
+    setName('')
+  }
+
+  if (adding) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>New source</Label>
+        <div className="flex gap-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. YouTube" autoFocus />
+          <Button type="button" size="sm" onClick={() => void onAdd()} disabled={!name.trim() || createLookup.isPending}>
+            Add
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>Where from</Label>
+      <Select
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === '__add__') setAdding(true)
+          else onChange(e.target.value)
+        }}
+      >
+        <option value="">Not sure</option>
+        {/* A source logged before one was renamed or removed still shows its own text, unselected from the list. */}
+        {value && !(sources ?? []).some((s) => s.value === value) && <option value={value}>{humanize(value)}</option>}
+        {(sources ?? []).map((s) => (
+          <option key={s.id} value={s.value}>
+            {humanize(s.value)}
+          </option>
+        ))}
+        {session?.is_owner && <option value="__add__">+ Add new source…</option>}
+      </Select>
+    </div>
+  )
+}
 
 export function EnquiriesPage() {
   return (
@@ -300,20 +358,10 @@ function EnquiryDialog({ enquiry }: { enquiry?: Enquiry }) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label>Where from</Label>
-              <Select
-                value={draft.source ?? ''}
-                onChange={(e) => setDraft((d) => ({ ...d, source: e.target.value || null }))}
-              >
-                <option value="">Not sure</option>
-                {ENQUIRY_SOURCES.map((s) => (
-                  <option key={s} value={s}>
-                    {humanize(s)}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <EnquirySourcePicker
+              value={draft.source ?? ''}
+              onChange={(v) => setDraft((d) => ({ ...d, source: v || null }))}
+            />
             <div className="flex flex-col gap-1.5">
               <Label>Status</Label>
               <Select

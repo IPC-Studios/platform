@@ -15,6 +15,7 @@ import {
   useDeleteTeamPayout,
 } from '@/features/team-payouts/api'
 import { useDirectory } from '@/features/team/api'
+import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
 import { type CreateTeamPayoutRequest, type TeamPayout } from '@ipc/contracts'
 import { Plus, Trash2, Pencil, DollarSign, Clock, CheckCircle } from 'lucide-react'
 
@@ -186,14 +187,11 @@ function TeamPayoutsContent() {
                 onChange={(e) => setForm({ ...form, period_end: e.target.value })}
               />
             </div>
-            <div>
-              <label className="text-sm font-medium">Payment Mode</label>
-              <Input
-                value={form.payment_mode ?? ''}
-                onChange={(e) => setForm({ ...form, payment_mode: e.target.value || null })}
-                placeholder="e.g. Bank Transfer, UPI"
-              />
-            </div>
+            <PaymentModePicker
+              label="Payment Mode"
+              value={form.payment_mode ?? ''}
+              onChange={(v) => setForm({ ...form, payment_mode: v || null })}
+            />
             <div>
               <label className="text-sm font-medium">Reference</label>
               <Input

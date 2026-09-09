@@ -14,17 +14,6 @@ export type EnquiryStatus = z.infer<typeof enquiryStatus>
 /** Statuses that still want someone's attention. */
 export const OPEN_ENQUIRY_STATUSES: readonly EnquiryStatus[] = ['new', 'reviewed', 'contacted']
 
-/** Offered in the picker; the field itself is free text. */
-export const ENQUIRY_SOURCES = [
-  'website',
-  'phone',
-  'walk_in',
-  'instagram',
-  'facebook',
-  'referral',
-  'other',
-] as const
-
 export const enquiry = z.object({
   id: uuid,
   name: z.string(),

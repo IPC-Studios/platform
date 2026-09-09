@@ -17,6 +17,7 @@ import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { monthlySeries } from '@/shared/ui/chart-geometry'
 import { useInvoices, useStates, useCreateInvoice, useRecordPayment } from '@/features/billing/api'
 import { emptyInvoiceForm, useInvoiceForm, InvoiceFormFields } from '@/features/billing/InvoiceForm'
+import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
 
@@ -200,14 +201,14 @@ function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: num
   const record = useRecordPayment(invoiceId)
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState(balance)
-  const [mode, setMode] = useState('upi')
+  const [mode, setMode] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
-      await record.mutateAsync({ amount, mode })
+      await record.mutateAsync({ amount, ...(mode ? { mode } : {}) })
       setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record payment.')
@@ -227,10 +228,7 @@ function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: num
             <Label>Amount</Label>
             <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} autoFocus />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Mode</Label>
-            <Input value={mode} onChange={(e) => setMode(e.target.value)} placeholder="upi / cash / bank" />
-          </div>
+          <PaymentModePicker value={mode} onChange={setMode} />
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}

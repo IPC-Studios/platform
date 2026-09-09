@@ -47,12 +47,15 @@ export const myProfile = z.object({
   phone: z.string().nullable(),
   role: z.string(),
   status: z.string(),
+  /** A plain URL, not an upload — same as the company logo. */
+  avatar_url: z.string().nullable(),
 })
 export type MyProfile = z.infer<typeof myProfile>
 
 export const updateMyProfileRequest = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   phone: z.string().trim().max(20).nullable().optional(),
+  avatar_url: z.string().trim().max(500).nullable().optional(),
 })
 export type UpdateMyProfileRequest = z.infer<typeof updateMyProfileRequest>
 

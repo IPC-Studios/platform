@@ -116,6 +116,8 @@ async function freshDb() {
   await db.exec(mig('0080_lead_group_source.sql'))
   await db.exec(mig('0081_reminder_assign_link.sql'))
   await db.exec(mig('0082_referral_event_fields.sql'))
+  await db.exec(mig('0083_profile_photo.sql'))
+  await db.exec(mig('0084_lookup_categories_expansion.sql'))
   return db
 }
 
@@ -5057,6 +5059,13 @@ describe('Lovable parity round 5: editing a team member and a company expense', 
     expect(row.rows[0]).toEqual({ name: 'Rahul Verma', engagement_type: 'freelancer', phone: '9000000099' })
   })
 
+  it('a person can put a photo link on their own profile, next to the studio logo', async () => {
+    await asUser(db, OWNER)
+    await db.exec(`update users set avatar_url = 'https://cdn.example/me.jpg' where user_id = '${OWNER}';`)
+    const row = await db.query<{ avatar_url: string }>(`select avatar_url from users where user_id = '${OWNER}';`)
+    expect(row.rows[0]!.avatar_url).toBe('https://cdn.example/me.jpg')
+  })
+
   it('a company expense logged with the wrong amount, date, and GST rate can be corrected', async () => {
     const created = await db.query<{ id: string }>(
       `insert into expenses (company_id, category, amount, expense_date, gst_treatment, gst_rate)
@@ -5330,6 +5339,23 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
     await db.exec(`update custom_lookups set value = 'Instagram', is_active = false where id = '${l.rows[0]!.id}';`)
     const row = await db.query<{ value: string; is_active: boolean }>(`select value, is_active from custom_lookups where id = '${l.rows[0]!.id}';`)
     expect(row.rows[0]).toEqual({ value: 'Instagram', is_active: false })
+  })
+
+  it('a new studio gets enquiry source and payment type seeded as picklists too, not just lead source and expense category', async () => {
+    const categories = await db.query<{ category: string }>(
+      `select distinct category from custom_lookups where company_id = '${companyId}' order by category;`,
+    )
+    expect(categories.rows.map((r) => r.category)).toEqual([
+      'expense_category',
+      'lead_source',
+      'payment_type',
+      'enquiry_source',
+    ].sort())
+
+    const paymentTypes = await db.query<{ value: string }>(
+      `select value from custom_lookups where company_id = '${companyId}' and category = 'payment_type' order by sort_order;`,
+    )
+    expect(paymentTypes.rows.map((r) => r.value)).toEqual(['UPI', 'Cash', 'Bank transfer', 'Cheque'])
   })
 
   it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {
