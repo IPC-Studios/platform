@@ -170,8 +170,8 @@ function ClockActions() {
   function doCheckIn() {
     const send = (lat: number, lng: number) => {
       // A local check saves a doomed round trip and gives a clearer reason; the
-      // server still refuses anything outside the fence either way.
-      if (fence && !withinFence({ lat, lng }, { lat: fence.lat, lng: fence.lng }, fence.radius_m)) {
+      // server still refuses anything outside the fence either way (when active).
+      if (fence?.is_active && !withinFence({ lat, lng }, { lat: fence.lat, lng: fence.lng }, fence.radius_m)) {
         toast.error('You appear to be outside the studio fence.')
         return
       }
@@ -530,6 +530,7 @@ function FenceDialog() {
   const [lat, setLat] = useState(String(fence?.lat ?? ''))
   const [lng, setLng] = useState(String(fence?.lng ?? ''))
   const [radius, setRadius] = useState(String(fence?.radius_m ?? 150))
+  const [enforce, setEnforce] = useState(fence?.is_active ?? true)
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
@@ -564,6 +565,7 @@ function FenceDialog() {
       lng: Number(lng),
       radius_m: Number(radius),
       timezone: fence?.timezone ?? 'Asia/Kolkata',
+      is_active: enforce,
     })
     if (!parsed.success) {
       setError('Check the coordinates and a radius between 20 and 5000 metres.')
@@ -604,6 +606,16 @@ function FenceDialog() {
               Between 20 and 5000. Too tight and GPS drift alone locks people out.
             </p>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={enforce} onChange={(e) => setEnforce(e.target.checked)} />
+            Enforce this location on check-in
+          </label>
+          {!enforce && (
+            <p className="text-xs text-muted-foreground">
+              Check-in still works from anywhere while this is off — useful for a shoot day away from the studio,
+              or while re-measuring the location. It stays saved for when you turn it back on.
+            </p>
+          )}
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}

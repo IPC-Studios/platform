@@ -149,12 +149,14 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [saved, setSaved] = useState(false)
 
   function reset() {
     setCompanyName(company.data?.name ?? '')
     setName(profile.data?.name ?? '')
     setPhone(profile.data?.phone ?? '')
+    setAvatarUrl(profile.data?.avatar_url ?? '')
     setSaved(false)
   }
   useEffect(reset, [company.data, profile.data])
@@ -162,7 +164,8 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
   const dirty =
     companyName !== (company.data?.name ?? '') ||
     name !== (profile.data?.name ?? '') ||
-    phone !== (profile.data?.phone ?? '')
+    phone !== (profile.data?.phone ?? '') ||
+    avatarUrl !== (profile.data?.avatar_url ?? '')
   const busy = saveCompany.isPending || saveProfile.isPending
 
   async function onSubmit(e: FormEvent) {
@@ -174,8 +177,12 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
       if (canEditCompany && companyName !== company.data?.name) {
         await saveCompany.mutateAsync({ name: companyName.trim() })
       }
-      if (name !== profile.data?.name || phone !== (profile.data?.phone ?? '')) {
-        await saveProfile.mutateAsync({ name: name.trim(), phone: phone.trim() || null })
+      if (
+        name !== profile.data?.name ||
+        phone !== (profile.data?.phone ?? '') ||
+        avatarUrl !== (profile.data?.avatar_url ?? '')
+      ) {
+        await saveProfile.mutateAsync({ name: name.trim(), phone: phone.trim() || null, avatar_url: avatarUrl.trim() || null })
       }
       await qc.invalidateQueries({ queryKey: ['settings'] })
       await refresh()
@@ -227,6 +234,13 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="9876543210"
+              />
+            </Field>
+            <Field label="Photo URL" hint="Shown wherever your name appears — a link, not an upload.">
+              <Input
+                value={avatarUrl}
+                onChange={(e) => setAvatarUrl(e.target.value)}
+                placeholder="https://…"
               />
             </Field>
           </div>

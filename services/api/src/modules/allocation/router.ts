@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { bookSlotRequest, setSlotStatusRequest, teamSlot } from '@ipc/contracts'
+import { bookSlotRequest, setSlotStatusRequest, setSlotCostRequest, teamSlot } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
@@ -19,7 +19,7 @@ export const allocationRouter = new Hono<AppEnv>()
         c.get('auth').userId,
         (sql) => sql`
           select s.id, s.user_id, s.shoot_id, s.service_name, s.start_at, s.end_at, s.status,
-                 s.estimated_cost, u.name as user_name
+                 s.estimated_cost, s.final_cost, s.cost_status, s.cost_notes, u.name as user_name
           from team_assignment_slots s
           left join users u on u.user_id = s.user_id
           order by s.start_at`,
@@ -76,5 +76,29 @@ export const allocationRouter = new Hono<AppEnv>()
     )
     if (!ok) fail(400, 'We could not update the booking.')
     await audit(c, { action: 'allocation.status', entityType: 'team_assignment_slot', entityId: id, after: parsed.data })
+    return c.body(null, 204)
+  })
+
+  // Cost is settled separately from the booking -- what a shoot is worth to
+  // pay out, distinct from when/who/where it happens.
+  .post('/:id/cost', requireAction('projects', 'edit'), async (c) => {
+    const parsed = setSlotCostRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the cost details.')
+    const id = uuidParam(c)
+    const d = parsed.data
+    const ok = await attempt(c, 'allocation.set_cost', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`select set_slot_cost(
+          p_slot_id => ${id},
+          p_estimated_cost => ${d.estimated_cost ?? null},
+          p_final_cost => ${d.final_cost ?? null},
+          p_cost_status => ${d.cost_status ?? null},
+          p_cost_notes => ${d.cost_notes ?? null}
+        )`
+        return true
+      }),
+    )
+    if (!ok) fail(400, 'We could not update the cost.')
+    await audit(c, { action: 'allocation.set_cost', entityType: 'team_assignment_slot', entityId: id, after: d })
     return c.body(null, 204)
   })

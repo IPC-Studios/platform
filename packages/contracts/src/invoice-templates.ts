@@ -54,3 +54,31 @@ export const createInvoiceTemplateRequest = z.object({
   is_default: z.boolean().default(false),
 })
 export type CreateInvoiceTemplateRequest = z.infer<typeof createInvoiceTemplateRequest>
+
+/**
+ * A reusable Notes snippet -- independent of layoutJsonDefaults' print-layout
+ * templates above. A studio picks one to fill an invoice's free-text Notes
+ * field without leaving the form, the same way a saved payment mode or
+ * expense category works.
+ */
+export const invoiceNoteTemplate = z.object({
+  id: uuid,
+  company_id: uuid,
+  title: z.string(),
+  content: z.string(),
+  is_default: z.boolean(),
+  created_at: isoDateTime,
+})
+export type InvoiceNoteTemplate = z.infer<typeof invoiceNoteTemplate>
+
+export const invoiceNoteTemplateList = z.object({
+  items: z.array(invoiceNoteTemplate),
+})
+export type InvoiceNoteTemplateList = z.infer<typeof invoiceNoteTemplateList>
+
+export const createInvoiceNoteTemplateRequest = z.object({
+  title: z.string().trim().min(1).max(160),
+  content: z.string().trim().min(1).max(2000),
+  is_default: z.boolean().default(false),
+})
+export type CreateInvoiceNoteTemplateRequest = z.infer<typeof createInvoiceNoteTemplateRequest>

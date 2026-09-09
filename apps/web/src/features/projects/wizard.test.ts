@@ -305,6 +305,13 @@ describe('shoot type search', () => {
   it('comes back empty for a type nobody listed', () => {
     expect(matchShootTypes('drone')).toEqual([])
   })
+
+  it('folds in a studio\'s own saved shoot names, deduped against the common list', () => {
+    expect(matchShootTypes('pool', ['Pool Party'])).toEqual(['Pool Party'])
+    // Their own "Haldi" preset does not show up twice next to the built-in one.
+    expect(matchShootTypes('haldi', ['Haldi', 'Pool Party'])).toEqual(['Haldi', 'Haldi Bride', 'Haldi Groom'])
+    expect(matchShootTypes('', ['Pool Party'])).toHaveLength(SHOOT_TYPES.length + 1)
+  })
 })
 
 describe('the shoot card', () => {

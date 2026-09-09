@@ -342,6 +342,11 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                 onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.alternate_phone) patch({ alternate_phone: v }) }} />
             </div>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="lead-group">Group / tag</Label>
+            <Input id="lead-group" defaultValue={lead.group_name ?? ''} placeholder="e.g. Hot Lead, Already Booked" disabled={!canEdit}
+              onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.group_name) patch({ group_name: v }) }} />
+          </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-value">Deal value (₹)</Label>

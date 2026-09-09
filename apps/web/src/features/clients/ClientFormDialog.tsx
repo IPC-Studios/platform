@@ -142,7 +142,7 @@ export function ClientFormDialog({ client, trigger }: Props) {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>GSTIN</Label>
-              <Input value={gstin} onChange={(e) => setGstin(e.target.value)} placeholder="For a B2B invoice" />
+              <Input value={gstin} onChange={(e) => setGstin(e.target.value)} placeholder="e.g. 27ABCDE1234F1Z5" />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">

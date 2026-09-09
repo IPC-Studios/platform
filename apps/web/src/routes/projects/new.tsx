@@ -67,6 +67,7 @@ import {
   useSaveDeliverableSet,
 } from '@/features/projects/api'
 import { useRoleLibrary } from '@/features/team/api'
+import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
 import {
   useDeleteShootPreset,
   useSaveShootPreset,
@@ -699,9 +700,12 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
 function AddShootMenu({
   shoots,
   onAdd,
+  extraNames = [],
 }: {
   shoots: ShootDraft[]
   onAdd: (name: string) => void
+  /** This studio's own saved shoot names, merged into the common list. */
+  extraNames?: readonly string[]
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -731,7 +735,7 @@ function AddShootMenu({
   }, [open])
 
   const taken = new Set(shoots.map((s) => s.name.trim().toLowerCase()))
-  const matches = matchShootTypes(query)
+  const matches = matchShootTypes(query, extraNames)
   const custom = query.trim()
   const free = matches.filter((m) => !taken.has(m.toLowerCase()))
 
@@ -909,7 +913,11 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <AddShootMenu shoots={draft.shoots} onAdd={addNamed} />
+          <AddShootMenu
+            shoots={draft.shoots}
+            onAdd={addNamed}
+            extraNames={(shootPresets.data ?? []).map((p) => p.name)}
+          />
           <PresetMenu
             label="Apply preset"
             presets={shootPresets.data ?? []}
@@ -2034,8 +2042,8 @@ function DeliverableRow({
           </Select>
         </Field>
 
-        {item.due_basis === 'custom' && (
-          <Field label="Estimated date">
+        {(item.due_basis === 'custom' || item.due_basis === 'custom_after') && (
+          <Field label={item.due_basis === 'custom_after' ? 'Count days from' : 'Estimated date'}>
             <Input
               type="date"
               value={item.custom_date}
@@ -2201,15 +2209,7 @@ function BillingStep({
                 <Field label="Received on">
                   <Input type="date" value={p.paid_on} onChange={(e) => set(i, { paid_on: e.target.value })} />
                 </Field>
-                <Field label="Mode">
-                  <Select value={p.mode} onChange={(e) => set(i, { mode: e.target.value })}>
-                    <option value="">—</option>
-                    <option value="upi">UPI</option>
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank transfer</option>
-                    <option value="cheque">Cheque</option>
-                  </Select>
-                </Field>
+                <PaymentModePicker value={p.mode} onChange={(v) => set(i, { mode: v })} />
                 <Field label="Reference">
                   <Input
                     value={p.reference}
@@ -2482,7 +2482,7 @@ function AddDeliverableDialog({
       description: description.trim(),
       due_days: dueDays.trim(),
       due_basis: dueBasis,
-      custom_date: dueBasis === 'custom' ? customDate : '',
+      custom_date: dueBasis === 'custom' || dueBasis === 'custom_after' ? customDate : '',
       visibility_scope: onQuotation ? 'client' : 'internal',
       show_on_quotation: onQuotation,
       // Only internal work waits on data. A client line is a promise, not a
@@ -2555,9 +2555,9 @@ function AddDeliverableDialog({
             </div>
           </div>
 
-          {dueBasis === 'custom' && (
+          {(dueBasis === 'custom' || dueBasis === 'custom_after') && (
             <div className="flex flex-col gap-1.5">
-              <Label>Estimated date</Label>
+              <Label>{dueBasis === 'custom_after' ? 'Count days from' : 'Estimated date'}</Label>
               <Input
                 type="date"
                 value={customDate}

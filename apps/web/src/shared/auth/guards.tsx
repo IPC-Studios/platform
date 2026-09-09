@@ -66,18 +66,29 @@ function BootSkeleton() {
   )
 }
 
+/** Only the owner can buy or renew a plan — everyone else has no button to press. */
 function PlanExpired() {
   const navigate = useNavigate()
+  const { session, signOut } = useAuth()
+  const isOwner = session?.is_owner ?? false
   return (
     <Centered>
       <div className="max-w-sm">
         <h1 className="text-xl font-semibold">Subscription expired</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your studio’s plan has lapsed. Renew to regain access.
+          {isOwner
+            ? 'Your studio’s plan has lapsed. Renew to regain access.'
+            : "Your studio’s plan has lapsed. Contact your studio’s owner to renew."}
         </p>
-        <Button className="mt-4" onClick={() => void navigate({ to: '/settings/subscription' })}>
-          Renew plan
-        </Button>
+        {isOwner ? (
+          <Button className="mt-4" onClick={() => void navigate({ to: '/settings/subscription' })}>
+            Renew plan
+          </Button>
+        ) : (
+          <Button className="mt-4" variant="outline" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+        )}
       </div>
     </Centered>
   )

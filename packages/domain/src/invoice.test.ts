@@ -41,6 +41,23 @@ describe('computeInvoice', () => {
     expect(inv.taxable).toBe(0)
     expect(inv.total).toBe(0)
   })
+
+  it('reads a percent discount off the subtotal, and persists it as the flat figure it resolves to', () => {
+    const inv = computeInvoice(lines, { intraState: true, discount: 10, discountType: 'percent' })
+    expect(inv.discount).toBe(12000) // 10% of 120000 -- same flat amount as the test above
+    expect(inv.total).toBe(126360)
+  })
+
+  it('caps a percent discount over 100% at the subtotal, same as a flat one', () => {
+    const inv = computeInvoice(lines, { intraState: true, discount: 150, discountType: 'percent' })
+    expect(inv.discount).toBe(120000)
+    expect(inv.total).toBe(0)
+  })
+
+  it('omitting discountType still means a flat amount, unchanged from before this option existed', () => {
+    const inv = computeInvoice(lines, { intraState: true, discount: 12000 })
+    expect(inv.discount).toBe(12000)
+  })
 })
 
 describe('amountInWords (Indian)', () => {

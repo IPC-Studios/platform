@@ -58,35 +58,39 @@ export const remindersRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please check the reminder details.')
     const auth = c.get('auth')
     const d = parsed.data
+    const assignee = d.assigned_to ?? auth.userId
     const rows = await attempt(c, 'reminders.create', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const made = await sql<{ id: string }[]>`
-          insert into reminders (company_id, user_id, title, description, priority, entity_type, entity_id, due_at)
-          values (${auth.companyId}, ${auth.userId}, ${d.title}, ${d.description ?? null},
+          insert into reminders (company_id, user_id, created_by, title, description, priority, entity_type, entity_id, due_at)
+          values (${auth.companyId}, ${assignee}, ${auth.userId}, ${d.title}, ${d.description ?? null},
                   ${d.priority}, ${d.entity_type ?? null}, ${d.entity_id ?? null}, ${d.due_at ?? null})
           returning id`
         return made
       }),
     )
     if (!rows?.[0]) fail(400, 'We could not create this reminder.')
-    await audit(c, { action: 'reminder.create', entityType: 'reminder', entityId: rows[0].id, after: { title: d.title } })
+    await audit(c, { action: 'reminder.create', entityType: 'reminder', entityId: rows[0].id, after: { title: d.title, assigned_to: assignee } })
     return c.json({ id: rows[0].id }, 201)
   })
 
+  // Either the person it's for, or whoever set it, can edit/complete/remove it.
   .patch('/:id', async (c) => {
     const id = uuidParam(c)
     const parsed = createReminderRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the reminder details.')
     const auth = c.get('auth')
     const d = parsed.data
+    const assignee = d.assigned_to ?? auth.userId
     const rows = await attempt(c, 'reminders.update', () =>
       withUser(c.env, auth.userId, async (sql) => {
         return sql<{ id: string }[]>`
           update reminders
-             set title = ${d.title}, description = ${d.description ?? null},
+             set title = ${d.title}, description = ${d.description ?? null}, user_id = ${assignee},
                  priority = ${d.priority}, entity_type = ${d.entity_type ?? null},
                  entity_id = ${d.entity_id ?? null}, due_at = ${d.due_at ?? null}::timestamptz
-           where id = ${id} and company_id = ${auth.companyId} and user_id = ${auth.userId}
+           where id = ${id} and company_id = ${auth.companyId}
+             and (user_id = ${auth.userId} or created_by = ${auth.userId})
            returning id`
       }),
     )
@@ -107,7 +111,8 @@ export const remindersRouter = new Hono<AppEnv>()
         return sql<{ id: string }[]>`
           update reminders
              set status = ${status.data}
-           where id = ${id} and company_id = ${auth.companyId} and user_id = ${auth.userId}
+           where id = ${id} and company_id = ${auth.companyId}
+             and (user_id = ${auth.userId} or created_by = ${auth.userId})
            returning id`
       }),
     )
@@ -123,7 +128,9 @@ export const remindersRouter = new Hono<AppEnv>()
     const rows = await attempt(c, 'reminders.delete', () =>
       withUser(c.env, auth.userId, async (sql) => {
         return sql<{ id: string }[]>`
-          delete from reminders where id = ${id} and company_id = ${auth.companyId} and user_id = ${auth.userId} returning id`
+          delete from reminders where id = ${id} and company_id = ${auth.companyId}
+            and (user_id = ${auth.userId} or created_by = ${auth.userId})
+          returning id`
       }),
     )
     if (!rows) fail(400, 'We could not delete this reminder.')

@@ -23,6 +23,8 @@ export const companyFence = z.object({
   lng: z.number(),
   radius_m: z.number().int(),
   timezone: z.string().default('Asia/Kolkata'),
+  /** When off, check-in still works but location is not validated — for a shoot day away from the studio, or while re-measuring. */
+  is_active: z.boolean().default(true),
 })
 export type CompanyFence = z.infer<typeof companyFence>
 
@@ -32,6 +34,7 @@ export const setFenceRequest = z.object({
   // Under 20m and GPS drift alone locks people out; over 5km is not a fence.
   radius_m: z.number().int().min(20).max(5000).default(150),
   timezone: z.string().min(3).max(60).default('Asia/Kolkata'),
+  is_active: z.boolean().default(true),
 })
 export type SetFenceRequest = z.infer<typeof setFenceRequest>
 

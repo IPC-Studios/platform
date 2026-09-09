@@ -34,8 +34,18 @@ export const authToken = z.object({
   refresh_token: z.string(),
   token_type: z.literal('bearer'),
   expires_in: z.number().int().positive(),
+  /** True only right after a brand-new Google sign-in with no studio yet -- route to /complete-setup instead of the dashboard. */
+  needs_setup: z.boolean().default(false),
 })
 export type AuthToken = z.infer<typeof authToken>
+
+/** Finishes setting up a studio for someone who just signed in via Google as a brand-new identity. */
+export const completeSetupRequest = z.object({
+  company_name: z.string().trim().min(2).max(120),
+  admin_name: z.string().trim().min(2).max(120),
+  phone: phone.optional(),
+})
+export type CompleteSetupRequest = z.infer<typeof completeSetupRequest>
 
 /**
  * Exchange a refresh token for a fresh pair (the old one is spent). The token

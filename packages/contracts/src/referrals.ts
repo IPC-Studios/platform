@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { uuid, isoDateTime, money } from './shared/primitives'
+import { uuid, isoDateTime, isoDate, money } from './shared/primitives'
 
 export const referralRewardType = z.enum(['percentage', 'fixed', 'credit', 'custom'])
 export type ReferralRewardType = z.infer<typeof referralRewardType>
@@ -46,6 +46,10 @@ export const referralSubmission = z.object({
   reward_granted: z.boolean(),
   reward_amount: money.nullable(),
   notes: z.string().nullable(),
+  /** What the referred client's event is, when it is, and how many functions it has. */
+  event_type: z.string().nullable().default(null),
+  event_date: isoDate.nullable().default(null),
+  functions_count: z.number().int().nullable().default(null),
   created_at: isoDateTime,
 })
 export type ReferralSubmission = z.infer<typeof referralSubmission>
@@ -89,5 +93,8 @@ export const submitReferralRequest = z.object({
   client_phone: z.string().trim().max(40).nullish(),
   client_email: z.string().trim().max(200).nullish(),
   notes: z.string().trim().max(2000).nullish(),
+  event_type: z.string().trim().max(80).nullish(),
+  event_date: isoDate.nullish(),
+  functions_count: z.number().int().min(0).max(20).nullish(),
 })
 export type SubmitReferralRequest = z.infer<typeof submitReferralRequest>

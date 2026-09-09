@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
-import { teamSlot, teamMember, type BookSlotRequest, type SlotStatus } from '@ipc/contracts'
+import { teamSlot, teamMember, type BookSlotRequest, type SlotStatus, type SetSlotCostRequest } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi, ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -51,6 +51,18 @@ export function useSetSlotStatus() {
       callApi(`/allocation/${id}/status`, { method: 'POST', body: { status }, responseSchema: z.unknown() }),
     onSuccess: () => {
       toast.success('Booking updated')
+      void qc.invalidateQueries({ queryKey: ['allocation'] })
+    },
+  })
+}
+
+export function useSetSlotCost() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: SetSlotCostRequest }) =>
+      callApi(`/allocation/${id}/cost`, { method: 'POST', body: patch, responseSchema: z.unknown() }),
+    onSuccess: () => {
+      toast.success('Cost updated')
       void qc.invalidateQueries({ queryKey: ['allocation'] })
     },
   })

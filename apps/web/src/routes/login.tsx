@@ -237,13 +237,17 @@ export function LoginPage() {
     setError(null)
     setBusy(true)
     try {
-      rememberSession(
-        await callApi('/auth/google', {
-          method: 'POST',
-          body: { id_token: idToken },
-          responseSchema: authToken,
-        }),
-      )
+      const result = await callApi('/auth/google', {
+        method: 'POST',
+        body: { id_token: idToken },
+        responseSchema: authToken,
+      })
+      rememberSession(result)
+      if (result.needs_setup) {
+        // Google proved who they are; there's no studio yet to fetch a session for.
+        await navigate({ to: '/complete-setup' })
+        return
+      }
       await refresh()
       await navigate({ to: '/dashboard' })
     } catch (err) {

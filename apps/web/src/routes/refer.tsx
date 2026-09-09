@@ -33,6 +33,9 @@ export function ReferPage() {
   const [clientName, setClientName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
   const [clientEmail, setClientEmail] = useState('')
+  const [eventType, setEventType] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [functionsCount, setFunctionsCount] = useState('')
   const [notes, setNotes] = useState('')
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -58,6 +61,9 @@ export function ReferPage() {
           client_name: clientName.trim(),
           client_phone: clientPhone.trim() || undefined,
           client_email: clientEmail.trim() || undefined,
+          event_type: eventType.trim() || undefined,
+          event_date: eventDate || undefined,
+          functions_count: functionsCount.trim() ? Number(functionsCount) : undefined,
           notes: notes.trim() || undefined,
         },
         responseSchema: created,
@@ -131,6 +137,29 @@ export function ReferPage() {
                   <Label>Their email</Label>
                   <Input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="Optional" />
                 </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label>What's the event?</Label>
+                  <Input value={eventType} onChange={(e) => setEventType(e.target.value)} placeholder="Wedding, pre-wedding…" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Event date</Label>
+                  <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>How many functions?</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={functionsCount}
+                  onChange={(e) => setFunctionsCount(e.target.value)}
+                  placeholder="e.g. haldi, mehendi, wedding, reception"
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">

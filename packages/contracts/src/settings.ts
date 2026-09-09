@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { GSTIN_PATTERN } from './shared/primitives'
 
 export const companyProfile = z.object({
   name: z.string(),
@@ -26,7 +27,9 @@ export const updateCompanyRequest = z.object({
   state: z.string().trim().max(120).optional(),
   country: z.string().trim().max(80).optional(),
   website: z.string().trim().max(200).optional(),
-  invoice_gst_number: z.string().trim().max(20).optional(),
+  invoice_gst_number: z.string().trim().toUpperCase().max(20)
+    .refine((v) => !v || GSTIN_PATTERN.test(v), 'Invalid GSTIN format')
+    .optional(),
   avatar_url: z.string().trim().max(500).optional(),
   invoice_number_prefix: z.string().trim().min(1).max(20).optional(),
   invoice_next_number: z.number().int().min(1).optional(),
@@ -47,12 +50,15 @@ export const myProfile = z.object({
   phone: z.string().nullable(),
   role: z.string(),
   status: z.string(),
+  /** A plain URL, not an upload — same as the company logo. */
+  avatar_url: z.string().nullable(),
 })
 export type MyProfile = z.infer<typeof myProfile>
 
 export const updateMyProfileRequest = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   phone: z.string().trim().max(20).nullable().optional(),
+  avatar_url: z.string().trim().max(500).nullable().optional(),
 })
 export type UpdateMyProfileRequest = z.infer<typeof updateMyProfileRequest>
 

@@ -7,13 +7,16 @@ export type ReminderPriority = z.infer<typeof reminderPriority>
 export const reminderStatus = z.enum(['active', 'completed', 'dismissed'])
 export type ReminderStatus = z.infer<typeof reminderStatus>
 
-export const reminderEntityType = z.enum(['lead', 'project', 'client', 'invoice', 'custom'])
+export const reminderEntityType = z.enum(['lead', 'project', 'client', 'invoice', 'enquiry', 'task', 'shoot', 'custom'])
 export type ReminderEntityType = z.infer<typeof reminderEntityType>
 
 export const reminder = z.object({
   id: uuid,
   company_id: uuid,
+  /** Who it's for — the person who sees it in their list and can complete it. */
   user_id: uuid,
+  /** Who made it — themself, or an admin setting a reminder for someone else. */
+  created_by: uuid.nullable().default(null),
   title: z.string(),
   description: z.string().nullable(),
   priority: reminderPriority,
@@ -48,5 +51,7 @@ export const createReminderRequest = z.object({
   entity_type: reminderEntityType.nullish(),
   entity_id: uuid.nullish(),
   due_at: isoDateTime.nullish(),
+  /** Omit to set it for yourself; pass a teammate's id to set it for them instead. */
+  assigned_to: uuid.nullish(),
 })
 export type CreateReminderRequest = z.infer<typeof createReminderRequest>

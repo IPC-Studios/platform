@@ -8,6 +8,8 @@ import {
   recordPaymentRequest,
   createInvoiceTemplateRequest,
   invoiceTemplateList,
+  createInvoiceNoteTemplateRequest,
+  invoiceNoteTemplateList,
 } from '@ipc/contracts'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import type { AppEnv } from '../../context'
@@ -58,9 +60,10 @@ export const billingRouter = new Hono<AppEnv>()
     // The one source of GST truth — same tested engine everywhere.
     const totals = computeInvoice(
       req.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-      { intraState: req.intra_state, discount: req.discount },
+      { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
+      subtext: l.subtext ?? null,
       description: l.description,
       quantity: l.quantity,
       rate: l.rate,
@@ -72,9 +75,12 @@ export const billingRouter = new Hono<AppEnv>()
       igst: l.igst,
     }))
 
-    const row = await attempt(c, 'billing.invoice_create', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        const rows = await sql<{ id: string; invoice_number: string }[]>`
+    const row = await attempt(
+      c,
+      'billing.invoice_create',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const rows = await sql<{ id: string; invoice_number: string }[]>`
           select * from create_invoice(
             p_client_id => ${req.client_id},
             p_project_id => ${req.project_id},
@@ -88,11 +94,14 @@ export const billingRouter = new Hono<AppEnv>()
             p_total => ${totals.total},
             p_items => ${sql.json(items)},
             p_notes => ${req.notes ?? null},
-            p_template_id => ${req.template_id ?? null}
+            p_template_id => ${req.template_id ?? null},
+            p_invoice_number => ${req.invoice_number ?? null}
           )`
-        return rows[0] ?? null
-      }),
+          return rows[0] ?? null
+        }),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
     )
+    if (row === 'taken') fail(409, 'An invoice with this number already exists.')
     if (!row) fail(400, 'We could not create the invoice.')
     await audit(c, {
       action: 'invoice.create',
@@ -118,7 +127,7 @@ export const billingRouter = new Hono<AppEnv>()
                  ) as template_layout,
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
-                     'id', it.id, 'description', it.description, 'quantity', it.quantity,
+                     'id', it.id, 'description', it.description, 'subtext', it.subtext, 'quantity', it.quantity,
                      'rate', it.rate, 'amount', it.amount, 'gst_rate', it.gst_rate,
                      'cgst', it.cgst, 'sgst', it.sgst, 'igst', it.igst) order by it.id)
                    from invoice_items it where it.invoice_id = i.id
@@ -149,9 +158,10 @@ export const billingRouter = new Hono<AppEnv>()
 
     const totals = computeInvoice(
       req.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-      { intraState: req.intra_state, discount: req.discount },
+      { intraState: req.intra_state, discount: req.discount, discountType: req.discount_type },
     )
     const items = totals.lines.map((l) => ({
+      subtext: l.subtext ?? null,
       description: l.description,
       quantity: l.quantity,
       rate: l.rate,
@@ -303,5 +313,81 @@ export const billingRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not delete this template.')
     if (!rows.length) fail(404, 'We could not find that template.')
     await audit(c, { action: 'invoice_template.delete', entityType: 'invoice_template', entityId: id })
+    return c.json({ ok: true })
+  })
+
+  // ── Notes snippet library (billing module) ──────────────────
+  // Independent of the print-layout templates above -- a reusable Notes
+  // string, not a layout.
+  .get('/note-templates', async (c) => {
+    const rows = await attempt(c, 'billing.note_templates_list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, company_id, title, content, is_default, created_at
+          from invoice_note_templates
+         where company_id = ${c.get('auth').companyId} and is_active = true
+         order by is_default desc, created_at desc`),
+    )
+    if (!rows) fail(400, 'We could not load note templates.')
+    return c.json(invoiceNoteTemplateList.parse({ items: rows }))
+  })
+
+  .post('/note-templates', requireAction('billing', 'edit'), async (c) => {
+    const parsed = createInvoiceNoteTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the note template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'billing.note_template_create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        if (d.is_default) {
+          await sql`update invoice_note_templates set is_default = false where company_id = ${auth.companyId} and is_default = true`
+        }
+        return sql<{ id: string }[]>`
+          insert into invoice_note_templates (company_id, title, content, is_default)
+          values (${auth.companyId}, ${d.title}, ${d.content}, ${d.is_default})
+          returning id`
+      }),
+    )
+    if (!rows?.[0]) fail(400, 'We could not save this note template.')
+    await audit(c, { action: 'invoice_note_template.create', entityType: 'invoice_note_template', entityId: rows[0].id, after: { title: d.title } })
+    return c.json({ id: rows[0].id }, 201)
+  })
+
+  .patch('/note-templates/:id', requireAction('billing', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const parsed = createInvoiceNoteTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the note template details.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const rows = await attempt(c, 'billing.note_template_update', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        if (d.is_default) {
+          await sql`update invoice_note_templates set is_default = false where company_id = ${auth.companyId} and is_default = true and id != ${id}`
+        }
+        return sql<{ id: string }[]>`
+          update invoice_note_templates
+             set title = ${d.title}, content = ${d.content}, is_default = ${d.is_default}
+           where id = ${id} and company_id = ${auth.companyId}
+           returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not save this note template.')
+    if (!rows.length) fail(404, 'We could not find that note template.')
+    await audit(c, { action: 'invoice_note_template.update', entityType: 'invoice_note_template', entityId: id, after: d })
+    return c.json({ ok: true })
+  })
+
+  .delete('/note-templates/:id', requireAction('billing', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'billing.note_template_delete', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          update invoice_note_templates set is_active = false
+           where id = ${id} and company_id = ${auth.companyId} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not delete this note template.')
+    if (!rows.length) fail(404, 'We could not find that note template.')
+    await audit(c, { action: 'invoice_note_template.delete', entityType: 'invoice_note_template', entityId: id })
     return c.json({ ok: true })
   })

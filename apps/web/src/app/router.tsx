@@ -8,6 +8,7 @@ import {
   type AnyRoute,
 } from '@tanstack/react-router'
 import { LoginPage } from '@/routes/login'
+import { CompleteSetupPage } from '@/routes/complete-setup'
 import { VerifyEmailPage } from '@/routes/verify'
 import { ResetPasswordPage } from '@/routes/reset-password'
 import { AcceptInvitePage } from '@/routes/accept-invite'
@@ -30,6 +31,7 @@ import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
 import { GopoPage } from '@/routes/financials/gopo'
 import { GstAnalysisPage } from '@/routes/financials/gst-analysis'
+import { CalculatedExpensesPage } from '@/routes/financials/calculated-expenses'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { CrmContactsPage } from '@/routes/crm/contacts'
 import { CrmCompaniesPage } from '@/routes/crm/companies'
@@ -126,6 +128,7 @@ const route = (path: string, component: () => ReactNode): AnyRoute =>
 
 const routeTree = rootRoute.addChildren([
   publicRoute('/login', LoginPage),
+  publicRoute('/complete-setup', CompleteSetupPage),
   publicRoute('/verify', VerifyEmailPage),
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),
@@ -181,6 +184,7 @@ const routeTree = rootRoute.addChildren([
   route('/financials', FinancialsPage),
   route('/financials/gopo', GopoPage),
   route('/financials/gst-analysis', GstAnalysisPage),
+  route('/financials/calculated-expenses', CalculatedExpensesPage),
   route('/notifications', NotificationsPage),
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),

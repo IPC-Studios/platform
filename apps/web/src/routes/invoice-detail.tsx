@@ -135,7 +135,10 @@ function InvoiceDoc() {
           <tbody>
             {data.items.map((it) => (
               <tr key={it.id} className="border-b border-border">
-                <td className="py-2">{it.description}</td>
+                <td className="py-2">
+                  {it.description}
+                  {it.subtext && <p className="text-xs text-muted-foreground">{it.subtext}</p>}
+                </td>
                 <td className="py-2 text-right">{it.quantity}</td>
                 <td className="py-2 text-right">{formatINR(it.rate)}</td>
                 {layout.show_gst && <td className="py-2 text-right">{it.gst_rate}%</td>}
@@ -222,10 +225,20 @@ function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
     intra_state: invoice.intra_state,
     invoice_date: invoice.invoice_date,
     due_date: invoice.due_date ?? '',
+    // Re-editing always works off the flat rupee figure it was saved as -- a percent
+    // entry is not remembered as a percent once the invoice is created.
     discount: invoice.discount,
+    discount_type: 'flat',
     notes: invoice.notes ?? '',
     template_id: invoice.template_id ?? '',
-    lines: invoice.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, gst_rate: i.gst_rate as GstSlab })),
+    invoice_number: '',
+    lines: invoice.items.map((i) => ({
+      description: i.description,
+      subtext: i.subtext ?? undefined,
+      quantity: i.quantity,
+      rate: i.rate,
+      gst_rate: i.gst_rate as GstSlab,
+    })),
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -253,7 +266,7 @@ function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
         className="max-w-2xl"
       >
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          <InvoiceFormFields form={form} states={states} />
+          <InvoiceFormFields form={form} states={states} isEdit />
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}

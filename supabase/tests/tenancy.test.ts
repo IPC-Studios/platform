@@ -112,6 +112,18 @@ async function freshDb() {
   await db.exec(mig('0076_work_submission_edit.sql'))
   await db.exec(mig('0077_reminder_entity_name.sql'))
   await db.exec(mig('0078_invoice_template_link.sql'))
+  await db.exec(mig('0079_attendance_fence_toggle.sql'))
+  await db.exec(mig('0080_lead_group_source.sql'))
+  await db.exec(mig('0081_reminder_assign_link.sql'))
+  await db.exec(mig('0082_referral_event_fields.sql'))
+  await db.exec(mig('0083_profile_photo.sql'))
+  await db.exec(mig('0084_lookup_categories_expansion.sql'))
+  await db.exec(mig('0085_invoice_line_presets.sql'))
+  await db.exec(mig('0086_project_profitability_report.sql'))
+  await db.exec(mig('0087_invoice_number_override.sql'))
+  await db.exec(mig('0088_invoice_item_title.sql'))
+  await db.exec(mig('0089_invoice_note_templates.sql'))
+  await db.exec(mig('0090_team_payout_settlements.sql'))
   return db
 }
 
@@ -683,6 +695,58 @@ describe('billing & invoicing (Phase 9)', () => {
     expect(Number(it.rows[0]!.n)).toBe(1)
   })
 
+  it('a custom invoice number does not consume the auto-numbered sequence, and a duplicate is refused', async () => {
+    const items = JSON.stringify([
+      { description: 'Custom-numbered', quantity: 1, rate: 1000, amount: 1000, gst_rate: 0, taxable: 1000, cgst: 0, sgst: 0, igst: 0 },
+    ])
+    const custom = await db.query<{ invoice_number: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => current_date, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 0, p_total => 1000,
+        p_items => '${items}'::jsonb, p_invoice_number => 'CUSTOM-001'
+      );`)
+    expect(custom.rows[0]!.invoice_number).toBe('CUSTOM-001')
+
+    const auto = await db.query<{ invoice_number: string }>(
+      `select * from create_invoice('${clientId}', null, '27', current_date, null,
+        1000, 0, 1000, 0, 1000, '${items}'::jsonb, null);`,
+    )
+    // Still the next sequential number -- the custom one above did not burn a slot.
+    expect(auto.rows[0]!.invoice_number).toBe('INV-0003')
+
+    await expect(
+      db.query(`
+        select * from create_invoice(
+          p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+          p_invoice_date => current_date, p_due_date => null,
+          p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 0, p_total => 1000,
+          p_items => '${items}'::jsonb, p_invoice_number => 'CUSTOM-001'
+        );`),
+    ).rejects.toThrow()
+  })
+
+  it('a line item keeps its subtext underneath the description, and an old line without one round-trips as null', async () => {
+    const items = JSON.stringify([
+      { description: 'Wedding Photography Package', subtext: 'Haldi + Wedding + Reception coverage', quantity: 1, rate: 1000, amount: 1000, gst_rate: 0, taxable: 1000, cgst: 0, sgst: 0, igst: 0 },
+      { description: 'Travel Charges', quantity: 1, rate: 500, amount: 500, gst_rate: 0, taxable: 500, cgst: 0, sgst: 0, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => current_date, p_due_date => null,
+        p_subtotal => 1500, p_discount => 0, p_taxable => 1500, p_tax => 0, p_total => 1500,
+        p_items => '${items}'::jsonb
+      );`)
+    const rows = await db.query<{ description: string; subtext: string | null }>(
+      `select description, subtext from invoice_items where invoice_id = '${inv.rows[0]!.id}' order by sort_order;`,
+    )
+    expect(rows.rows).toEqual([
+      { description: 'Wedding Photography Package', subtext: 'Haldi + Wedding + Reception coverage' },
+      { description: 'Travel Charges', subtext: null },
+    ])
+  })
+
   it('records payments and moves status partial -> paid', async () => {
     const items = JSON.stringify([
       { description: 'Album', quantity: 1, rate: 10000, amount: 10000, gst_rate: 12, taxable: 10000, cgst: 600, sgst: 600, igst: 0 },
@@ -854,6 +918,30 @@ describe('billing & invoicing (Phase 9)', () => {
 
     expect(await resolve(withOwn.rows[0]!.id)).toBe('false')
     expect(await resolve(withoutOwn.rows[0]!.id)).toBe('true')
+  })
+
+  it('a Notes snippet library sits alongside print-layout templates, independent of them', async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const a = await db.query<{ id: string }>(
+      `insert into invoice_note_templates (company_id, title, content, is_default)
+       values ('${companyId}', 'Standard terms', 'Payment due within 15 days.', true) returning id;`,
+    )
+    await db.exec(
+      `insert into invoice_note_templates (company_id, title, content) values ('${companyId}', 'Thank you note', 'Thank you for booking with us!');`,
+    )
+    const active = await db.query<{ title: string }>(
+      `select title from invoice_note_templates where company_id = '${companyId}' and is_active = true order by is_default desc, created_at desc;`,
+    )
+    expect(active.rows.map((r) => r.title)).toEqual(['Standard terms', 'Thank you note'])
+
+    // Soft-deleted, not gone -- an invoice that already used its text keeps meaning what it said.
+    await db.exec(`update invoice_note_templates set is_active = false where id = '${a.rows[0]!.id}';`)
+    const stillActive = await db.query<{ title: string }>(
+      `select title from invoice_note_templates where company_id = '${companyId}' and is_active = true;`,
+    )
+    expect(stillActive.rows.map((r) => r.title)).toEqual(['Thank you note'])
+    const row = await db.query<{ content: string }>(`select content from invoice_note_templates where id = '${a.rows[0]!.id}';`)
+    expect(row.rows[0]!.content).toBe('Payment due within 15 days.')
   })
 })
 
@@ -1976,6 +2064,20 @@ describe('attendance check-out and fence (0030)', () => {
   it('keeps the fence out once it is set', async () => {
     // Same coordinates the fence was just moved away from.
     await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow()
+  })
+
+  it('a fence can be turned off without deleting it, and back on again', async () => {
+    // The fence is currently at Delhi (28.6139, 77.209); Mumbai (19.076, 72.8777) is outside it.
+    await db.query(`select set_company_location(28.6139, 77.209, 300, 'Asia/Kolkata', false);`)
+    const id = (await db.query<{ id: string }>(`select check_in(19.076, 72.8777) as id;`)).rows[0]!.id
+    expect(id).toBeTruthy()
+    await db.exec(`delete from attendance where id = '${id}';`) // undo, so the next test starts clean
+
+    await db.query(`select set_company_location(28.6139, 77.209, 300, 'Asia/Kolkata', true);`)
+    await expect(db.query(`select check_in(19.076, 72.8777);`)).rejects.toThrow(/outside_fence/)
+
+    const row = await db.query<{ is_active: boolean }>(`select is_active from company_location;`)
+    expect(row.rows[0]!.is_active).toBe(true)
   })
 })
 
@@ -4477,6 +4579,29 @@ describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
     expect(row.rows[0]!.event_location).toBe('Taj Palace, Jaipur')
   })
 
+  it('a lead can carry a free-text group tag, and its source covers every channel a studio hears from a client on', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const ids: string[] = []
+    for (const source of ['instagram', 'whatsapp', 'google_form', 'csv_import', 'other']) {
+      const inserted = await db.query<{ id: string }>(
+        `insert into crm_leads (company_id, phone, phone_norm, source) values ('${co}', '9${source.length}00000000', '9${source.length}00000000', '${source}') returning id;`,
+      )
+      ids.push(inserted.rows[0]!.id)
+    }
+    const rows = await db.query<{ source: string }>(`select source from crm_leads where id in (${ids.map((id) => `'${id}'`).join(',')});`)
+    expect(rows.rows.map((r) => r.source).sort()).toEqual(['csv_import', 'google_form', 'instagram', 'other', 'whatsapp'])
+
+    await expect(
+      db.exec(`insert into crm_leads (company_id, phone, phone_norm, source) values ('${co}', '9000000099', '9000000099', 'not_a_real_source');`),
+    ).rejects.toThrow()
+
+    const withGroup = await db.query<{ id: string }>(
+      `insert into crm_leads (company_id, phone, phone_norm, group_name) values ('${co}', '9000000098', '9000000098', 'Hot Lead, Already Booked') returning id;`,
+    )
+    const g = await db.query<{ group_name: string }>(`select group_name from crm_leads where id = '${withGroup.rows[0]!.id}';`)
+    expect(g.rows[0]!.group_name).toBe('Hot Lead, Already Booked')
+  })
+
   it('generate_referral_slug is readable, unique, and stable to look up', async () => {
     const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
     const a = await db.query<{ slug: string }>(
@@ -4502,6 +4627,46 @@ describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
     )
     const lookup = await db.query<{ v: unknown }>(`select get_public_referral_campaign('${made.rows[0]!.slug}') as v;`)
     expect(lookup.rows[0]!.v).toBeNull()
+  })
+
+  it('a referral submission can carry the event type, date and function count the original form asked for', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const campaign = await db.query<{ id: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Friend Referral', generate_referral_slug('Friend Referral')) returning id;`,
+    )
+    const campaignId = campaign.rows[0]!.id
+
+    const submitted = await db.query<{ submit_referral: string }>(`
+      select submit_referral(
+        p_campaign_id => '${campaignId}'::uuid,
+        p_client_name => 'Riya Shah',
+        p_client_phone => '9000001234',
+        p_event_type => 'Wedding',
+        p_event_date => '2027-02-14',
+        p_functions_count => 4
+      ) as submit_referral;`)
+    const row = await db.query<{ event_type: string; event_date: Date; functions_count: number }>(
+      `select event_type, event_date, functions_count from referral_submissions where id = '${submitted.rows[0]!.submit_referral}';`,
+    )
+    expect({ ...row.rows[0], event_date: row.rows[0]!.event_date.toISOString().slice(0, 10) }).toEqual({
+      event_type: 'Wedding',
+      event_date: '2027-02-14',
+      functions_count: 4,
+    })
+
+    // Every field here is optional -- a friend who only leaves a name and phone still goes through.
+    const bare = await db.query<{ submit_referral: string }>(`
+      select submit_referral(p_campaign_id => '${campaignId}'::uuid, p_client_name => 'Anon Friend', p_client_phone => '9000005678') as submit_referral;`)
+    const bareRow = await db.query<{ event_type: string | null; functions_count: number | null }>(
+      `select event_type, functions_count from referral_submissions where id = '${bare.rows[0]!.submit_referral}';`,
+    )
+    expect(bareRow.rows[0]).toEqual({ event_type: null, functions_count: null })
+
+    await expect(
+      db.exec(
+        `insert into referral_submissions (company_id, campaign_id, client_name, functions_count) values ('${co}', '${campaignId}', 'Bad Count', 21);`,
+      ),
+    ).rejects.toThrow()
   })
 
   it('the service catalog rejects a duplicate name per company', async () => {
@@ -4826,6 +4991,133 @@ describe('Lovable parity round 2: overhead allocation and company settings', () 
 })
 
 /**
+ * Project profitability report ("Calculated Expenses" in the original, 0086):
+ * per-project income/expense/margin, sortable, date-windowed, paginated.
+ */
+describe('project profitability report (0086)', () => {
+  let db: PGlite
+  let co: string
+  let p1: string
+  let p2: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into clients (company_id, name) values ('${co}', 'Acme');`)
+    const clientId = (await db.query<{ id: string }>(`select id from clients where company_id = '${co}'`)).rows[0]!.id
+    p1 = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost, status) values ('${co}', '${clientId}', 'Wedding A', 100000, 'active') returning id;`,
+      )
+    ).rows[0]!.id
+    p2 = (
+      await db.query<{ id: string }>(
+        `insert into projects (company_id, client_id, name, package_cost, status) values ('${co}', '${clientId}', 'Wedding B', 50000, 'active') returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(`insert into received_payments (company_id, project_id, amount, paid_on) values ('${co}', '${p1}', 60000, '2026-01-10');`)
+    await db.exec(`insert into received_payments (company_id, project_id, amount, paid_on) values ('${co}', '${p2}', 50000, '2026-02-05');`)
+    await db.exec(`insert into expenses (company_id, project_id, amount, expense_date, category) values ('${co}', '${p1}', 10000, '2026-01-15', 'travel');`)
+    await db.exec(`insert into expenses (company_id, project_id, is_fixed_overhead, amount, expense_date, category) values ('${co}', null, true, 2000, '2026-01-20', 'supplies');`)
+  })
+
+  it('splits paid income, receivables and project-plus-overhead expense the way the original did, plus the overhead share this app already allocates', async () => {
+    const r = await db.query<{ v: { items: Record<string, unknown>[]; summary: Record<string, unknown> } }>(
+      `select project_profitability_report() as v;`,
+    )
+    const byId = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_id, i]))
+    // Wedding A: 60k paid of 100k, 10k direct expense + a 1k/2 overhead share = 11k.
+    expect(byId[p1]).toMatchObject({
+      project_total_value: 100000,
+      paid_income: 60000,
+      receivables: 40000,
+      company_expense_total: 11000,
+      gross_profit: 49000,
+      balance_status: 'pending',
+      attention_flags: ['pending_receivable'],
+    })
+    // Wedding B: fully paid, no direct expense, still absorbs its overhead share.
+    expect(byId[p2]).toMatchObject({
+      project_total_value: 50000,
+      paid_income: 50000,
+      receivables: 0,
+      company_expense_total: 1000,
+      balance_status: 'settled',
+    })
+    expect(r.rows[0]!.v.summary).toMatchObject({
+      project_count: 2,
+      total_project_value: 150000,
+      total_paid_income: 110000,
+      total_company_expenses: 12000,
+      pending_project_count: 1,
+    })
+  })
+
+  it('a date window scopes payments and expenses only -- project value stays the full booking either way', async () => {
+    const r = await db.query<{ v: { items: Record<string, unknown>[] } }>(
+      `select project_profitability_report(p_date_from => '2026-02-01', p_date_to => '2026-02-28') as v;`,
+    )
+    const byId = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_id, i]))
+    // January's payment and both January expenses fall outside the window.
+    expect(byId[p1]).toMatchObject({ project_total_value: 100000, paid_income: 0, company_expense_total: 0 })
+    expect(byId[p2]).toMatchObject({ project_total_value: 50000, paid_income: 50000, company_expense_total: 0 })
+  })
+
+  it('sorts by any allowed column in either direction, and paginates the result', async () => {
+    const asc = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_sort_by => 'total_cost', p_sort_direction => 'asc') as v;`,
+    )
+    expect(asc.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding B', 'Wedding A'])
+
+    const desc = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_sort_by => 'total_cost', p_sort_direction => 'desc') as v;`,
+    )
+    expect(desc.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding A', 'Wedding B'])
+
+    // page_size is clamped to at least 10, same as the original's own floor.
+    const paged = await db.query<{ v: { pagination: { page_size: number; total_count: number; total_pages: number } } }>(
+      `select project_profitability_report(p_page_size => 1) as v;`,
+    )
+    expect(paged.rows[0]!.v.pagination).toEqual({ page: 1, page_size: 10, total_count: 2, total_pages: 1 })
+  })
+
+  it('filters by project, client, status and a name/client search', async () => {
+    const byProject = await db.query<{ v: { items: unknown[] } }>(
+      `select project_profitability_report(p_project_id => '${p1}') as v;`,
+    )
+    expect(byProject.rows[0]!.v.items).toHaveLength(1)
+
+    const bySearch = await db.query<{ v: { items: { project_name: string }[] } }>(
+      `select project_profitability_report(p_search => 'wedding b') as v;`,
+    )
+    expect(bySearch.rows[0]!.v.items.map((i) => i.project_name)).toEqual(['Wedding B'])
+
+    const byStatus = await db.query<{ v: { items: unknown[] } }>(
+      `select project_profitability_report(p_status => 'cancelled') as v;`,
+    )
+    expect(byStatus.rows[0]!.v.items).toHaveLength(0)
+  })
+
+  it('a project running at a loss is flagged, and a cancelled project does not absorb overhead', async () => {
+    await db.exec(`
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co}', (select id from clients where company_id = '${co}'), 'Underwater', 1000, 'active');
+      insert into expenses (company_id, project_id, amount, expense_date, category)
+        values ('${co}', (select id from projects where name = 'Underwater'), 5000, '2026-01-15', 'equipment');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co}', (select id from clients where company_id = '${co}'), 'Called off', 1000, 'cancelled');
+    `)
+    const r = await db.query<{ v: { items: Record<string, unknown>[] } }>(`select project_profitability_report() as v;`)
+    const byName = Object.fromEntries(r.rows[0]!.v.items.map((i) => [i.project_name, i]))
+    expect(byName['Underwater']).toMatchObject({ profitability_status: 'loss', attention_flags: expect.arrayContaining(['loss_project']) })
+    expect(byName['Called off']).toMatchObject({ company_expense_total: 0 })
+  })
+})
+
+/**
  * Round 3 of the Lovable parity pass: parties (vendors/freelancers) were a
  * completely orphaned table -- no route anywhere referenced them, despite
  * both expense tables already joining to one for display. Both expense forms
@@ -4974,6 +5266,13 @@ describe('Lovable parity round 5: editing a team member and a company expense', 
       `select name, engagement_type, phone from users where user_id = '${MEMBER}';`,
     )
     expect(row.rows[0]).toEqual({ name: 'Rahul Verma', engagement_type: 'freelancer', phone: '9000000099' })
+  })
+
+  it('a person can put a photo link on their own profile, next to the studio logo', async () => {
+    await asUser(db, OWNER)
+    await db.exec(`update users set avatar_url = 'https://cdn.example/me.jpg' where user_id = '${OWNER}';`)
+    const row = await db.query<{ avatar_url: string }>(`select avatar_url from users where user_id = '${OWNER}';`)
+    expect(row.rows[0]!.avatar_url).toBe('https://cdn.example/me.jpg')
   })
 
   it('a company expense logged with the wrong amount, date, and GST rate can be corrected', async () => {
@@ -5251,6 +5550,29 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
     expect(row.rows[0]).toEqual({ value: 'Instagram', is_active: false })
   })
 
+  it('a new studio gets enquiry source and payment type seeded as picklists too, not just lead source and expense category', async () => {
+    const categories = await db.query<{ category: string }>(
+      `select distinct category from custom_lookups where company_id = '${companyId}' order by category;`,
+    )
+    expect(categories.rows.map((r) => r.category)).toEqual([
+      'expense_category',
+      'lead_source',
+      'payment_type',
+      'enquiry_source',
+      'invoice_line_preset',
+    ].sort())
+
+    const paymentTypes = await db.query<{ value: string }>(
+      `select value from custom_lookups where company_id = '${companyId}' and category = 'payment_type' order by sort_order;`,
+    )
+    expect(paymentTypes.rows.map((r) => r.value)).toEqual(['UPI', 'Cash', 'Bank transfer', 'Cheque'])
+
+    const presetCount = await db.query<{ n: string }>(
+      `select count(*)::text as n from custom_lookups where company_id = '${companyId}' and category = 'invoice_line_preset';`,
+    )
+    expect(presetCount.rows[0]!.n).toBe('14')
+  })
+
   it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {
     const inv = await db.query<{ id: string }>(
       `insert into user_invitations (company_id, email, token_hash, role, pending_name, expires_at)
@@ -5398,5 +5720,102 @@ describe('reminders resolve a display name for whatever they are linked to', () 
     expect(byTitle.get('Call client')?.entity_name).toBe('Verma Client')
     expect(byTitle.get('Chase invoice')?.entity_name).toMatch(/^INV-/)
     expect(byTitle.get('Buy printer paper')?.entity_name).toBeNull()
+  })
+})
+
+/**
+ * Team payouts, shoot-derived tracker (0090): a settlement ledger kept
+ * alongside the existing manual team_payouts table, not replacing it.
+ */
+describe('team payout settlements (0090)', () => {
+  let db: PGlite
+  let companyId: string
+  const member = '55555555-5555-5555-5555-555555555555'
+  let slotId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${member}', 'm@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${member}', '${companyId}', 'employee', 'Shooter', 'm@s.test');`,
+    )
+    const slot = await db.query<{ book_team_slot: string }>(
+      `select book_team_slot('${member}', null, 'Photographer',
+        '2026-07-01T04:00:00Z', '2026-07-01T12:00:00Z', 8000);`,
+    )
+    slotId = slot.rows[0]!.book_team_slot
+  })
+
+  it('a slot carries its own cost status and notes, separate from the booking itself', async () => {
+    await db.query(
+      `select set_slot_cost(p_slot_id => '${slotId}', p_final_cost => 7500, p_cost_status => 'final', p_cost_notes => 'Agreed on the day');`,
+    )
+    const row = await db.query<{ final_cost: string; cost_status: string; cost_notes: string }>(
+      `select final_cost, cost_status, cost_notes from team_assignment_slots where id = '${slotId}';`,
+    )
+    expect(Number(row.rows[0]!.final_cost)).toBe(7500)
+    expect(row.rows[0]!.cost_status).toBe('final')
+    expect(row.rows[0]!.cost_notes).toBe('Agreed on the day')
+
+    await expect(
+      db.query(`select set_slot_cost(p_slot_id => '${slotId}', p_cost_status => 'not_a_real_status');`),
+    ).rejects.toThrow()
+  })
+
+  it('a partial payment, then the rest, settles the slot -- and a third payment is refused as over-collection', async () => {
+    const first = await db.query<{ paid_total: string; amount_due: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 5000, p_payment_mode => 'upi');`,
+    )
+    expect(Number(first.rows[0]!.paid_total)).toBe(5000)
+    expect(Number(first.rows[0]!.amount_due)).toBe(7500)
+
+    const second = await db.query<{ paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 2500, p_payment_mode => 'cash');`,
+    )
+    expect(Number(second.rows[0]!.paid_total)).toBe(7500)
+
+    await expect(
+      db.query(`select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 1, p_payment_mode => 'cash');`),
+    ).rejects.toThrow(/exceed amount due/i)
+  })
+
+  it('a reversal corrects a mistaken payment, but cannot push the paid total negative', async () => {
+    const rev = await db.query<{ id: string; paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 2500, p_entry_type => 'reversal', p_notes => 'wrong amount');`,
+    )
+    expect(Number(rev.rows[0]!.paid_total)).toBe(5000)
+
+    await expect(
+      db.query(`select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 999999, p_entry_type => 'reversal');`),
+    ).rejects.toThrow(/negative/i)
+  })
+
+  it('lists every entry for a slot plus its paid-total aggregate, and never touches the slot itself', async () => {
+    const before = await db.query<{ final_cost: string }>(`select final_cost from team_assignment_slots where id = '${slotId}';`)
+
+    const listed = await db.query<{
+      v: { entries: { entry_type: string; amount_paid: string }[]; aggregates: { slot_id: string; paid_total: string; entries_count: number }[] }
+    }>(`select list_payout_settlements(array['${slotId}']::uuid[]) as v;`)
+    expect(listed.rows[0]!.v.entries).toHaveLength(3) // payment, payment, reversal
+    const agg = listed.rows[0]!.v.aggregates.find((a) => a.slot_id === slotId)
+    expect(Number(agg!.paid_total)).toBe(5000)
+    expect(agg!.entries_count).toBe(3)
+
+    // Settlement bookkeeping is deliberately inert against the slot's own cost fields.
+    const after = await db.query<{ final_cost: string }>(`select final_cost from team_assignment_slots where id = '${slotId}';`)
+    expect(after.rows[0]!.final_cost).toBe(before.rows[0]!.final_cost)
+  })
+
+  it('an adjustment is not blocked by the overpay guard, the way a plain payment is', async () => {
+    const adj = await db.query<{ paid_total: string }>(
+      `select * from create_payout_settlement(p_slot_id => '${slotId}', p_amount_paid => 4000, p_entry_type => 'adjustment', p_notes => 'correction');`,
+    )
+    // 5000 (running total) + 4000 adjustment = 9000, over the 7500 due -- allowed for an adjustment.
+    expect(Number(adj.rows[0]!.paid_total)).toBe(9000)
   })
 })

@@ -3,6 +3,8 @@ import { roundINR, sumINR } from './money'
 
 export interface InvoiceLineInput {
   description: string
+  /** The subtext line underneath the description. */
+  subtext?: string | undefined
   quantity: number
   rate: number
   gst_rate: GstSlab
@@ -26,17 +28,24 @@ export interface InvoiceTotals {
 }
 
 /**
- * Compute an invoice from its lines. Discount (flat ₹) is applied proportionally
- * across lines, then GST is charged on each line's discounted taxable value
- * using the place-of-supply split. This is the single source the API persists.
+ * Compute an invoice from its lines. Discount is given as a flat ₹ amount or
+ * a percentage of the subtotal — either way it resolves to one flat ₹ figure
+ * here, which is the only form that ever reaches the API or gets persisted;
+ * a percent discount is not remembered as a percent once saved. It is applied
+ * proportionally across lines, then GST is charged on each line's discounted
+ * taxable value using the place-of-supply split. This is the single source
+ * the API persists.
  */
 export function computeInvoice(
   lines: ReadonlyArray<InvoiceLineInput>,
-  opts: { intraState: boolean; discount?: number },
+  opts: { intraState: boolean; discount?: number; discountType?: 'flat' | 'percent' },
 ): InvoiceTotals {
   const amounts = lines.map((l) => roundINR(l.quantity * l.rate))
   const subtotal = sumINR(amounts)
-  const discount = Math.min(Math.max(0, opts.discount ?? 0), subtotal)
+  const rawDiscount = opts.discount ?? 0
+  const flatDiscount =
+    opts.discountType === 'percent' ? roundINR(subtotal * (Math.max(0, rawDiscount) / 100)) : rawDiscount
+  const discount = Math.min(Math.max(0, flatDiscount), subtotal)
   const ratio = subtotal > 0 ? (subtotal - discount) / subtotal : 1
 
   const computed: InvoiceLine[] = lines.map((l, i) => {

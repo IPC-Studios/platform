@@ -2,9 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   teamPayoutList,
+  payoutSettlementList,
+  createPayoutSettlementResponse,
   z,
   type CreateTeamPayoutRequest,
   type UpdateTeamPayoutRequest,
+  type CreatePayoutSettlementRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -78,4 +81,31 @@ export function useDeleteTeamPayout() {
     (id: string) => callApi(`/team-payouts/${id}`, { method: 'DELETE', responseSchema: anySchema }),
     'Payout deleted',
   )
+}
+
+// ── Shoot-derived tracker: a cash ledger against booked slots ──────
+// Kept alongside the manual payouts above -- separate query key, since it
+// reads and writes nothing the manual list touches.
+export function usePayoutSettlements(slotIds: readonly string[]) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const key = [...slotIds].sort().join(',')
+  return useQuery({
+    queryKey: ['team-payouts', 'settlements', key],
+    queryFn: () => callApi(`/team-payouts/settlements?slot_ids=${encodeURIComponent(key)}`, { responseSchema: payoutSettlementList }),
+    enabled: !!session && access.hasModule('team_payouts') && slotIds.length > 0,
+    staleTime: 15_000,
+  })
+}
+
+export function useCreatePayoutSettlement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreatePayoutSettlementRequest) =>
+      callApi('/team-payouts/settlements', { method: 'POST', body, responseSchema: createPayoutSettlementResponse }),
+    onSuccess: () => {
+      toast.success('Settlement recorded')
+      void qc.invalidateQueries({ queryKey: ['team-payouts', 'settlements'] })
+    },
+  })
 }

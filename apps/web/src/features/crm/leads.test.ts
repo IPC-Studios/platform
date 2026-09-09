@@ -51,6 +51,7 @@ const lead = (name: string, over: Partial<CrmLead> = {}): CrmLead => ({
   city: null,
   currency: 'INR',
   score: 0,
+  group_name: null,
   created_at: '2026-08-20T10:00:00Z',
   ...over,
 })

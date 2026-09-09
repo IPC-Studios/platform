@@ -104,6 +104,25 @@ export function useCustomLookups(category?: string) {
   })
 }
 
+const activeLookupSchema = z.object({
+  id: z.string().uuid(),
+  category: z.string(),
+  value: z.string(),
+  sort_order: z.number().int(),
+})
+const activeLookupArraySchema = activeLookupSchema.array()
+
+/** The active values of one lookup category — open to any signed-in member, not just the owner. */
+export function useActiveLookups(category: string) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['settings', 'lookups', 'active', category],
+    queryFn: () => callApi(`/settings/lookups/active?category=${encodeURIComponent(category)}`, { responseSchema: activeLookupArraySchema }),
+    enabled: !!session,
+    staleTime: 30_000,
+  })
+}
+
 export function useCreateCustomLookup() {
   const qc = useQueryClient()
   return useMutation({

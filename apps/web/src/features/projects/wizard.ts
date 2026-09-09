@@ -171,11 +171,24 @@ export const SHOOT_PRESET = ['Haldi', 'Mehendi', 'Wedding Day', 'Reception'] as 
  * Filter the type list for the search box: case-insensitive, matches anywhere
  * in the name so "haldi" finds all three Haldis and "shoot" finds the couple
  * and pre-wedding ones.
+ *
+ * `extra` is this studio's own saved shoot names — a "Pool Party" or
+ * "Baby Shower" they've booked before but that never earns a spot on the
+ * common list. Merged ahead of the search, deduped case-insensitively so a
+ * studio's own "Haldi" preset does not double the built-in one.
  */
-export function matchShootTypes(query: string): string[] {
+export function matchShootTypes(query: string, extra: readonly string[] = []): string[] {
+  const seen = new Set<string>()
+  const all: string[] = []
+  for (const name of [...SHOOT_TYPES, ...extra]) {
+    const key = name.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    all.push(name)
+  }
   const q = query.trim().toLowerCase()
-  if (!q) return [...SHOOT_TYPES]
-  return SHOOT_TYPES.filter((t) => t.toLowerCase().includes(q))
+  if (!q) return all
+  return all.filter((t) => t.toLowerCase().includes(q))
 }
 
 /**

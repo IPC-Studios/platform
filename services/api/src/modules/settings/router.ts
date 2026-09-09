@@ -80,7 +80,7 @@ export const settingsRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'settings.profile', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
-          select name, email, phone, role, status from users where user_id = ${auth.userId}`
+          select name, email, phone, role, status, avatar_url from users where user_id = ${auth.userId}`
         return rows[0] ?? null
       }),
     )
@@ -97,7 +97,7 @@ export const settingsRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           update users set ${sql(parsed.data)} where user_id = ${auth.userId}
-          returning name, email, phone, role, status`
+          returning name, email, phone, role, status, avatar_url`
         return rows[0] ?? null
       }),
     )
@@ -189,6 +189,26 @@ export const settingsRouter = new Hono<AppEnv>()
   })
 
   // ── Custom Lookups ─────────────────────────────────────────
+  // Managing the list is owner-only, but reading the active values is not --
+  // anyone logging an expense needs the category list, not just the owner.
+  .get('/lookups/active', async (c) => {
+    const category = c.req.query('category')
+    if (!category) fail(422, 'Category is required.')
+    const rows = await attempt(c, 'settings.lookups_active', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        return sql`
+          select id, category, value, sort_order
+            from custom_lookups
+           where company_id = ${c.get('auth').companyId}
+             and category = ${category}
+             and is_active = true
+           order by sort_order, value`
+      }),
+    )
+    if (!rows) fail(400, 'We could not load lookups.')
+    return c.json(rows)
+  })
+
   .get('/lookups', requireOwner(), async (c) => {
     const category = c.req.query('category')
     const rows = await attempt(c, 'settings.lookups', () =>

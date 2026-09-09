@@ -1,5 +1,15 @@
 import { Hono } from 'hono'
-import { createExpenseRequest, updateExpenseRequest, expense, projectFinancials, gopoSummary, gstAnalysis, gstAnalysisRequest } from '@ipc/contracts'
+import {
+  createExpenseRequest,
+  updateExpenseRequest,
+  expense,
+  projectFinancials,
+  gopoSummary,
+  gstAnalysis,
+  gstAnalysisRequest,
+  profitabilityReportQuery,
+  profitabilityReport,
+} from '@ipc/contracts'
 import { grossProfit, balancePending } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -153,4 +163,44 @@ export const financialsRouter = new Hono<AppEnv>()
     )
     if (!data) fail(400, 'We could not load GST analysis.')
     return c.json(gstAnalysis.parse(data))
+  })
+
+  // ── Project profitability report (financials module) ───────
+  .get('/profitability', requireModule('financials'), async (c) => {
+    const q = c.req.query()
+    const parsed = profitabilityReportQuery.safeParse({
+      date_from: q.date_from || undefined,
+      date_to: q.date_to || undefined,
+      project_id: q.project_id || undefined,
+      client_id: q.client_id || undefined,
+      status: q.status || undefined,
+      search: q.search || undefined,
+      sort_by: q.sort_by || undefined,
+      sort_direction: q.sort_direction || undefined,
+      page: q.page ? Number(q.page) : undefined,
+      page_size: q.page_size ? Number(q.page_size) : undefined,
+    })
+    if (!parsed.success) fail(422, 'Please check the report filters.')
+    const v = parsed.data
+
+    const data = await attempt(c, 'financials.profitability', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const result = await sql<{ project_profitability_report: unknown }[]>`
+          select project_profitability_report(
+            p_date_from => ${v.date_from ?? null}::date,
+            p_date_to => ${v.date_to ?? null}::date,
+            p_project_id => ${v.project_id ?? null}::uuid,
+            p_client_id => ${v.client_id ?? null}::uuid,
+            p_status => ${v.status ?? null},
+            p_search => ${v.search ?? null},
+            p_sort_by => ${v.sort_by},
+            p_sort_direction => ${v.sort_direction},
+            p_page => ${v.page},
+            p_page_size => ${v.page_size}
+          ) as project_profitability_report`
+        return rpcJson(result[0]?.project_profitability_report, {})
+      }),
+    )
+    if (!data) fail(400, 'We could not load the profitability report.')
+    return c.json(profitabilityReport.parse(data))
   })

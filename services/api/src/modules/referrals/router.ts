@@ -151,6 +151,7 @@ export const referralsRouter = new Hono<AppEnv>()
                  rs.referrer_name, rs.referrer_phone,
                  rs.client_name, rs.client_phone, rs.client_email,
                  rs.status, rs.reward_granted, rs.reward_amount, rs.notes,
+                 rs.event_type, rs.event_date, rs.functions_count,
                  rs.created_at
             from referral_submissions rs
             join referral_campaigns rc on rc.id = rs.campaign_id
@@ -231,7 +232,10 @@ publicReferralsRouter.post('/referrals/submit', async (c) => {
           p_client_name => ${d.client_name},
           p_client_phone => ${d.client_phone ?? null},
           p_client_email => ${d.client_email ?? null},
-          p_notes => ${d.notes ?? null}
+          p_notes => ${d.notes ?? null},
+          p_event_type => ${d.event_type ?? null},
+          p_event_date => ${d.event_date ?? null},
+          p_functions_count => ${d.functions_count ?? null}
         ) as submit_referral`
       return result
     })
