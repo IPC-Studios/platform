@@ -42,6 +42,7 @@ import {
   useSetTaskStatus,
   useTaskPriorities,
   useTasks,
+  useUpdateBundle,
   useUpdateTask,
 } from '@/features/tasks/api'
 import {
@@ -704,14 +705,28 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
   const { data: bundles, isLoading } = useBundles()
   const { data: projects } = useProjects()
   const createBundle = useCreateBundle()
+  const updateBundle = useUpdateBundle()
   const deleteBundle = useDeleteBundle()
   const applyBundle = useApplyBundle()
   const confirm = useConfirm()
 
   const [open, setOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [itemText, setItemText] = useState('')
   const [applyTo, setApplyTo] = useState<Record<string, string>>({})
+
+  function startEdit(b: { id: string; name: string; items: { title: string }[] }) {
+    setEditingId(b.id)
+    setName(b.name)
+    setItemText(b.items.map((i) => i.title).join('\n'))
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setName('')
+    setItemText('')
+  }
 
   const items = itemText
     .split('\n')
@@ -754,6 +769,10 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="min-w-0 flex-1 truncate font-medium">{b.name}</p>
                       <StatusBadge>{b.items.length} tasks</StatusBadge>
+                      <Button size="sm" variant="ghost" onClick={() => startEdit(b)}>
+                        <Pencil />
+                        <span className="sr-only">Edit {b.name}</span>
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -803,19 +822,16 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
           <form
             onSubmit={(e) => {
               e.preventDefault()
-              createBundle.mutate(
-                { name: name.trim(), items: items.map((title) => ({ title, priority: 'medium' })) },
-                {
-                  onSuccess: () => {
-                    setName('')
-                    setItemText('')
-                  },
-                },
-              )
+              const payload = { name: name.trim(), items: items.map((title) => ({ title, priority: 'medium' as const })) }
+              if (editingId) {
+                updateBundle.mutate({ id: editingId, input: payload }, { onSuccess: cancelEdit })
+              } else {
+                createBundle.mutate(payload, { onSuccess: cancelEdit })
+              }
             }}
             className="flex flex-col gap-3 border-t border-border pt-5"
           >
-            <p className="text-sm font-medium">New bundle</p>
+            <p className="text-sm font-medium">{editingId ? 'Edit bundle' : 'New bundle'}</p>
             <div className="flex flex-col gap-1.5">
               <Label>Name</Label>
               <Input
@@ -837,12 +853,21 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
                 {items.length} {items.length === 1 ? 'task' : 'tasks'} · they keep this order.
               </p>
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {editingId && (
+                <Button type="button" variant="outline" onClick={cancelEdit}>
+                  Cancel
+                </Button>
+              )}
               <Button
                 type="submit"
-                disabled={createBundle.isPending || name.trim().length < 2 || items.length === 0}
+                disabled={(editingId ? updateBundle.isPending : createBundle.isPending) || name.trim().length < 2 || items.length === 0}
               >
-                {createBundle.isPending ? 'Saving…' : 'Save bundle'}
+                {(editingId ? updateBundle.isPending : createBundle.isPending)
+                  ? 'Saving…'
+                  : editingId
+                    ? 'Save changes'
+                    : 'Save bundle'}
               </Button>
             </div>
           </form>

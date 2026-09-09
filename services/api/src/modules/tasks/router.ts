@@ -3,7 +3,9 @@ import {
   applyBundleRequest,
   companyTaskPriority,
   createBundleRequest,
+  updateBundleRequest,
   createTaskPriorityRequest,
+  updateTaskPriorityRequest,
   createTaskRequest,
   generateTasksRequest,
   setBoardOrderRequest,
@@ -109,6 +111,25 @@ export const tasksRouter = new Hono<AppEnv>()
     if (!row) fail(400, 'We could not add this priority.')
     await audit(c, { action: 'task_priority.create', entityType: 'task_priority', entityId: row.id, after: parsed.data })
     return c.json(companyTaskPriority.parse(row), 201)
+  })
+
+  .patch('/priorities/:id', requireAction('tasks', 'edit'), async (c) => {
+    const parsed = updateTaskPriorityRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the priority details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const row = await attempt(c, 'tasks.priorities.update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          update company_task_priorities set ${sql(parsed.data)} where id = ${id}
+          returning id, code, label, tone, sort_order`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That priority was not found.')
+    const updated = companyTaskPriority.parse(row)
+    await audit(c, { action: 'task_priority.update', entityType: 'task_priority', entityId: id, after: parsed.data })
+    return c.json(updated)
   })
 
   .delete('/priorities/:id', requireAction('tasks', 'edit'), async (c) => {
@@ -347,6 +368,30 @@ export const tasksRouter = new Hono<AppEnv>()
     if (!id) fail(400, 'We could not create this bundle.')
     await audit(c, { action: 'task_bundle.create', entityType: 'task_bundle', entityId: id, after: { name, items: items.length } })
     return c.json({ id }, 201)
+  })
+
+  .patch('/bundles/:id', requireAction('tasks', 'edit'), async (c) => {
+    const parsed = updateBundleRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'A bundle needs a name and at least one task.')
+    const { name, items } = parsed.data
+    const id = uuidParam(c)
+    const companyId = c.get('auth').companyId
+    const ok = await attempt(c, 'tasks.bundle_update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<{ id: string }[]>`update task_bundles set name = ${name} where id = ${id} returning id`
+        if (!rows.length) return false
+        await sql`delete from task_bundle_items where bundle_id = ${id}`
+        for (const [index, item] of items.entries()) {
+          await sql`
+            insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order)
+            values (${id}, ${companyId}, ${item.title}, ${item.priority}, ${index})`
+        }
+        return true
+      }),
+    )
+    if (!ok) fail(404, 'We could not find that bundle.')
+    await audit(c, { action: 'task_bundle.update', entityType: 'task_bundle', entityId: id, after: { name, items: items.length } })
+    return c.body(null, 204)
   })
 
   .delete('/bundles/:id', requireAction('tasks', 'delete'), async (c) => {

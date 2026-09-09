@@ -384,6 +384,13 @@ export const createTemplateRequest = z.object({
 })
 export type CreateTemplateRequest = z.infer<typeof createTemplateRequest>
 
+export const updateTemplateRequest = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  body: z.string().trim().min(2).max(2000).optional(),
+  kind: templateKind.optional(),
+})
+export type UpdateTemplateRequest = z.infer<typeof updateTemplateRequest>
+
 /**
  * Sending a template to one lead. The server renders the body with the lead's
  * fields, records the contact on the lead's history, and hands back the link

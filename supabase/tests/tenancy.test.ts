@@ -109,6 +109,7 @@ async function freshDb() {
   await db.exec(mig('0073_work_submission_location.sql'))
   await db.exec(mig('0074_invoice_edit.sql'))
   await db.exec(mig('0075_quote_edit.sql'))
+  await db.exec(mig('0076_work_submission_edit.sql'))
   return db
 }
 
@@ -5062,5 +5063,138 @@ describe('Lovable parity round 7: editing a project deliverable', () => {
       `select title, show_on_quotation from deliverables where id = '${deliverableId}';`,
     )
     expect(row.rows[0]).toEqual({ title: 'Wedding Album (Premium)', show_on_quotation: false })
+  })
+})
+
+/**
+ * Round 8: a batch of smaller settings/reference objects that could be
+ * created and deleted but never corrected in place -- a mistyped priority
+ * label, a bundle checklist, a lead template, a picklist value, a pending
+ * invitation, an unpaid payout, and a work submission awaiting review.
+ */
+describe('Lovable parity round 8: editing settings, invitations, payouts, and work submissions', () => {
+  let db: PGlite
+  let companyId: string
+  const MEMBER = '88888888-8888-8888-8888-888888888881'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${MEMBER}', 'member8@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${MEMBER}', '${companyId}', 'employee', 'Member Eight', 'member8@s.test');`,
+    )
+  })
+
+  it('a custom task priority label and tone can be corrected, but its code stays fixed', async () => {
+    const p = await db.query<{ id: string }>(
+      `insert into company_task_priorities (company_id, code, label, tone) values ('${companyId}', 'rush', 'Rsh', 'neutral') returning id;`,
+    )
+    await db.exec(`update company_task_priorities set label = 'Rush', tone = 'danger' where id = '${p.rows[0]!.id}';`)
+    const row = await db.query<{ code: string; label: string; tone: string }>(
+      `select code, label, tone from company_task_priorities where id = '${p.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ code: 'rush', label: 'Rush', tone: 'danger' })
+  })
+
+  it('a task bundle can be renamed and have its checklist replaced wholesale', async () => {
+    const bundle = await db.query<{ id: string }>(
+      `insert into task_bundles (company_id, name) values ('${companyId}', 'Wedding editin') returning id;`,
+    )
+    const bundleId = bundle.rows[0]!.id
+    await db.exec(`insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order)
+      values ('${bundleId}', '${companyId}', 'Cull', 'medium', 0);`)
+    await db.exec(`update task_bundles set name = 'Wedding editing' where id = '${bundleId}';`)
+    await db.exec(`delete from task_bundle_items where bundle_id = '${bundleId}';`)
+    await db.exec(`insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order) values
+      ('${bundleId}', '${companyId}', 'Cull and select', 'medium', 0),
+      ('${bundleId}', '${companyId}', 'Colour grade', 'medium', 1);`)
+    const name = await db.query<{ name: string }>(`select name from task_bundles where id = '${bundleId}';`)
+    expect(name.rows[0]!.name).toBe('Wedding editing')
+    const items = await db.query<{ title: string }>(`select title from task_bundle_items where bundle_id = '${bundleId}' order by sort_order;`)
+    expect(items.rows.map((r) => r.title)).toEqual(['Cull and select', 'Colour grade'])
+  })
+
+  it('a lead send-template\'s wording can be fixed after saving it', async () => {
+    const t = await db.query<{ id: string }>(
+      `insert into crm_templates (company_id, name, body, kind) values ('${companyId}', 'Follow-up', 'Hi {{nam}}', 'whatsapp') returning id;`,
+    )
+    await db.exec(`update crm_templates set body = 'Hi {{name}}, thanks for reaching out!' where id = '${t.rows[0]!.id}';`)
+    const row = await db.query<{ body: string }>(`select body from crm_templates where id = '${t.rows[0]!.id}';`)
+    expect(row.rows[0]!.body).toBe('Hi {{name}}, thanks for reaching out!')
+  })
+
+  it('a custom lookup value and its active flag can both be corrected', async () => {
+    const l = await db.query<{ id: string }>(
+      `insert into custom_lookups (company_id, category, value) values ('${companyId}', 'lead_source', 'Instagam') returning id;`,
+    )
+    await db.exec(`update custom_lookups set value = 'Instagram', is_active = false where id = '${l.rows[0]!.id}';`)
+    const row = await db.query<{ value: string; is_active: boolean }>(`select value, is_active from custom_lookups where id = '${l.rows[0]!.id}';`)
+    expect(row.rows[0]).toEqual({ value: 'Instagram', is_active: false })
+  })
+
+  it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {
+    const inv = await db.query<{ id: string }>(
+      `insert into user_invitations (company_id, email, token_hash, role, pending_name, expires_at)
+       values ('${companyId}', 'invitee@s.test', 'x', 'employee', 'Rahul Sharm', now() + interval '7 days') returning id;`,
+    )
+    await db.exec(`update user_invitations set pending_name = 'Rahul Sharma', role = 'manager' where id = '${inv.rows[0]!.id}';`)
+    const row = await db.query<{ pending_name: string; role: string }>(
+      `select pending_name, role from user_invitations where id = '${inv.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ pending_name: 'Rahul Sharma', role: 'manager' })
+  })
+
+  it('a pending payout\'s amount can be corrected, but the same guarded update is a no-op once it is completed', async () => {
+    const payoutId = await db.query<{ id: string }>(
+      `select create_team_payout('${MEMBER}', 5000, current_date - 7, current_date) as id;`,
+    )
+    const id = payoutId.rows[0]!.id
+    const fixed = await db.query(`update team_payouts set amount = 6000 where id = '${id}' and status = 'pending' returning id;`)
+    expect(fixed.rows.length).toBe(1)
+    await db.exec(`update team_payouts set status = 'completed' where id = '${id}';`)
+    const blocked = await db.query(`update team_payouts set amount = 9999 where id = '${id}' and status = 'pending' returning id;`)
+    expect(blocked.rows.length).toBe(0)
+    const row = await db.query<{ amount: string }>(`select amount from team_payouts where id = '${id}';`)
+    expect(Number(row.rows[0]!.amount)).toBe(6000)
+  })
+
+  it('a work submission\'s link and notes can be fixed by the person who submitted it, before review', async () => {
+    await asUser(db, MEMBER)
+    const sub = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/wrong') as id;`,
+    )
+    const id = sub.rows[0]!.id
+    await db.query(`select update_work_submission('${id}', 'https://drive.example.com/right', 'fixed', 'HDD 2');`)
+    const row = await db.query<{ submission_link: string; notes: string; location_note: string }>(
+      `select submission_link, notes, location_note from team_work_submissions where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ submission_link: 'https://drive.example.com/right', notes: 'fixed', location_note: 'HDD 2' })
+  })
+
+  it('a work submission cannot be edited by someone else, or once it has been reviewed', async () => {
+    await asUser(db, MEMBER)
+    const sub = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/x') as id;`,
+    )
+    const id = sub.rows[0]!.id
+
+    const OTHER = '88888888-8888-8888-8888-888888888882'
+    await asUser(db, OWNER)
+    await db.exec(`insert into auth.users (id, email) values ('${OTHER}', 'other8@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${OTHER}', '${companyId}', 'employee', 'Other Eight', 'other8@s.test');`,
+    )
+    await asUser(db, OTHER)
+    await expect(db.query(`select update_work_submission('${id}', 'https://hijack.example.com');`)).rejects.toThrow(/not allowed/)
+
+    await asUser(db, OWNER)
+    await db.query(`select review_work(p_submission_id => '${id}', p_approve => true);`)
+    await expect(db.query(`select update_work_submission('${id}', 'https://drive.example.com/after');`)).rejects.toThrow(/cannot be edited/)
   })
 })

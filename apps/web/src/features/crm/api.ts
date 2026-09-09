@@ -70,6 +70,7 @@ import {
   type CreateStageRequest,
   type CreateWorkflowRequest,
   type CreateTemplateRequest,
+  type UpdateTemplateRequest,
   type CrmStatsQuery,
   type CsvImportCommitRequest,
   type MergeLeadsRequest,
@@ -244,6 +245,14 @@ export function useCreateTemplate() {
     (input: CreateTemplateRequest) =>
       callApi('/crm/templates', { method: 'POST', body: input, responseSchema: crmTemplate }),
     'Template saved',
+  )
+}
+
+export function useUpdateTemplate() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateTemplateRequest }) =>
+      callApi(`/crm/templates/${id}`, { method: 'PATCH', body: patch, responseSchema: crmTemplate }),
+    'Template updated',
   )
 }
 

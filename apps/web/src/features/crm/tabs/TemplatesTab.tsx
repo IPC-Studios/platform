@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { templateVariables } from '@ipc/domain'
-import type { TemplateKind } from '@ipc/contracts'
+import type { CrmTemplate, TemplateKind } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -10,7 +10,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useCreateTemplate, useDeleteTemplate, useTemplates } from '../api'
+import { useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useTemplates } from '../api'
 
 const KNOWN = new Set(['name', 'phone', 'email', 'studio'])
 
@@ -22,11 +22,13 @@ const KNOWN = new Set(['name', 'phone', 'email', 'studio'])
 export function TemplatesTab() {
   const { data, isLoading, isError, error, refetch } = useTemplates()
   const create = useCreateTemplate()
+  const update = useUpdateTemplate()
   const del = useDeleteTemplate()
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
   const canDelete = access.hasAction('crm', 'delete')
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [body, setBody] = useState('')
   const [kind, setKind] = useState<TemplateKind>('whatsapp')
@@ -35,6 +37,20 @@ export function TemplatesTab() {
 
   if (isLoading) return <SkeletonCards count={3} />
   if (isError) return <ErrorState error={error} onRetry={() => void refetch()} />
+
+  function startEdit(t: CrmTemplate) {
+    setEditingId(t.id)
+    setName(t.name)
+    setBody(t.body)
+    setKind(t.kind)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setName('')
+    setBody('')
+    setKind('whatsapp')
+  }
 
   async function onDelete(id: string, label: string) {
     if (await confirm({ title: `Delete "${label}"?`, confirmLabel: 'Delete', destructive: true })) del.mutate(id)
@@ -46,7 +62,7 @@ export function TemplatesTab() {
         <Card>
           <CardContent className="flex flex-col gap-3 p-4 sm:p-5">
             <div>
-              <p className="font-medium">New template</p>
+              <p className="font-medium">{editingId ? 'Edit template' : 'New template'}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 Use <code className="rounded bg-muted px-1">{'{{name}}'}</code>, <code className="rounded bg-muted px-1">{'{{phone}}'}</code>,{' '}
                 <code className="rounded bg-muted px-1">{'{{email}}'}</code> and <code className="rounded bg-muted px-1">{'{{studio}}'}</code>; they are filled in per lead.
@@ -82,22 +98,21 @@ export function TemplatesTab() {
                 </p>
               )}
             </div>
-            <div>
+            <div className="flex gap-2">
+              {editingId && (
+                <Button variant="outline" onClick={cancelEdit}>
+                  Cancel
+                </Button>
+              )}
               <Button
-                disabled={name.trim().length < 2 || body.trim().length < 2 || create.isPending}
-                onClick={() =>
-                  create.mutate(
-                    { name: name.trim(), body: body.trim(), kind },
-                    {
-                      onSuccess: () => {
-                        setName('')
-                        setBody('')
-                      },
-                    },
-                  )
-                }
+                disabled={name.trim().length < 2 || body.trim().length < 2 || create.isPending || update.isPending}
+                onClick={() => {
+                  const patch = { name: name.trim(), body: body.trim(), kind }
+                  if (editingId) update.mutate({ id: editingId, patch }, { onSuccess: cancelEdit })
+                  else create.mutate(patch, { onSuccess: cancelEdit })
+                }}
               >
-                Save template
+                {editingId ? 'Save changes' : 'Save template'}
               </Button>
             </div>
           </CardContent>
@@ -120,12 +135,20 @@ export function TemplatesTab() {
                 </p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{t.body}</p>
               </div>
-              {canDelete && (
-                <Button size="sm" variant="ghost" onClick={() => void onDelete(t.id, t.name)}>
-                  <Trash2 />
-                  <span className="sr-only">Delete {t.name}</span>
-                </Button>
-              )}
+              <span className="flex gap-1">
+                {canEdit && (
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(t)}>
+                    <Pencil />
+                    <span className="sr-only">Edit {t.name}</span>
+                  </Button>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" onClick={() => void onDelete(t.id, t.name)}>
+                    <Trash2 />
+                    <span className="sr-only">Delete {t.name}</span>
+                  </Button>
+                )}
+              </span>
             </CardContent>
           </Card>
         ))

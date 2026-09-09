@@ -226,6 +226,31 @@ export const settingsRouter = new Hono<AppEnv>()
     return c.json({ id: rows[0].id }, 201)
   })
 
+  .patch('/lookups/:id', requireOwner(), async (c) => {
+    const id = c.req.param('id')
+    if (!id) fail(422, 'ID is required.')
+    const body = await c.req.json().catch(() => ({}))
+    const patch: Record<string, unknown> = {}
+    if (typeof body.value === 'string' && body.value.trim()) patch.value = body.value.trim()
+    if (typeof body.sort_order === 'number') patch.sort_order = body.sort_order
+    if (typeof body.is_active === 'boolean') patch.is_active = body.is_active
+    if (Object.keys(patch).length === 0) fail(422, 'Nothing to change.')
+    const auth = c.get('auth')
+    const rows = await attempt(
+      c,
+      'settings.lookup_update',
+      () =>
+        withUser(c.env, auth.userId, (sql) => sql<{ id: string }[]>`
+          update custom_lookups set ${sql(patch)} where id = ${id} and company_id = ${auth.companyId} returning id`),
+      { onCode: (code) => (code === '23505' ? 'taken' : undefined) },
+    )
+    if (rows === 'taken') fail(409, 'That value already exists in this category.')
+    if (!rows) fail(400, 'We could not update this lookup.')
+    if (!rows.length) fail(404, 'We could not find that lookup.')
+    await audit(c, { action: 'lookup.update', entityType: 'custom_lookup', entityId: id, after: patch })
+    return c.json({ ok: true })
+  })
+
   .delete('/lookups/:id', requireOwner(), async (c) => {
     const id = c.req.param('id')
     if (!id) fail(422, 'ID is required.')

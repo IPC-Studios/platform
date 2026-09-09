@@ -18,9 +18,9 @@ import { Switch } from '@/shared/ui/switch'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
-import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
+import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup, useUpdateCustomLookup } from '@/features/settings/api'
 import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
-import { useTaskPriorities, useCreateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
+import { useTaskPriorities, useCreateTaskPriority, useUpdateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
 import { useWorkReminderSettings, useUpdateWorkReminderSettings } from '@/features/work/api'
 import type { TaskPriorityTone } from '@ipc/contracts'
 
@@ -278,7 +278,9 @@ function CustomLookups() {
   const [newValue, setNewValue] = useState('')
   const { data: items, isLoading } = useCustomLookups(activeCategory)
   const create = useCreateCustomLookup()
+  const update = useUpdateCustomLookup()
   const del = useDeleteCustomLookup()
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
 
   function handleAdd() {
     if (!newValue.trim()) return
@@ -325,25 +327,66 @@ function CustomLookups() {
             <EmptyState title="No values yet" description="Add your first lookup value above." />
           ) : (
             <ul className="divide-y divide-border">
-              {items.map((item) => (
-                <li key={item.id} className="flex items-center justify-between py-2 text-sm">
-                  <div className="flex items-center gap-3">
-                    <span className="font-medium">{item.value}</span>
-                    <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
-                      {item.is_active ? 'Active' : 'Inactive'}
-                    </StatusBadge>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => del.mutate(item.id)}
-                    disabled={del.isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </li>
-              ))}
+              {items.map((item) =>
+                editing?.id === item.id ? (
+                  <li key={item.id} className="flex items-center gap-2 py-2">
+                    <Input
+                      value={editing.value}
+                      onChange={(e) => setEditing({ id: item.id, value: e.target.value })}
+                      className="h-8"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        update.mutate({ id: item.id, patch: { value: editing.value.trim() } }, { onSuccess: () => setEditing(null) })
+                      }
+                      disabled={!editing.value.trim() || update.isPending}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={item.id} className="flex items-center justify-between py-2 text-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{item.value}</span>
+                      <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
+                        {item.is_active ? 'Active' : 'Inactive'}
+                      </StatusBadge>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setEditing({ id: item.id, value: item.value })}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7"
+                        onClick={() => update.mutate({ id: item.id, patch: { is_active: !item.is_active } })}
+                      >
+                        {item.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(item.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ),
+              )}
             </ul>
           )}
         </div>
@@ -455,9 +498,13 @@ const TONE_OPTIONS: { value: TaskPriorityTone; label: string }[] = [
 function TaskPriorities() {
   const { data: items, isLoading } = useTaskPriorities()
   const create = useCreateTaskPriority()
+  const update = useUpdateTaskPriority()
   const del = useDeleteTaskPriority()
   const [label, setLabel] = useState('')
   const [tone, setTone] = useState<TaskPriorityTone>('neutral')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editLabel, setEditLabel] = useState('')
+  const [editTone, setEditTone] = useState<TaskPriorityTone>('neutral')
 
   function handleAdd() {
     const trimmed = label.trim()
@@ -501,20 +548,60 @@ function TaskPriorities() {
             <EmptyState title="No custom priorities yet" description="Tasks show the default Low/Medium/High/Urgent until you add one." />
           ) : (
             <ul className="divide-y divide-border">
-              {items.map((p) => (
-                <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                  <StatusBadge tone={p.tone}>{p.label}</StatusBadge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => del.mutate(p.id)}
-                    disabled={del.isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </li>
-              ))}
+              {items.map((p) =>
+                editingId === p.id ? (
+                  <li key={p.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                    <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className="h-8 max-w-xs" autoFocus />
+                    <Select value={editTone} onChange={(e) => setEditTone(e.target.value as TaskPriorityTone)} className="h-8 w-28">
+                      {TONE_OPTIONS.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </Select>
+                    <Button
+                      size="sm"
+                      disabled={!editLabel.trim() || update.isPending}
+                      onClick={() =>
+                        update.mutate(
+                          { id: p.id, patch: { label: editLabel.trim(), tone: editTone } },
+                          { onSuccess: () => setEditingId(null) },
+                        )
+                      }
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                    <StatusBadge tone={p.tone}>{p.label}</StatusBadge>
+                    <span className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setEditingId(p.id)
+                          setEditLabel(p.label)
+                          setEditTone(p.tone)
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(p.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </span>
+                  </li>
+                ),
+              )}
             </ul>
           )}
         </div>

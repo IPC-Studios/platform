@@ -194,6 +194,13 @@ export const createInvitationRequest = z.object({
 })
 export type CreateInvitationRequest = z.infer<typeof createInvitationRequest>
 
+/** The email is the token's target, so it stays fixed; revoke and re-invite for a wrong address. */
+export const updateInvitationRequest = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  role: assignableRole.optional(),
+})
+export type UpdateInvitationRequest = z.infer<typeof updateInvitationRequest>
+
 /**
  * The link is returned so the owner can pass it on directly — WhatsApp is how
  * this actually reaches most crew, and the email may never be opened.

@@ -16,6 +16,7 @@ import {
   createLeadResponse,
   createLeadSourceRequest,
   createTemplateRequest,
+  updateTemplateRequest,
   crmLead,
   crmSettings,
   crmStats,
@@ -448,6 +449,25 @@ export const crmRouter = new Hono<AppEnv>()
     const created = crmTemplate.parse(row)
     await audit(c, { action: 'template.create', entityType: 'crm_template', entityId: created.id, after: { name, kind } })
     return c.json(created, 201)
+  })
+
+  .patch('/templates/:id', edit, async (c) => {
+    const parsed = updateTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Check template fields.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const row = await attempt(c, 'crm.template_update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          update crm_templates set ${sql(parsed.data)} where id = ${id}
+          returning id, name, body, kind, created_at`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That template was not found.')
+    const updated = crmTemplate.parse(row)
+    await audit(c, { action: 'template.update', entityType: 'crm_template', entityId: id, after: parsed.data })
+    return c.json(updated)
   })
 
   .delete('/templates/:id', remove, async (c) => {

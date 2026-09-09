@@ -1,11 +1,14 @@
-import { MailCheck, RotateCw, X } from 'lucide-react'
+import { useState } from 'react'
+import { MailCheck, Pencil, RotateCw, X } from 'lucide-react'
 import { toast } from 'sonner'
+import type { AssignableRole } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { Input, Select } from '@/shared/ui/input'
 import { humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
-import { useInvitations, useResendInvitation, useRevokeInvitation } from './api'
+import { useInvitations, useResendInvitation, useRevokeInvitation, useUpdateInvitation } from './api'
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 
@@ -26,7 +29,9 @@ export function InvitationsPanel() {
   const { data, isLoading } = useInvitations()
   const resend = useResendInvitation()
   const revoke = useRevokeInvitation()
+  const update = useUpdateInvitation()
   const confirm = useConfirm()
+  const [editing, setEditing] = useState<{ id: string; name: string; role: AssignableRole } | null>(null)
 
   async function onRevoke(id: string, email: string) {
     const yes = await confirm({
@@ -51,46 +56,88 @@ export function InvitationsPanel() {
           <p className="text-sm text-muted-foreground">No pending invitations.</p>
         ) : (
           <ul className="divide-y divide-border">
-            {data.map((i) => (
-              <li key={i.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <MailCheck className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{i.name}</p>
-                  <p className="truncate text-sm text-muted-foreground">{i.email}</p>
-                </div>
-                <StatusBadge tone={i.expired ? 'danger' : 'warning'}>
-                  {expiryLabel(i.expires_at, i.expired)}
-                </StatusBadge>
-                <StatusBadge>{humanize(i.role)}</StatusBadge>
-                <div className="flex items-center gap-1">
+            {data.map((i) =>
+              editing?.id === i.id ? (
+                <li key={i.id} className="flex flex-wrap items-center gap-2 py-3 first:pt-0 last:pb-0">
+                  <Input
+                    value={editing.name}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    className="h-8 max-w-xs"
+                    autoFocus
+                  />
+                  <Select
+                    value={editing.role}
+                    onChange={(e) => setEditing({ ...editing, role: e.target.value as AssignableRole })}
+                    className="h-8 w-32"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="employee">Employee</option>
+                  </Select>
                   <Button
                     size="sm"
-                    variant="ghost"
-                    disabled={resend.isPending}
+                    disabled={!editing.name.trim() || update.isPending}
                     onClick={() =>
-                      resend.mutate(i.id, {
-                        onSuccess: (res) => {
-                          void navigator.clipboard.writeText(res.invite_link)
-                          toast.success('New link sent and copied to your clipboard')
-                        },
-                      })
+                      update.mutate(
+                        { id: i.id, patch: { name: editing.name.trim(), role: editing.role } },
+                        { onSuccess: () => setEditing(null) },
+                      )
                     }
                   >
-                    <RotateCw /> Resend
+                    Save
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={revoke.isPending}
-                    onClick={() => void onRevoke(i.id, i.email)}
-                  >
-                    <X /> Revoke
+                  <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
+                    Cancel
                   </Button>
-                </div>
-              </li>
-            ))}
+                </li>
+              ) : (
+                <li key={i.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    <MailCheck className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{i.name}</p>
+                    <p className="truncate text-sm text-muted-foreground">{i.email}</p>
+                  </div>
+                  <StatusBadge tone={i.expired ? 'danger' : 'warning'}>
+                    {expiryLabel(i.expires_at, i.expired)}
+                  </StatusBadge>
+                  <StatusBadge>{humanize(i.role)}</StatusBadge>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditing({ id: i.id, name: i.name, role: i.role as AssignableRole })}
+                    >
+                      <Pencil /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={resend.isPending}
+                      onClick={() =>
+                        resend.mutate(i.id, {
+                          onSuccess: (res) => {
+                            void navigator.clipboard.writeText(res.invite_link)
+                            toast.success('New link sent and copied to your clipboard')
+                          },
+                        })
+                      }
+                    >
+                      <RotateCw /> Resend
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={revoke.isPending}
+                      onClick={() => void onRevoke(i.id, i.email)}
+                    >
+                      <X /> Revoke
+                    </Button>
+                  </div>
+                </li>
+              ),
+            )}
           </ul>
         )}
       </CardContent>

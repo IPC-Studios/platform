@@ -33,6 +33,13 @@ export const createTaskPriorityRequest = z.object({
 })
 export type CreateTaskPriorityRequest = z.infer<typeof createTaskPriorityRequest>
 
+/** Label and tone can be corrected after the fact; the code is the key other rows point to, so it stays fixed. */
+export const updateTaskPriorityRequest = z.object({
+  label: z.string().trim().min(1).max(60).optional(),
+  tone: taskPriorityTone.optional(),
+})
+export type UpdateTaskPriorityRequest = z.infer<typeof updateTaskPriorityRequest>
+
 /** A task as shown in lists and on the board. */
 export const taskListItem = z.object({
   id: uuid,
@@ -125,6 +132,10 @@ export const createBundleRequest = z.object({
     .max(50),
 })
 export type CreateBundleRequest = z.infer<typeof createBundleRequest>
+
+/** Same shape as creation: editing a bundle resends its name and full checklist together. */
+export const updateBundleRequest = createBundleRequest
+export type UpdateBundleRequest = z.infer<typeof updateBundleRequest>
 
 export const applyBundleRequest = z.object({
   project_id: uuid.nullable().default(null),

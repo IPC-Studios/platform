@@ -26,6 +26,10 @@ export const submitWorkRequest = z.object({
 })
 export type SubmitWorkRequest = z.infer<typeof submitWorkRequest>
 
+/** Same shape as submission, minus which task/project it's against -- that link doesn't change after the fact. */
+export const updateWorkSubmissionRequest = submitWorkRequest.omit({ task_id: true, project_id: true })
+export type UpdateWorkSubmissionRequest = z.infer<typeof updateWorkSubmissionRequest>
+
 export const reviewWorkRequest = z.object({
   approve: z.boolean(),
   review_notes: z.string().max(1000).optional(),

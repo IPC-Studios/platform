@@ -4,6 +4,7 @@ import {
   addMemberResponse,
   assignRolesRequest,
   createInvitationRequest,
+  updateInvitationRequest,
   directoryMember,
   employeeRole,
   invitation,
@@ -548,6 +549,31 @@ export const teamRouter = new Hono<AppEnv>()
     return c.json(
       invitationLink.parse({ id, invite_link: inviteLink(c.env, raw), expires_at: rows[0]!.expires_at }),
     )
+  })
+
+  .patch('/invitations/:id', requireOwner(), async (c) => {
+    const parsed = updateInvitationRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the invitation details.')
+    const { name, role } = parsed.data
+    if (name === undefined && role === undefined) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'team.invite_update', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`
+          update user_invitations set ${sql({
+            ...(name !== undefined ? { pending_name: name } : {}),
+            ...(role !== undefined ? { role } : {}),
+          })}
+          where id = ${id} and accepted_at is null and revoked_at is null
+          returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not update this invitation.')
+    if (!rows.length) fail(404, 'We could not find that invitation.')
+    await audit(c, { action: 'invitation.update', entityType: 'user_invitation', entityId: id, after: parsed.data })
+    return c.json({ ok: true })
   })
 
   .delete('/invitations/:id', requireOwner(), async (c) => {

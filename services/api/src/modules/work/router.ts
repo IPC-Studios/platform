@@ -1,6 +1,13 @@
 import { Hono } from 'hono'
 import { z } from '@ipc/contracts'
-import { reviewWorkRequest, submitWorkRequest, workReminderSettings, updateWorkReminderSettingsRequest, workSubmission } from '@ipc/contracts'
+import {
+  reviewWorkRequest,
+  submitWorkRequest,
+  updateWorkSubmissionRequest,
+  workReminderSettings,
+  updateWorkReminderSettingsRequest,
+  workSubmission,
+} from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction, requireOwner } from '../../middleware/permissions'
@@ -58,6 +65,33 @@ export const workRouter = new Hono<AppEnv>()
     if (!id) fail(400, 'We could not submit your work.')
     await audit(c, { action: 'work.submit', entityType: 'work_submission', entityId: id, after: { task_id: parsed.data.task_id, project_id: parsed.data.project_id } })
     return c.json({ id }, 201)
+  })
+
+  // The RPC itself checks the caller is the submitter (or an admin/manager)
+  // and refuses once the submission has been reviewed.
+  .patch('/submissions/:id', async (c) => {
+    const parsed = updateWorkSubmissionRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please add a link to your work.')
+    const id = uuidParam(c)
+    const ok = await attempt(
+      c,
+      'work.update',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          await sql`select update_work_submission(
+            p_submission_id => ${id},
+            p_link => ${parsed.data.submission_link},
+            p_notes => ${parsed.data.notes ?? null},
+            p_location_note => ${parsed.data.location_note ?? null}
+          )`
+          return true
+        }),
+      { onCode: (code) => (code === '23514' ? 'reviewed' : undefined) },
+    )
+    if (ok === 'reviewed') fail(409, 'This submission has already been reviewed and can no longer be edited.')
+    if (!ok) fail(400, 'We could not update this submission.')
+    await audit(c, { action: 'work.update', entityType: 'work_submission', entityId: id, after: parsed.data })
+    return c.body(null, 204)
   })
 
   .post('/submissions/:id/review', requireAction('team_work_preview', 'edit'), async (c) => {

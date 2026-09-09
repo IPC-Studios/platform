@@ -5,6 +5,7 @@ import {
   addMemberResponse,
   assignRolesRequest,
   createInvitationRequest,
+  updateInvitationRequest,
   directoryMember,
   employeeRole,
   libraryRole,
@@ -16,6 +17,7 @@ import {
   type AddMemberRequest,
   type AssignRolesRequest,
   type CreateInvitationRequest,
+  type UpdateInvitationRequest,
   type UpdateMemberRequest,
   type UpsertEmployeeRoleRequest,
 } from '@ipc/contracts'
@@ -195,6 +197,14 @@ export function useResendInvitation() {
     (id: string) =>
       callApi(`/team/invitations/${id}/resend`, { method: 'POST', responseSchema: invitationLink }),
     'Invitation resent',
+  )
+}
+
+export function useUpdateInvitation() {
+  return useTeamMutation(
+    ({ id, patch }: { id: string; patch: UpdateInvitationRequest }) =>
+      callApi(`/team/invitations/${id}`, { method: 'PATCH', body: updateInvitationRequest.parse(patch), responseSchema: ok }),
+    'Invitation updated',
   )
 }
 

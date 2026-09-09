@@ -4,7 +4,9 @@ import {
   applyBundleRequest,
   companyTaskPriority,
   createBundleRequest,
+  updateBundleRequest,
   createTaskPriorityRequest,
+  updateTaskPriorityRequest,
   createTaskRequest,
   generateTasksRequest,
   taskBundle,
@@ -13,7 +15,9 @@ import {
   z,
   type ApplyBundleRequest,
   type CreateBundleRequest,
+  type UpdateBundleRequest,
   type CreateTaskPriorityRequest,
+  type UpdateTaskPriorityRequest,
   type CreateTaskRequest,
   type GenerateTasksRequest,
   type SetBoardOrderRequest,
@@ -154,6 +158,18 @@ export function useCreateBundle() {
   )
 }
 
+export function useUpdateBundle() {
+  return useTaskMutation(
+    ({ id, input }: { id: string; input: UpdateBundleRequest }) =>
+      callApi(`/tasks/bundles/${id}`, {
+        method: 'PATCH',
+        body: updateBundleRequest.parse(input),
+        responseSchema: anySchema,
+      }),
+    'Bundle updated',
+  )
+}
+
 export function useDeleteBundle() {
   return useTaskMutation(
     (id: string) => callApi(`/tasks/bundles/${id}`, { method: 'DELETE', responseSchema: anySchema }),
@@ -230,6 +246,18 @@ export function useCreateTaskPriority() {
       callApi('/tasks/priorities', { method: 'POST', body: createTaskPriorityRequest.parse(input), responseSchema: companyTaskPriority }),
     onSuccess: () => {
       toast.success('Priority added')
+      void qc.invalidateQueries({ queryKey: ['tasks', 'priorities'] })
+    },
+  })
+}
+
+export function useUpdateTaskPriority() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateTaskPriorityRequest }) =>
+      callApi(`/tasks/priorities/${id}`, { method: 'PATCH', body: updateTaskPriorityRequest.parse(patch), responseSchema: companyTaskPriority }),
+    onSuccess: () => {
+      toast.success('Priority updated')
       void qc.invalidateQueries({ queryKey: ['tasks', 'priorities'] })
     },
   })
