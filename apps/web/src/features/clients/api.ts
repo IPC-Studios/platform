@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { z, client, createClientRequest, type CreateClientRequest } from '@ipc/contracts'
+import { z, client, createClientRequest, updateClientRequest, type CreateClientRequest, type UpdateClientRequest } from '@ipc/contracts'
 
 const noContent = z.unknown()
 import { callApi } from '@/shared/api/client'
@@ -40,10 +40,10 @@ export function useCreateClient() {
 export function useUpdateClient(id: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: Partial<CreateClientRequest>) =>
+    mutationFn: (input: UpdateClientRequest) =>
       callApi(`/clients/${id}`, {
         method: 'PATCH',
-        body: input,
+        body: updateClientRequest.parse(input),
         responseSchema: client,
       }),
     onSuccess: () => {

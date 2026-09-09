@@ -153,16 +153,21 @@ function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: R
     e.preventDefault()
     setError(null)
     try {
-      const body: CreateDataRecordRequest = {
+      const shared = {
         shoot_id: shootId || null,
         project_id: projectId || null,
         data_label: label.trim(),
-        ...(dataType ? { data_type: dataType } : {}),
         card_count: cards,
         size_gb: size,
       }
-      if (isEdit) await update.mutateAsync({ id: record.id, patch: body })
-      else await create.mutateAsync(body)
+      if (isEdit) {
+        // Resend data_type explicitly (null clears it) instead of a falsy
+        // value silently dropping the key from the patch.
+        await update.mutateAsync({ id: record.id, patch: { ...shared, data_type: dataType || null } })
+      } else {
+        const body: CreateDataRecordRequest = { ...shared, ...(dataType ? { data_type: dataType } : {}) }
+        await create.mutateAsync(body)
+      }
       setOpen(false)
       if (!isEdit) {
         setLabel('')

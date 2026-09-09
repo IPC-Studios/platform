@@ -213,10 +213,10 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
     e.preventDefault()
     setError(null)
     try {
-      const body: CreateExpenseRequest = {
-        // A fixed-overhead expense is shared across every project (see
-        // Settings → Financials); pinning it to one project too would count
-        // it twice.
+      // A fixed-overhead expense is shared across every project (see
+      // Settings → Financials); pinning it to one project too would count
+      // it twice.
+      const shared = {
         project_id: overhead ? null : projectId || null,
         party_id: partyId || null,
         amount,
@@ -224,11 +224,22 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
         is_fixed_overhead: overhead,
         gst_treatment: gstTreatment,
         ...(gstTreatment === 'gst_applicable' ? { gst_rate: gstRate } : {}),
-        ...(category.trim() ? { category: category.trim() } : {}),
-        ...(description.trim() ? { description: description.trim() } : {}),
       }
-      if (isEdit) await update.mutateAsync({ id: expense.id, patch: body })
-      else await create.mutateAsync(body)
+      if (isEdit) {
+        // Editing resends category/description explicitly (null clears them)
+        // instead of a falsy value silently dropping the key from the patch.
+        await update.mutateAsync({
+          id: expense.id,
+          patch: { ...shared, category: category.trim() || null, description: description.trim() || null },
+        })
+      } else {
+        const body: CreateExpenseRequest = {
+          ...shared,
+          ...(category.trim() ? { category: category.trim() } : {}),
+          ...(description.trim() ? { description: description.trim() } : {}),
+        }
+        await create.mutateAsync(body)
+      }
       setOpen(false)
       if (!isEdit) reset()
     } catch (err) {

@@ -45,20 +45,35 @@ export function ClientFormDialog({ client, trigger }: Props) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    const body = {
-      name: name.trim(),
-      ...(phone.trim() ? { phone: phone.trim() } : {}),
-      ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
-      ...(email.trim() ? { email: email.trim() } : {}),
-      ...(city.trim() ? { city: city.trim() } : {}),
-      ...(address.trim() ? { address: address.trim() } : {}),
-      ...(relation.trim() ? { relation: relation.trim() } : {}),
-      ...(gstin.trim() ? { gstin: gstin.trim() } : {}),
-      ...(notes.trim() ? { notes: notes.trim() } : {}),
-    }
     try {
-      if (isEdit) await update.mutateAsync(body)
-      else await create.mutateAsync(body)
+      if (isEdit) {
+        // Editing always resends every field explicitly — including as null —
+        // so clearing a field in the form actually clears it on the server,
+        // instead of a falsy value silently being left out of the patch.
+        await update.mutateAsync({
+          name: name.trim(),
+          phone: phone.trim() || null,
+          alternate_phone: alternatePhone.trim() || null,
+          email: email.trim() || null,
+          city: city.trim() || null,
+          address: address.trim() || null,
+          relation: relation.trim() || null,
+          gstin: gstin.trim() || null,
+          notes: notes.trim() || null,
+        })
+      } else {
+        await create.mutateAsync({
+          name: name.trim(),
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
+          ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
+          ...(email.trim() ? { email: email.trim() } : {}),
+          ...(city.trim() ? { city: city.trim() } : {}),
+          ...(address.trim() ? { address: address.trim() } : {}),
+          ...(relation.trim() ? { relation: relation.trim() } : {}),
+          ...(gstin.trim() ? { gstin: gstin.trim() } : {}),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+        })
+      }
       setOpen(false)
       if (!isEdit) reset()
     } catch (err) {

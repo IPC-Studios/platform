@@ -6,6 +6,7 @@ import {
   z,
   type SaveShootPresetRequest,
   type ShootPresetKind,
+  type UpdateShootRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -61,6 +62,18 @@ export function useDeleteService() {
     (id: string) => callApi(`/shoots/services/${id}`, { method: 'DELETE', responseSchema: anySchema }),
     'Service deleted',
   )
+}
+
+export function useUpdateShoot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateShootRequest }) =>
+      callApi(`/shoots/${id}`, { method: 'PATCH', body: patch, responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Shoot updated')
+      void qc.invalidateQueries({ queryKey: ['shoots'] })
+    },
+  })
 }
 
 export function useShootPresets(kind: ShootPresetKind) {

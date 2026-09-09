@@ -2030,6 +2030,29 @@ describe('shoot details (0038)', () => {
       ),
     ).rejects.toThrow()
   })
+
+  it('a shoot round-trips its map link and start/end time, and both can be corrected after scheduling', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const companyId = company.rows[0]!.id
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Shoot client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Shoot client';`)
+    const proj = await db.query<{ id: string }>(
+      `select create_project_with_details('${client.rows[0]!.id}', 'Shoot Proj', 50000) as id;`,
+    )
+    const shoot = await db.query<{ id: string }>(
+      `insert into shoots (company_id, project_id, name, shoot_date, start_at, end_at, map_link)
+       values ('${companyId}', '${proj.rows[0]!.id}', 'Wedding day', '2026-05-01',
+               '2026-05-01T09:00:00Z', '2026-05-01T18:00:00Z', 'https://maps.example.com/wrong')
+       returning id;`,
+    )
+    const id = shoot.rows[0]!.id
+    await db.exec(`update shoots set map_link = 'https://maps.example.com/right', end_at = '2026-05-01T20:00:00Z' where id = '${id}';`)
+    const row = await db.query<{ map_link: string; start_at: Date; end_at: Date }>(
+      `select map_link, start_at, end_at from shoots where id = '${id}';`,
+    )
+    expect(row.rows[0]!.map_link).toBe('https://maps.example.com/right')
+    expect(row.rows[0]!.end_at.toISOString()).toBe('2026-05-01T20:00:00.000Z')
+  })
 })
 
 describe('deliverable sets (0039)', () => {

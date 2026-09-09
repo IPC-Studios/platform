@@ -30,7 +30,10 @@ export const shootListItem = z.object({
   project_name: z.string().nullable(),
   client_name: z.string().nullable(),
   shoot_date: isoDate.nullable(),
+  start_at: isoDateTime.nullable(),
+  end_at: isoDateTime.nullable(),
   location: z.string().nullable(),
+  map_link: z.string().nullable(),
   status: shootStatus,
   /** What the day was planned to need — the booking screen fills against it. */
   requirements: z.array(shootRequirement),
