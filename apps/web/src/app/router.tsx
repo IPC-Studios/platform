@@ -8,6 +8,7 @@ import {
   type AnyRoute,
 } from '@tanstack/react-router'
 import { LoginPage } from '@/routes/login'
+import { CompleteSetupPage } from '@/routes/complete-setup'
 import { VerifyEmailPage } from '@/routes/verify'
 import { ResetPasswordPage } from '@/routes/reset-password'
 import { AcceptInvitePage } from '@/routes/accept-invite'
@@ -127,6 +128,7 @@ const route = (path: string, component: () => ReactNode): AnyRoute =>
 
 const routeTree = rootRoute.addChildren([
   publicRoute('/login', LoginPage),
+  publicRoute('/complete-setup', CompleteSetupPage),
   publicRoute('/verify', VerifyEmailPage),
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),

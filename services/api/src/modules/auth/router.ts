@@ -16,17 +16,19 @@ import {
   invitationPreview,
   authToken,
   sessionState,
+  completeSetupRequest,
   type AuthToken,
+  type PlanGate,
 } from '@ipc/contracts'
-import { serializeAccess } from '@ipc/permissions'
+import { serializeAccess, resolveAccess, type AppRole } from '@ipc/permissions'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
-import { withService } from '../../lib/db'
+import { withService, withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 import { isDevLike } from '../../lib/env'
-import { issueToken, hashPassword, verifyPassword, TTL_SECONDS } from '../../lib/auth-token'
+import { issueToken, hashPassword, verifyPassword, verifyToken, TTL_SECONDS } from '../../lib/auth-token'
 import { clearRefreshCookie, cookieMode, readRefreshCookie, setRefreshCookie } from '../../lib/session-cookie'
 import { originAllowed } from '../../lib/allowed-origins'
 import { sendVerificationEmail, sendPasswordResetEmail } from '../../lib/email'
@@ -250,7 +252,24 @@ export const authRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
     const row = rows[0]
-    if (!row) fail(404, 'No studio account found for this Google email. Please register first or use email + password.')
+
+    // No account with this email at all: Google already proved mailbox control,
+    // so this is a first-time sign-in, not a dead end -- create the identity and
+    // send them to /complete-setup to name their studio, the same as the original
+    // app's Google flow. No company exists yet, so nothing else is created here.
+    if (!row) {
+      const created = await attempt(c, 'auth.google.create', () =>
+        withService(c.env, async (sql) => {
+          const [u] = await sql<{ id: string }[]>`
+            insert into auth.users (email, encrypted_password, email_verified, email_verified_at)
+            values (${email}, null, true, now())
+            returning id`
+          return u!.id
+        }),
+      )
+      if (!created) fail(503, 'The service is temporarily unavailable. Please try again in a moment.')
+      return c.json({ ...(await signIn(c, created)), needs_setup: true })
+    }
 
     // Google proves mailbox control: auto-verify if still pending
     if (!row.email_verified) {
@@ -260,6 +279,93 @@ export const authRouter = new Hono<AppEnv>()
     }
 
     return c.json(await signIn(c, row.id))
+  })
+
+  // Second half of the Google-signup path: the identity already exists (just
+  // minted by /google above), but no studio does yet. Deliberately NOT behind
+  // requireAuth -- that requires get_auth_context() to already resolve a
+  // company, which is exactly what does not exist until this call succeeds.
+  .post('/complete-setup', async (c) => {
+    const auth = c.req.header('Authorization') ?? ''
+    const [scheme, token] = auth.split(' ')
+    if (scheme !== 'Bearer' || !token) fail(401, 'Please sign in to continue.')
+    const claims = await verifyToken(c.env, token)
+    if (!claims) fail(401, 'Your session has expired. Please sign in again.')
+
+    const parsed = completeSetupRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the form and try again.')
+    const { company_name, admin_name, phone } = parsed.data
+
+    const result = await attempt(c, 'auth.complete_setup', () =>
+      withService(c.env, async (sql) => {
+        const [u] = await sql<{ email: string }[]>`select email from auth.users where id = ${claims.uid}`
+        if (!u) return 'no_user'
+        // Same guard as /register: someone already invited to a studio joins it
+        // through their link, not by naming a brand-new one here.
+        const [invited] = await sql<{ one: number }[]>`
+          select 1 as one
+            from user_invitations
+           where email = ${u.email}
+             and accepted_at is null
+             and revoked_at is null
+             and expires_at > now()
+           limit 1`
+        if (invited) return 'invited'
+        await sql`select set_config('request.jwt.claim.sub', ${claims.uid}, true)`
+        await sql`select register_company_and_admin(${company_name}, ${admin_name}, ${phone ?? null})`
+        return 'ok'
+      }),
+    )
+    if (result === 'no_user') fail(401, 'Your session has expired. Please sign in again.')
+    if (result === 'invited') {
+      fail(
+        409,
+        'You have already been invited to a studio. Open the invitation link in your email to join it, rather than creating a new studio here.',
+      )
+    }
+    if (!result) fail(400, 'We could not set up your studio. Please try again.')
+
+    // The studio exists now -- hydrate the same session shape GET /session returns.
+    const row = await attempt(c, 'auth.complete_setup_session', () =>
+      withUser(c.env, claims.uid, async (sql) => {
+        const rows = await sql<
+          {
+            company_id: string
+            role: AppRole
+            is_owner: boolean
+            is_platform_admin: boolean
+            display_name: string
+            email: string
+            plan_expiry: string | null
+            plan_gate: PlanGate
+            profile_key: string | null
+            overrides: { permission_key: string; enabled: boolean }[] | null
+          }[]
+        >`select * from get_auth_context()`
+        return rows[0]
+      }),
+    )
+    if (!row) fail(400, 'Your studio was created, but we could not load your session. Please sign in again.')
+    const access = resolveAccess({
+      role: row.role,
+      isOwner: row.is_owner,
+      profileKey: row.profile_key,
+      overrides: row.overrides ?? [],
+    })
+    return c.json(
+      sessionState.parse({
+        user_id: claims.uid,
+        company_id: row.company_id,
+        role: row.role,
+        is_owner: row.is_owner,
+        is_platform_admin: row.is_platform_admin ?? false,
+        display_name: row.display_name,
+        email: row.email,
+        plan_gate: row.plan_gate,
+        plan_expiry: row.plan_expiry,
+        permissions: serializeAccess(access),
+      }),
+    )
   })
 
   .post('/forgot-password', async (c) => {
