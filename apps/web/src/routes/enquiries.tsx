@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { Inbox, Mail, Pencil, Phone, Plus, Trash2, UserPlus } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { ExternalLink, Inbox, Mail, Pencil, Phone, Plus, Trash2, UserPlus } from 'lucide-react'
 import type { Enquiry, EnquiryStatus, SaveEnquiryRequest } from '@ipc/contracts'
 import { ENQUIRY_SOURCES } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -199,7 +200,14 @@ function EnquiryRow({ enquiry, canEdit }: { enquiry: Enquiry; canEdit: boolean }
         {canEdit && (
           <div className="flex items-center gap-1">
             {/* Already a lead: the button would make a second one, and the
-                function would hand back the first anyway. */}
+                function would hand back the first anyway -- link to it instead. */}
+            {enquiry.converted_lead_id && (
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/follow-ups" search={{ lead: enquiry.converted_lead_id } as never}>
+                  <ExternalLink /> View lead
+                </Link>
+              </Button>
+            )}
             {!enquiry.converted_lead_id && (
               <Button
                 size="sm"

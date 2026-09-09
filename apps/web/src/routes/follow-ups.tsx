@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import { ChevronDown } from 'lucide-react'
 import type { CrmLead } from '@ipc/contracts'
@@ -70,15 +70,29 @@ function useTab(): [TabKey, (t: TabKey) => void] {
 
 function Crm() {
   const [tab, setTab] = useTab()
+  const { search } = useLocation()
+  const navigate = useNavigate()
   const [query, setQuery] = useState<LeadQuery>(EMPTY_QUERY)
   const [openLead, setOpenLead] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
 
+  // A ?lead= link (from an enquiry's conversion, a reminder, elsewhere)
+  // opens straight to that deal — even an archived one — then clears
+  // itself so closing the drawer and reloading the page doesn't reopen it.
+  const linkedLeadId = (search as { lead?: unknown }).lead
+  const hasLeadLink = typeof linkedLeadId === 'string' && linkedLeadId.length > 0
+  useEffect(() => {
+    if (!hasLeadLink) return
+    setOpenLead(linkedLeadId as string)
+    void navigate({ to: '/follow-ups', search: (tab === 'inbox' ? {} : { tab }) as never, replace: true })
+  }, [hasLeadLink]) // tab/navigate/linkedLeadId intentionally excluded: this fires once, off the initial URL
+
   const active = useLeads(false)
-  // The full list, archived included, is only fetched when a tab needs it.
-  const everything = useLeads(showArchived || tab === 'duplicates' || tab === 'settings')
+  // The full list, archived included, is only fetched when a tab needs it —
+  // or when a direct lead link needs to find one that might be archived.
+  const everything = useLeads(showArchived || hasLeadLink || tab === 'duplicates' || tab === 'settings')
   const leads = useMemo(() => active.data ?? [], [active.data])
   const allLeads = useMemo(() => everything.data ?? [], [everything.data])
   const archived = useMemo(() => allLeads.filter((l) => l.is_archived), [allLeads])

@@ -162,7 +162,7 @@ function DashboardInner() {
         <Tile icon={AlertTriangle} value={totals.critical} label="Critical projects" tone="danger" to="/project-tracking" />
         <Tile icon={CircleAlert} value={totals.overdue} label="Overdue tasks" hint="Across every project" tone="warning" to="/tasks" />
         <Tile icon={Database} value={totals.data_missing} label="Data missing" tone="warning" to="/data-management" />
-        <Tile icon={Eye} value={totals.pending_review} label="Pending review" tone="success" />
+        <Tile icon={Eye} value={totals.pending_review} label="Pending review" tone="success" to="/project-tracking" />
         {access.hasModule('billing') && (
           <Tile icon={Receipt} value={formatINR(outstanding)} label="Outstanding" tone="primary" to="/billing" />
         )}

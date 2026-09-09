@@ -21,8 +21,11 @@ import { useInvoices } from '@/features/billing/api'
 import { type CreateReminderRequest, type ReminderEntityType } from '@ipc/contracts'
 import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Bell, Link2 } from 'lucide-react'
 
-const ENTITY_LINK: Partial<Record<ReminderEntityType, (id: string) => { to: string; params: Record<string, string> }>> = {
+const ENTITY_LINK: Partial<
+  Record<ReminderEntityType, (id: string) => { to: string; params: Record<string, string>; search?: Record<string, string> }>
+> = {
   project: (id) => ({ to: '/projects/$id', params: { id } }),
+  lead: (id) => ({ to: '/follow-ups', params: {}, search: { lead: id } }),
 }
 
 /** Which entity is picked determines which list is fetched — no point loading all four. */
@@ -176,7 +179,7 @@ function RemindersContent() {
                   {(() => {
                     const link = reminder.entity_id && ENTITY_LINK[reminder.entity_type]?.(reminder.entity_id)
                     return link ? (
-                      <Link to={link.to} params={link.params} className="hover:underline">
+                      <Link to={link.to} params={link.params} search={link.search as never} className="hover:underline">
                         {reminder.entity_name}
                       </Link>
                     ) : (
