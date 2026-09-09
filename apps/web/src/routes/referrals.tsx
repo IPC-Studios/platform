@@ -13,10 +13,12 @@ import {
   useReferralSubmissions,
   useSaveReferralCampaign,
   useDeleteReferralCampaign,
+  useUpdateReferralCampaignStatus,
   useUpdateSubmissionStatus,
 } from '@/features/referrals/api'
-import { type CreateReferralCampaignRequest } from '@ipc/contracts'
-import { Plus, Trash2, ExternalLink, Trophy, Users, TrendingUp, Target } from 'lucide-react'
+import { type CreateReferralCampaignRequest, type ReferralCampaignStatus } from '@ipc/contracts'
+import { toast } from 'sonner'
+import { Plus, Trash2, Pencil, Copy, Trophy, Users, TrendingUp, Target } from 'lucide-react'
 
 function ReferralsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -33,6 +35,7 @@ function ReferralsContent() {
   const { data: submissionData, fetchNextPage, hasNextPage, isFetchingNextPage } = useReferralSubmissions()
   const saveCampaign = useSaveReferralCampaign()
   const deleteCampaign = useDeleteReferralCampaign()
+  const updateCampaignStatus = useUpdateReferralCampaignStatus()
   const updateStatus = useUpdateSubmissionStatus()
 
   const campaigns = campaignData?.campaigns ?? []
@@ -108,9 +111,6 @@ function ReferralsContent() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{campaign.name}</span>
-                  <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
-                    {campaign.status}
-                  </Badge>
                 </div>
                 {campaign.description && (
                   <p className="mt-1 truncate text-sm text-muted-foreground">{campaign.description}</p>
@@ -120,9 +120,33 @@ function ReferralsContent() {
                 </p>
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(campaign)}>
-                  <ExternalLink className="h-4 w-4" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Copy the link to share with a client"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(`${window.location.origin}/refer/${campaign.slug}`)
+                    toast.success('Referral link copied')
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
                 </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit campaign" onClick={() => openEdit(campaign)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Select
+                  value={campaign.status}
+                  onChange={(e) =>
+                    updateCampaignStatus.mutate({ id: campaign.id, status: e.target.value as ReferralCampaignStatus })
+                  }
+                  className="h-8 w-24"
+                  aria-label={`Status for ${campaign.name}`}
+                >
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                  <option value="ended">Ended</option>
+                </Select>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -220,6 +244,14 @@ function ReferralsContent() {
                 min="0"
                 value={form.reward_value || ''}
                 onChange={(e) => setForm({ ...form, reward_value: Number(e.target.value) })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Reward description (optional)</label>
+              <Input
+                value={form.reward_description ?? ''}
+                onChange={(e) => setForm({ ...form, reward_description: e.target.value || null })}
+                placeholder="Shown on the public referral page — defaults to a sensible message if left blank"
               />
             </div>
           </div>

@@ -1484,6 +1484,8 @@ function fakeClient(id: string, name: string, phone: string | null): Client {
     alternate_phone: null,
     address: null,
     city: 'Mumbai',
+    relation: null,
+    gstin: null,
     notes: null,
     created_at: '2026-05-01T10:00:00Z',
   }

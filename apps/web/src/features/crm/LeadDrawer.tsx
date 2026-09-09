@@ -16,7 +16,7 @@ import {
   Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CrmLead } from '@ipc/contracts'
+import type { CrmLead, CrmQuote } from '@ipc/contracts'
 import { REQUIRED_FIELD_LABEL, missingForStage, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
@@ -30,6 +30,7 @@ import { useClients } from '@/features/clients/api'
 import {
   useCadences,
   useConvertLead,
+  useContacts,
   useCrmCompanies,
   useCrmSettings,
   useEnrollWorkflow,
@@ -88,6 +89,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
   const move = useMoveStage()
   const { data: pipelines } = usePipelines()
   const { data: companies } = useCrmCompanies()
+  const { data: contacts } = useContacts()
   const { data: settings } = useCrmSettings()
   const [losingTo, setLosingTo] = useState<string | null>(null)
   const pipeline = (pipelines ?? []).find((p) => p.id === lead.pipeline_id) ?? (pipelines ?? []).find((p) => p.is_default)
@@ -293,6 +295,53 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
               </Select>
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-contact">Contact</Label>
+              <Select
+                id="lead-contact"
+                value={lead.contact_id ?? ''}
+                onChange={(e) => patch({ contact_id: e.target.value || null })}
+                disabled={update.isPending || !canEdit}
+              >
+                <option value="">None</option>
+                {(contacts ?? []).map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {ct.name ?? ct.phone ?? ct.email ?? 'Unnamed'}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-type">Event type</Label>
+              <Input id="lead-event-type" defaultValue={lead.event_type ?? ''} placeholder="Wedding, Pre-wedding…" disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.event_type) patch({ event_type: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-date">Event date</Label>
+              <Input id="lead-event-date" type="date" defaultValue={lead.event_date ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value || null; if (v !== lead.event_date) patch({ event_date: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-event-location">Venue / location</Label>
+              <Input id="lead-event-location" defaultValue={lead.event_location ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.event_location) patch({ event_location: v }) }} />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-city">City</Label>
+              <Input id="lead-city" defaultValue={lead.city ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.city) patch({ city: v }) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-alt-phone">Alternate phone</Label>
+              <Input id="lead-alt-phone" defaultValue={lead.alternate_phone ?? ''} disabled={!canEdit}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== lead.alternate_phone) patch({ alternate_phone: v }) }} />
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="lead-value">Deal value (₹)</Label>
@@ -420,6 +469,7 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
 function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
   const { data: quotes } = useQuotes(lead.id)
   const [building, setBuilding] = useState(false)
+  const [editing, setEditing] = useState<CrmQuote | null>(null)
   const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
 
   return (
@@ -437,7 +487,7 @@ function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
       {rows.length > 0 ? (
         <ul className="mt-2 divide-y divide-border">
           {rows.map((q) => (
-            <QuoteRow key={q.id} quote={q} compact />
+            <QuoteRow key={q.id} quote={q} compact onEdit={q.status === 'draft' && canEdit ? () => setEditing(q) : undefined} />
           ))}
         </ul>
       ) : (
@@ -446,6 +496,7 @@ function QuotesPanel({ lead, canEdit }: { lead: CrmLead; canEdit: boolean }) {
         </p>
       )}
       {building && <QuoteBuilder lead={lead} open onClose={() => setBuilding(false)} />}
+      {editing && <QuoteBuilder lead={lead} quote={editing} open onClose={() => setEditing(null)} />}
     </div>
   )
 }

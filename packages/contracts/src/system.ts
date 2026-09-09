@@ -49,6 +49,7 @@ export const cronRunResult = z.object({
   ok: z.literal(true),
   summary: z.unknown(),
   crm_follow_ups: z.unknown(),
+  work_submission_reminders: z.unknown(),
   purged_refresh_tokens: z.number().int(),
 })
 export type CronRunResult = z.infer<typeof cronRunResult>

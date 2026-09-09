@@ -11,6 +11,7 @@ import {
   createLeadRequest,
   createLeadResponse,
   createQuoteRequest,
+  updateQuoteRequest,
   crmActivity,
   crmCompany,
   crmContact,
@@ -63,11 +64,13 @@ import {
   type CreateLostReasonRequest,
   type CreatePipelineRequest,
   type CreateQuoteRequest,
+  type UpdateQuoteRequest,
   type CreateSavedViewRequest,
   type CreateScoringRuleRequest,
   type CreateStageRequest,
   type CreateWorkflowRequest,
   type CreateTemplateRequest,
+  type UpdateTemplateRequest,
   type CrmStatsQuery,
   type CsvImportCommitRequest,
   type MergeLeadsRequest,
@@ -242,6 +245,14 @@ export function useCreateTemplate() {
     (input: CreateTemplateRequest) =>
       callApi('/crm/templates', { method: 'POST', body: input, responseSchema: crmTemplate }),
     'Template saved',
+  )
+}
+
+export function useUpdateTemplate() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateTemplateRequest }) =>
+      callApi(`/crm/templates/${id}`, { method: 'PATCH', body: patch, responseSchema: crmTemplate }),
+    'Template updated',
   )
 }
 
@@ -784,6 +795,18 @@ export function useCreateQuote() {
         responseSchema: crmQuote,
       }),
     (q) => `Quote ${q.quote_number} created`,
+  )
+}
+
+export function useUpdateQuote() {
+  return useCrmMutation(
+    ({ id, patch }: { id: string; patch: UpdateQuoteRequest }) =>
+      callApi(`/crm/quotes/${id}`, {
+        method: 'PATCH',
+        body: updateQuoteRequest.parse(patch),
+        responseSchema: crmQuote,
+      }),
+    (q) => `Quote ${q.quote_number} updated`,
   )
 }
 

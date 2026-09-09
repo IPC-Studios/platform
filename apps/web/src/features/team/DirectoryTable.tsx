@@ -9,6 +9,7 @@ import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { Avatar } from '@/shared/ui/avatar'
 import { useRemoveMember, useSendReset, useUpdateMember } from './api'
+import { EditMemberDialog } from './EditMemberDialog'
 import type { DirectoryFilters, SortKey } from './filters'
 
 const ROLE_TONE: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
@@ -270,6 +271,7 @@ function RowActions({ member }: { member: DirectoryMember }) {
 
   return (
     <div className="row-actions flex items-center justify-end gap-1">
+      <EditMemberDialog member={member} />
       {member.login_enabled && member.email && (
         <Button
           size="sm"

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import {
   createTeamPayoutRequest,
+  updateTeamPayoutRequest,
   teamPayoutList,
   z,
 } from '@ipc/contracts'
@@ -76,6 +77,27 @@ export const teamPayoutsRouter = new Hono<AppEnv>()
     if (!rows?.[0]) fail(400, 'We could not create this payout.')
     await audit(c, { action: 'team_payout.create', entityType: 'team_payout', entityId: rows[0].create_team_payout, after: d })
     return c.json({ id: rows[0].create_team_payout }, 201)
+  })
+
+  // A wrong amount or period is only safe to correct before the payout has
+  // actually moved -- once it's processing or completed, that number is what
+  // was paid, not a draft.
+  .patch('/:id', async (c) => {
+    const parsed = updateTeamPayoutRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the payout details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'team-payouts.update', () =>
+      withUser(c.env, auth.userId, (sql) => sql<{ id: string }[]>`
+        update team_payouts set ${sql(parsed.data)}
+        where id = ${id} and company_id = ${auth.companyId} and status = 'pending'
+        returning id`),
+    )
+    if (!rows) fail(400, 'We could not update this payout.')
+    if (!rows.length) fail(404, 'That payout was not found, or is no longer pending.')
+    await audit(c, { action: 'team_payout.update', entityType: 'team_payout', entityId: id, after: parsed.data })
+    return c.json(okResponse.parse({ ok: true }))
   })
 
   .patch('/:id/status', async (c) => {

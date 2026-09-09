@@ -4,6 +4,7 @@ import {
   teamPayoutList,
   z,
   type CreateTeamPayoutRequest,
+  type UpdateTeamPayoutRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -45,6 +46,14 @@ export function useCreateTeamPayout() {
     (body: CreateTeamPayoutRequest) =>
       callApi('/team-payouts', { method: 'POST', body, responseSchema: created }),
     'Payout created',
+  )
+}
+
+export function useUpdateTeamPayout() {
+  return useTeamPayoutMutation(
+    ({ id, patch }: { id: string; patch: UpdateTeamPayoutRequest }) =>
+      callApi(`/team-payouts/${id}`, { method: 'PATCH', body: patch, responseSchema: anySchema }),
+    'Payout updated',
   )
 }
 

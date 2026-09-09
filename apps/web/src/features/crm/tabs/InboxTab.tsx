@@ -6,6 +6,7 @@ import { Input, Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
+import { useMembers } from '@/features/allocation/api'
 import { useBulkPatch, useCrmPrefs, useCrmSettings, useDeleteView, useEnrollWorkflow, useSaveView, useSavedViews, useUpdateCrmPrefs, useUpdateView, useWorkflows } from '../api'
 import { LostReasonDialog } from '../LostReasonDialog'
 import { EMPTY_QUERY, QUICK_FILTERS, STAGES, applyQuery, type LeadQuery, type QuickFilter } from '../leads'
@@ -97,11 +98,14 @@ export function InboxTab({
   }, [prefs, views, query, onQuery])
 
   const rows = useMemo(() => applyQuery(leads, query, now), [leads, query, now])
-  const assignees = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const l of leads) if (l.assigned_to) seen.set(l.assigned_to, l.assignee_name ?? 'Unknown')
-    return [...seen.entries()]
-  }, [leads])
+  // The real team directory, not a scan of who currently has a lead — a
+  // newly onboarded rep with zero leads still needs to show up here, both
+  // as an owner filter and as a bulk-reassign target.
+  const { data: members } = useMembers()
+  const assignees = useMemo(
+    () => (members ?? []).map((m): [string, string] => [m.user_id, m.name]),
+    [members],
+  )
 
   const toggleSelect = (id: string, on: boolean) =>
     setSelected((s) => {

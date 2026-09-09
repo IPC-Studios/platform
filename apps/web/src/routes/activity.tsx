@@ -10,12 +10,29 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { useActivityLog } from '@/features/activity/api'
 import { humanize } from '@/shared/ui/format'
 
+// The value on the right must match entityType exactly as audit() logs it
+// server-side (services/api/src/modules/**/*.ts) — a mismatch here (as
+// 'employee' once was, for what is actually logged as 'user') makes a filter
+// silently return nothing instead of erroring.
 const ENTITY_FILTERS = [
   ['', 'Everything'],
-  ['crm_lead', 'Leads'],
+  ['crm_lead', 'Deals'],
+  ['crm_contact', 'Contacts'],
+  ['crm_company', 'Companies'],
+  ['crm_quote', 'Quotes'],
+  ['client', 'Clients'],
   ['project', 'Projects'],
+  ['shoot', 'Shoots'],
+  ['task', 'Tasks'],
   ['invoice', 'Invoices'],
-  ['employee', 'Team members'],
+  ['expense', 'Company expenses'],
+  ['personal_expense', 'Personal expenses'],
+  ['party', 'Vendors / parties'],
+  ['shoot_data_record', 'Data records'],
+  ['work_submission', 'Work submissions'],
+  ['user', 'Team members'],
+  ['user_invitation', 'Invitations'],
+  ['team_payout', 'Payouts'],
   ['reminder', 'Reminders'],
   ['company', 'Company'],
 ] as const

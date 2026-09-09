@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import {
   createProjectRequest,
   deliverableInput,
+  updateDeliverableRequest,
   deliverableSet,
   paymentInput,
   projectDetail,
@@ -402,6 +403,26 @@ export const projectsRouter = new Hono<AppEnv>()
     if (!row) fail(400, 'We could not add the deliverable.')
     await audit(c, { action: 'deliverable.add', entityType: 'project', entityId: projectId, after: parsed.data })
     return c.json({ id: row.id }, 201)
+  })
+
+  .patch('/:id/deliverables/:did', requireAction('projects', 'edit'), async (c) => {
+    const parsed = updateDeliverableRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the deliverable details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const projectId = uuidParam(c)
+    const did = uuidParam(c, 'did')
+    const rows = await attempt(c, 'projects.deliverable_update', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`
+          update deliverables set ${sql(parsed.data)} where id = ${did} and project_id = ${projectId} returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not update the deliverable.')
+    if (!rows.length) fail(404, 'That deliverable was not found.')
+    await audit(c, { action: 'deliverable.update', entityType: 'project', entityId: projectId, after: { deliverable_id: did, ...parsed.data } })
+    return c.body(null, 204)
   })
 
   .delete('/:id/deliverables/:did', requireAction('projects', 'edit'), async (c) => {

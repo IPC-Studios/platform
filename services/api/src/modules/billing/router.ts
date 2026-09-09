@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import {
   createInvoiceRequest,
+  updateInvoiceRequest,
   gstState,
   invoiceDetail,
   invoiceListItem,
@@ -86,7 +87,8 @@ export const billingRouter = new Hono<AppEnv>()
             p_tax => ${totals.tax},
             p_total => ${totals.total},
             p_items => ${sql.json(items)},
-            p_notes => ${req.notes ?? null}
+            p_notes => ${req.notes ?? null},
+            p_template_id => ${req.template_id ?? null}
           )`
         return rows[0] ?? null
       }),
@@ -106,9 +108,14 @@ export const billingRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'billing.invoice', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
-          select i.id, i.invoice_number, i.invoice_date, i.status, i.place_of_supply,
-                 i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.created_at,
-                 cl.name as client_name,
+          select i.id, i.invoice_number, i.invoice_date, i.due_date, i.status, i.place_of_supply,
+                 i.intra_state, i.client_id, i.project_id, i.template_id,
+                 i.subtotal, i.discount, i.taxable, i.tax, i.total, i.amount_paid, i.balance_due, i.notes, i.created_at,
+                 cl.name as client_name, cl.gstin as client_gstin, cl.address as client_address,
+                 coalesce(
+                   (select it.layout_json from invoice_templates it where it.id = i.template_id),
+                   (select it.layout_json from invoice_templates it where it.company_id = i.company_id and it.is_default = true limit 1)
+                 ) as template_layout,
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
                      'id', it.id, 'description', it.description, 'quantity', it.quantity,
@@ -130,6 +137,77 @@ export const billingRouter = new Hono<AppEnv>()
     )
     if (!row) fail(404, 'That invoice was not found.')
     return c.json(invoiceDetail.parse(row))
+  })
+
+  // Full resend, same as creation: once a payment is recorded the totals are
+  // a ledger fact, not a draft, so update_invoice() itself refuses those.
+  .patch('/invoices/:id', requireAction('billing', 'edit'), async (c) => {
+    const parsed = updateInvoiceRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the invoice details.')
+    const req = parsed.data
+    const id = uuidParam(c)
+
+    const totals = computeInvoice(
+      req.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
+      { intraState: req.intra_state, discount: req.discount },
+    )
+    const items = totals.lines.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      rate: l.rate,
+      amount: l.amount,
+      gst_rate: l.gst_rate,
+      taxable: l.taxable,
+      cgst: l.cgst,
+      sgst: l.sgst,
+      igst: l.igst,
+    }))
+
+    const ok = await attempt(
+      c,
+      'billing.invoice_update',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          await sql`select update_invoice(
+            p_invoice_id => ${id},
+            p_client_id => ${req.client_id},
+            p_project_id => ${req.project_id},
+            p_place_of_supply => ${req.place_of_supply},
+            p_intra_state => ${req.intra_state},
+            p_invoice_date => ${req.invoice_date ?? null},
+            p_due_date => ${req.due_date ?? null},
+            p_subtotal => ${totals.subtotal},
+            p_discount => ${totals.discount},
+            p_taxable => ${totals.taxable},
+            p_tax => ${totals.tax},
+            p_total => ${totals.total},
+            p_items => ${sql.json(items)},
+            p_notes => ${req.notes ?? null},
+            p_template_id => ${req.template_id ?? null}
+          )`
+          return true
+        }),
+      { onCode: (code) => (code === '23514' ? 'has_payment' : undefined) },
+    )
+    if (ok === 'has_payment') fail(409, 'A payment has already been recorded against this invoice — it can no longer be edited.')
+    if (!ok) fail(400, 'We could not update this invoice.')
+    await audit(c, { action: 'invoice.update', entityType: 'invoice', entityId: id, after: { total: totals.total, client_id: req.client_id } })
+    return c.json({ ok: true })
+  })
+
+  .delete('/invoices/:id', requireAction('billing', 'delete'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(
+      c,
+      'billing.invoice_delete',
+      () =>
+        withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+          delete from invoices where id = ${id} and amount_paid = 0 returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this invoice.')
+    if (!rows.length) fail(404, 'That invoice was not found, or already has a payment recorded.')
+    await audit(c, { action: 'invoice.delete', entityType: 'invoice', entityId: id })
+    return c.body(null, 204)
   })
 
   .post('/invoices/:id/payments', requireAction('billing', 'edit'), async (c) => {

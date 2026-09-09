@@ -10,37 +10,67 @@ import { Select } from '@/shared/ui/select'
 import {
   useTeamPayouts,
   useCreateTeamPayout,
+  useUpdateTeamPayout,
   useUpdatePayoutStatus,
   useDeleteTeamPayout,
 } from '@/features/team-payouts/api'
 import { useDirectory } from '@/features/team/api'
-import { type CreateTeamPayoutRequest } from '@ipc/contracts'
-import { Plus, Trash2, DollarSign, Clock, CheckCircle } from 'lucide-react'
+import { type CreateTeamPayoutRequest, type TeamPayout } from '@ipc/contracts'
+import { Plus, Trash2, Pencil, DollarSign, Clock, CheckCircle } from 'lucide-react'
+
+const emptyForm = (): CreateTeamPayoutRequest => ({
+  user_id: '',
+  amount: 0,
+  period_start: '',
+  period_end: '',
+  payment_mode: null,
+  reference: null,
+  notes: null,
+})
 
 function TeamPayoutsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [form, setForm] = useState<CreateTeamPayoutRequest>({
-    user_id: '',
-    amount: 0,
-    period_start: '',
-    period_end: '',
-    payment_mode: null,
-    reference: null,
-    notes: null,
-  })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<CreateTeamPayoutRequest>(emptyForm())
 
   const { data } = useTeamPayouts()
   const { data: members } = useDirectory()
   const createPayout = useCreateTeamPayout()
+  const updatePayout = useUpdateTeamPayout()
   const updateStatus = useUpdatePayoutStatus()
   const deletePayout = useDeleteTeamPayout()
 
   const items = data?.items ?? []
   const summary = data?.summary
 
+  function startEdit(p: TeamPayout) {
+    setEditingId(p.id)
+    setForm({
+      user_id: p.user_id,
+      amount: p.amount,
+      period_start: p.period_start,
+      period_end: p.period_end,
+      payment_mode: p.payment_mode,
+      reference: p.reference,
+      notes: p.notes,
+    })
+    setDialogOpen(true)
+  }
+
+  function openCreate() {
+    setEditingId(null)
+    setForm(emptyForm())
+    setDialogOpen(true)
+  }
+
   function handleSubmit() {
     if (!form.user_id || form.amount <= 0 || !form.period_start || !form.period_end) return
-    createPayout.mutate(form, { onSuccess: () => setDialogOpen(false) })
+    if (editingId) {
+      const { user_id: _user_id, ...patch } = form
+      updatePayout.mutate({ id: editingId, patch }, { onSuccess: () => setDialogOpen(false) })
+    } else {
+      createPayout.mutate(form, { onSuccess: () => setDialogOpen(false) })
+    }
   }
 
   const statusColors = {
@@ -56,7 +86,7 @@ function TeamPayoutsContent() {
         title="Team Payouts"
         description="Manage team settlements and payments"
         actions={
-          <Button onClick={() => setDialogOpen(true)} size="sm">
+          <Button onClick={openCreate} size="sm">
             <Plus className="mr-1 h-4 w-4" /> New Payout
           </Button>
         }
@@ -96,6 +126,11 @@ function TeamPayoutsContent() {
                 <option value="completed">Completed</option>
                 <option value="failed">Failed</option>
               </Select>
+              {payout.status === 'pending' && (
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEdit(payout)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
                 <Button
                 variant="ghost"
                 size="icon"
@@ -113,11 +148,11 @@ function TeamPayoutsContent() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent title="New Payout">
+        <DialogContent title={editingId ? 'Edit Payout' : 'New Payout'}>
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium">Team Member</label>
-              <Select value={form.user_id} onChange={(e) => setForm({ ...form, user_id: e.target.value })}>
+              <Select value={form.user_id} onChange={(e) => setForm({ ...form, user_id: e.target.value })} disabled={!!editingId}>
                 <option value="">Select team member</option>
                 {members?.map((m) => (
                   <option key={m.user_id} value={m.user_id}>{m.name ?? m.email}</option>
@@ -180,9 +215,22 @@ function TeamPayoutsContent() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={handleSubmit}
-              disabled={!form.user_id || form.amount <= 0 || !form.period_start || !form.period_end || createPayout.isPending}
+              disabled={
+                !form.user_id ||
+                form.amount <= 0 ||
+                !form.period_start ||
+                !form.period_end ||
+                createPayout.isPending ||
+                updatePayout.isPending
+              }
             >
-              {createPayout.isPending ? 'Creating...' : 'Create Payout'}
+              {editingId
+                ? updatePayout.isPending
+                  ? 'Saving...'
+                  : 'Save changes'
+                : createPayout.isPending
+                  ? 'Creating...'
+                  : 'Create Payout'}
             </Button>
           </div>
         </DialogContent>

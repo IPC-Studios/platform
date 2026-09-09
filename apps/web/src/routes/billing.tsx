@@ -1,14 +1,12 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Plus, Trash2, IndianRupee } from 'lucide-react'
-import { computeInvoice, type GstSlab } from '@ipc/domain'
-import type { CreateInvoiceRequest, InvoiceLineInput } from '@ipc/contracts'
+import { Plus, IndianRupee } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
-import { Input, Label, Select } from '@/shared/ui/input'
+import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
@@ -18,9 +16,9 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { BarChart, ShareChart } from '@/shared/ui/chart'
 import { monthlySeries } from '@/shared/ui/chart-geometry'
 import { useInvoices, useStates, useCreateInvoice, useRecordPayment } from '@/features/billing/api'
+import { emptyInvoiceForm, useInvoiceForm, InvoiceFormFields } from '@/features/billing/InvoiceForm'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
-const GST_SLABS: GstSlab[] = [0, 5, 12, 18, 28]
 
 export function BillingPage() {
   return (
@@ -148,47 +146,20 @@ function Billing() {
   )
 }
 
-type Line = InvoiceLineInput
-
 function NewInvoiceDialog() {
   const create = useCreateInvoice()
   const { data: states } = useStates()
   const [open, setOpen] = useState(false)
-  const [place, setPlace] = useState('27')
-  const [intra, setIntra] = useState(true)
-  const [discount, setDiscount] = useState(0)
-  const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, rate: 0, gst_rate: 18 }])
+  const form = useInvoiceForm(emptyInvoiceForm())
   const [error, setError] = useState<string | null>(null)
-
-  const totals = useMemo(
-    () =>
-      computeInvoice(
-        lines.filter((l) => l.description.trim()).map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
-        { intraState: intra, discount },
-      ),
-    [lines, intra, discount],
-  )
-
-  function patch(i: number, p: Partial<Line>) {
-    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...p } : l)))
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
-      const body: CreateInvoiceRequest = {
-        client_id: null,
-        project_id: null,
-        place_of_supply: place,
-        intra_state: intra,
-        discount,
-        lines: lines.filter((l) => l.description.trim()),
-      }
-      await create.mutateAsync(body)
+      await create.mutateAsync(form.toRequest())
       setOpen(false)
-      setLines([{ description: '', quantity: 1, rate: 0, gst_rate: 18 }])
-      setDiscount(0)
+      form.reset()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the invoice.')
     }
@@ -203,61 +174,7 @@ function NewInvoiceDialog() {
       </DialogTrigger>
       <DialogContent title="New invoice" description="GST is computed automatically." className="max-w-2xl">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Place of supply</Label>
-              <Select value={place} onChange={(e) => setPlace(e.target.value)}>
-                {(states ?? []).map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <label className="mt-6 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={intra} onChange={(e) => setIntra(e.target.checked)} />
-              Same state as studio (CGST + SGST)
-            </label>
-          </div>
-
-          <div className="rounded-md border border-border">
-            {lines.map((l, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 border-b border-border p-2 last:border-0">
-                <Input placeholder="Description" value={l.description} onChange={(e) => patch(i, { description: e.target.value })} className="min-w-40 flex-1" />
-                <Input type="number" min={0} value={l.quantity} onChange={(e) => patch(i, { quantity: Number(e.target.value) })} className="w-16" />
-                <Input type="number" min={0} value={l.rate} onChange={(e) => patch(i, { rate: Number(e.target.value) })} className="w-28" placeholder="Rate" />
-                <Select value={l.gst_rate} onChange={(e) => patch(i, { gst_rate: Number(e.target.value) as GstSlab })} className="w-20">
-                  {GST_SLABS.map((g) => (
-                    <option key={g} value={g}>
-                      {g}%
-                    </option>
-                  ))}
-                </Select>
-                <Button type="button" variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}>
-                  <Trash2 />
-                </Button>
-              </div>
-            ))}
-            <div className="p-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, { description: '', quantity: 1, rate: 0, gst_rate: 18 }])}>
-                <Plus /> Add line
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Label>Discount ₹</Label>
-              <Input type="number" min={0} value={discount} onChange={(e) => setDiscount(Number(e.target.value))} className="w-32" />
-            </div>
-            <div className="text-right text-sm">
-              <p className="text-muted-foreground">
-                Subtotal {formatINR(totals.subtotal)} · Tax {formatINR(totals.tax)}
-              </p>
-              <p className="text-lg font-semibold">{formatINR(totals.total)}</p>
-            </div>
-          </div>
-
+          <InvoiceFormFields form={form} states={states} />
           {error && (
             <p id="form-error" role="alert" className="text-sm text-destructive">
               {error}
@@ -269,7 +186,7 @@ function NewInvoiceDialog() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={create.isPending || totals.total <= 0}>
+            <Button type="submit" disabled={create.isPending || form.totals.total <= 0 || !form.values.client_id}>
               {create.isPending ? 'Creating…' : 'Create invoice'}
             </Button>
           </div>

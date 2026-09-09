@@ -49,6 +49,9 @@ import { EnquiriesPage } from '@/routes/enquiries'
 import { PersonalExpensesPage } from '@/routes/personal-expenses'
 import { ReceiptPage } from '@/routes/receipt'
 import { DeliveryPage } from '@/routes/delivery'
+import { ReferPage } from '@/routes/refer'
+import { ProjectDocumentsPage } from '@/routes/project-documents'
+import { TeamWorkPreviewPage } from '@/routes/team-work-preview'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
@@ -132,6 +135,7 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/quotation', QuotationPage),
   publicRoute('/receipt', ReceiptPage),
   publicRoute('/delivery', DeliveryPage),
+  publicRoute('/refer/$slug', ReferPage),
 
   renewalLayout.addChildren([
     createRoute({
@@ -149,6 +153,8 @@ const routeTree = rootRoute.addChildren([
   route('/projects/new', NewProjectPage),
   route('/projects/$id', ProjectDetailPage),
   route('/project-tracking', ProjectTrackingPage),
+  route('/project-documents', ProjectDocumentsPage),
+  route('/team/work-preview', TeamWorkPreviewPage),
   route('/clients', ClientsListPage),
 
   route('/shoots', ShootsPage),

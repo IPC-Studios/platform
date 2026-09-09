@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { uuid, isoDate, isoDateTime, money } from './shared/primitives'
+import { uuid, isoDate, isoDateTime, money, gstRate } from './shared/primitives'
 
 export const personalExpenseCategory = z.enum([
   'travel',
@@ -14,6 +14,26 @@ export type PersonalExpenseCategory = z.infer<typeof personalExpenseCategory>
 
 export const PERSONAL_EXPENSE_CATEGORIES: readonly PersonalExpenseCategory[] = personalExpenseCategory.options
 
+/** A vendor, freelancer, or other party an expense was paid to or received from. */
+export const party = z.object({
+  id: uuid,
+  name: z.string(),
+  kind: z.enum(['vendor', 'freelancer', 'other']),
+})
+export type Party = z.infer<typeof party>
+
+export const createPartyRequest = z.object({
+  name: z.string().trim().min(1).max(120),
+  kind: z.enum(['vendor', 'freelancer', 'other']).default('vendor'),
+})
+export type CreatePartyRequest = z.infer<typeof createPartyRequest>
+
+export const updatePartyRequest = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  kind: z.enum(['vendor', 'freelancer', 'other']).optional(),
+})
+export type UpdatePartyRequest = z.infer<typeof updatePartyRequest>
+
 export const personalExpense = z.object({
   id: uuid,
   company_id: uuid,
@@ -24,6 +44,7 @@ export const personalExpense = z.object({
   expense_date: isoDate,
   category: z.string().nullable(),
   gst_treatment: z.string(),
+  gst_rate: gstRate.nullable(),
   description: z.string().nullable(),
   created_at: isoDateTime,
 })
@@ -50,6 +71,7 @@ export const createPersonalExpenseRequest = z.object({
   expense_date: isoDate.optional(),
   category: personalExpenseCategory.nullish(),
   gst_treatment: z.enum(['non_gst', 'gst_applicable', 'exempt', 'reverse_charge']).default('non_gst'),
+  gst_rate: gstRate.nullish(),
   description: z.string().trim().max(2000).nullish(),
 })
 export type CreatePersonalExpenseRequest = z.infer<typeof createPersonalExpenseRequest>

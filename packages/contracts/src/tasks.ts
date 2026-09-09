@@ -7,6 +7,39 @@ export type TaskStatus = z.infer<typeof taskStatus>
 export const taskPriority = z.enum(['low', 'medium', 'high', 'urgent'])
 export type TaskPriority = z.infer<typeof taskPriority>
 
+/**
+ * A studio-defined label and colour layered on top of the canonical
+ * low/medium/high/urgent -- "Rush", amber, say -- kept for display and
+ * reporting; the canonical value underneath still drives sorting.
+ */
+// Matches StatusBadge's tone set exactly — that component is a locked
+// primitive across the app, and a custom priority is shown with it too.
+export const taskPriorityTone = z.enum(['neutral', 'success', 'warning', 'danger', 'info'])
+export type TaskPriorityTone = z.infer<typeof taskPriorityTone>
+
+export const companyTaskPriority = z.object({
+  id: uuid,
+  code: z.string(),
+  label: z.string(),
+  tone: taskPriorityTone,
+  sort_order: z.number().int(),
+})
+export type CompanyTaskPriority = z.infer<typeof companyTaskPriority>
+
+export const createTaskPriorityRequest = z.object({
+  code: z.string().trim().min(1).max(40).regex(/^[a-z0-9_-]+$/, 'lowercase letters, numbers, - or _ only'),
+  label: z.string().trim().min(1).max(60),
+  tone: taskPriorityTone.default('neutral'),
+})
+export type CreateTaskPriorityRequest = z.infer<typeof createTaskPriorityRequest>
+
+/** Label and tone can be corrected after the fact; the code is the key other rows point to, so it stays fixed. */
+export const updateTaskPriorityRequest = z.object({
+  label: z.string().trim().min(1).max(60).optional(),
+  tone: taskPriorityTone.optional(),
+})
+export type UpdateTaskPriorityRequest = z.infer<typeof updateTaskPriorityRequest>
+
 /** A task as shown in lists and on the board. */
 export const taskListItem = z.object({
   id: uuid,
@@ -14,10 +47,14 @@ export const taskListItem = z.object({
   description: z.string().nullable().default(null),
   status: taskStatus,
   priority: taskPriority,
+  custom_priority_code: z.string().nullable().default(null),
+  custom_priority_label: z.string().nullable().default(null),
+  custom_priority_tone: taskPriorityTone.nullable().default(null),
   due_date: isoDate.nullable(),
   project_id: uuid.nullable(),
   project_name: z.string().nullable(),
   assignee_names: z.array(z.string()).default([]),
+  assignee_ids: z.array(uuid).default([]),
   sort_order: z.number().int().default(0),
 })
 export type TaskListItem = z.infer<typeof taskListItem>
@@ -29,6 +66,7 @@ export const createTaskRequest = z.object({
   description: z.string().trim().max(2000).optional(),
   status: taskStatus.default('to_do'),
   priority: taskPriority.default('medium'),
+  custom_priority_code: z.string().nullable().optional(),
   due_date: isoDate.optional(),
   assignees: z.array(uuid).default([]),
 })
@@ -36,6 +74,20 @@ export type CreateTaskRequest = z.infer<typeof createTaskRequest>
 
 export const updateTaskStatusRequest = z.object({ status: taskStatus })
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusRequest>
+
+/** Everything about a task the create form set, editable afterwards. Assignees are optional here — omit to leave them as-is, send a (possibly empty) array to replace the set. */
+export const updateTaskRequest = z.object({
+  project_id: uuid.nullable().optional(),
+  deliverable_id: uuid.nullable().optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  status: taskStatus.optional(),
+  priority: taskPriority.optional(),
+  custom_priority_code: z.string().nullable().optional(),
+  due_date: isoDate.nullable().optional(),
+  assignees: z.array(uuid).optional(),
+})
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequest>
 
 export const generateTasksRequest = z.object({
   project_id: uuid,
@@ -80,6 +132,10 @@ export const createBundleRequest = z.object({
     .max(50),
 })
 export type CreateBundleRequest = z.infer<typeof createBundleRequest>
+
+/** Same shape as creation: editing a bundle resends its name and full checklist together. */
+export const updateBundleRequest = createBundleRequest
+export type UpdateBundleRequest = z.infer<typeof updateBundleRequest>
 
 export const applyBundleRequest = z.object({
   project_id: uuid.nullable().default(null),

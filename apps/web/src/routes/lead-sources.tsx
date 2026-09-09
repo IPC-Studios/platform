@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Check, ChevronDown, Copy, Facebook, Globe, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, Copy, Facebook, Globe, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   createLeadSourceRequest,
   leadSourceRow,
@@ -132,6 +132,8 @@ function useSourceMutation<TInput>(fn: (input: TInput) => Promise<unknown>, succ
 function SourceCard({ source }: { source: LeadSourceRow }) {
   const [showSetup, setShowSetup] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [label, setLabel] = useState(source.label ?? '')
   const confirm = useConfirm()
 
   const update = useSourceMutation(
@@ -165,13 +167,29 @@ function SourceCard({ source }: { source: LeadSourceRow }) {
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Icon className="size-4" />
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{source.label ?? source.source_key}</p>
-            <p className="text-xs text-muted-foreground">
-              {source.kind === 'meta' ? 'Meta lead ads' : 'Web form'} · added{' '}
-              {dayFormat.format(new Date(source.created_at))}
-            </p>
-          </div>
+          {renaming ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} className="h-8" autoFocus />
+              <Button
+                size="sm"
+                disabled={!label.trim() || update.isPending}
+                onClick={() => update.mutate({ label: label.trim() }, { onSuccess: () => setRenaming(false) })}
+              >
+                Save
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setRenaming(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{source.label ?? source.source_key}</p>
+              <p className="text-xs text-muted-foreground">
+                {source.kind === 'meta' ? 'Meta lead ads' : 'Web form'} · added{' '}
+                {dayFormat.format(new Date(source.created_at))}
+              </p>
+            </div>
+          )}
 
           <StatusBadge tone={source.is_active ? 'success' : 'neutral'}>
             {source.is_active ? 'Active' : 'Paused'}
@@ -180,20 +198,26 @@ function SourceCard({ source }: { source: LeadSourceRow }) {
             {source.lead_count} {source.lead_count === 1 ? 'lead' : 'leads'}
           </StatusBadge>
 
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={update.isPending}
-              onClick={() => update.mutate({ is_active: !source.is_active })}
-            >
-              {source.is_active ? 'Pause' : 'Resume'}
-            </Button>
-            <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => void onDelete()}>
-              <Trash2 />
-              <span className="sr-only">Delete {source.label ?? source.source_key}</span>
-            </Button>
-          </div>
+          {!renaming && (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="ghost" onClick={() => { setLabel(source.label ?? ''); setRenaming(true) }}>
+                <Pencil />
+                <span className="sr-only">Rename {source.label ?? source.source_key}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={update.isPending}
+                onClick={() => update.mutate({ is_active: !source.is_active })}
+              >
+                {source.is_active ? 'Pause' : 'Resume'}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => void onDelete()}>
+                <Trash2 />
+                <span className="sr-only">Delete {source.label ?? source.source_key}</span>
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3">

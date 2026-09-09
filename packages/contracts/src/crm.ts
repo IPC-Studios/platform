@@ -52,6 +52,11 @@ export const crmLead = z.object({
   crm_company_name: z.string().nullable().default(null),
   title: z.string().nullable().default(null),
   close_date: isoDate.nullable().default(null),
+  event_type: z.string().nullable().default(null),
+  event_date: isoDate.nullable().default(null),
+  event_location: z.string().nullable().default(null),
+  alternate_phone: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
   currency: z.string().default('INR'),
   score: z.number().int().default(0),
   created_at: isoDateTime,
@@ -95,6 +100,11 @@ export const updateLeadRequest = z
     lost_competitor: z.string().trim().max(120).nullable().optional(),
     title: z.string().trim().max(160).nullable().optional(),
     close_date: isoDate.nullable().optional(),
+    event_type: z.string().trim().max(80).nullable().optional(),
+    event_date: isoDate.nullable().optional(),
+    event_location: z.string().trim().max(200).nullable().optional(),
+    alternate_phone: z.string().trim().max(30).nullable().optional(),
+    city: z.string().trim().max(120).nullable().optional(),
     currency: z.string().regex(/^[A-Z]{3}$/).optional(),
     contact_id: uuid.nullable().optional(),
     crm_company_id: uuid.nullable().optional(),
@@ -138,6 +148,11 @@ export const createLeadRequest = z.object({
   probability: z.number().int().min(0).max(100).optional(),
   title: z.string().trim().max(160).optional(),
   close_date: isoDate.optional(),
+  event_type: z.string().trim().max(80).optional(),
+  event_date: isoDate.optional(),
+  event_location: z.string().trim().max(200).optional(),
+  alternate_phone: z.string().trim().max(30).optional(),
+  city: z.string().trim().max(120).optional(),
   pipeline_id: uuid.optional(),
   stage_id: uuid.optional(),
   crm_company_id: uuid.optional(),
@@ -368,6 +383,13 @@ export const createTemplateRequest = z.object({
   kind: templateKind.default('whatsapp'),
 })
 export type CreateTemplateRequest = z.infer<typeof createTemplateRequest>
+
+export const updateTemplateRequest = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  body: z.string().trim().min(2).max(2000).optional(),
+  kind: templateKind.optional(),
+})
+export type UpdateTemplateRequest = z.infer<typeof updateTemplateRequest>
 
 /**
  * Sending a template to one lead. The server renders the body with the lead's
@@ -1287,6 +1309,10 @@ export const createQuoteRequest = z.object({
   lines: z.array(invoiceLineInput).min(1).max(50),
 })
 export type CreateQuoteRequest = z.infer<typeof createQuoteRequest>
+
+/** Same shape as creation, minus the lead (a quote never moves to a different deal): an edit resends title, terms, and lines together. */
+export const updateQuoteRequest = createQuoteRequest.omit({ lead_id: true })
+export type UpdateQuoteRequest = z.infer<typeof updateQuoteRequest>
 
 export const sendQuoteRequest = z.object({
   /** Also deliver the link on WhatsApp (Cloud API when connected, else a wa.me link) or by email. */

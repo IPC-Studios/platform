@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, ExternalLink } from 'lucide-react'
-import { workSubmission, type SubmitWorkRequest, z } from '@ipc/contracts'
+import { Plus, ExternalLink, Pencil } from 'lucide-react'
+import { workSubmission, type SubmitWorkRequest, type UpdateWorkSubmissionRequest, type WorkSubmission, z } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -11,9 +11,10 @@ import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
-import { Input, Label } from '@/shared/ui/input'
+import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
+import { useMyTasks } from '@/features/tasks/api'
 
 const list = workSubmission.array()
 const TONE = { submitted: 'warning', approved: 'success', rejected: 'danger' } as const
@@ -39,6 +40,22 @@ function useSubmitWork() {
       }),
     onSuccess: () => {
       toast.success('Work submitted')
+      void qc.invalidateQueries({ queryKey: ['work', 'submissions'] })
+    },
+  })
+}
+
+function useUpdateWorkSubmission() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateWorkSubmissionRequest }) =>
+      callApi(`/work/submissions/${id}`, {
+        method: 'PATCH',
+        body: patch,
+        responseSchema: z.unknown(),
+      }),
+    onSuccess: () => {
+      toast.success('Submission updated')
       void qc.invalidateQueries({ queryKey: ['work', 'submissions'] })
     },
   })
@@ -85,7 +102,19 @@ function MyWork() {
                     <p className="mt-1 text-sm text-muted-foreground">Review: {s.review_notes}</p>
                   )}
                 </div>
-                <StatusBadge tone={TONE[s.status]}>{s.status}</StatusBadge>
+                <div className="flex items-center gap-2">
+                  {s.status === 'submitted' && (
+                    <SubmitDialog
+                      submission={s}
+                      trigger={
+                        <Button size="sm" variant="ghost">
+                          <Pencil />
+                        </Button>
+                      }
+                    />
+                  )}
+                  <StatusBadge tone={TONE[s.status]}>{s.status}</StatusBadge>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -95,43 +124,86 @@ function MyWork() {
   )
 }
 
-function SubmitDialog() {
+function SubmitDialog({ submission, trigger }: { submission?: WorkSubmission; trigger?: React.ReactNode } = {}) {
+  const isEdit = !!submission
   const submit = useSubmitWork()
+  const update = useUpdateWorkSubmission()
+  const { data: myTasks } = useMyTasks()
   const [open, setOpen] = useState(false)
-  const [link, setLink] = useState('')
-  const [notes, setNotes] = useState('')
+  const [taskId, setTaskId] = useState('')
+  const [link, setLink] = useState(submission?.submission_link ?? '')
+  const [locationNote, setLocationNote] = useState(submission?.location_note ?? '')
+  const [notes, setNotes] = useState(submission?.notes ?? '')
   const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
-      await submit.mutateAsync({
-        task_id: null,
-        project_id: null,
-        submission_link: link.trim(),
-        ...(notes.trim() ? { notes: notes.trim() } : {}),
-      })
+      if (isEdit) {
+        await update.mutateAsync({
+          id: submission.id,
+          patch: {
+            submission_link: link.trim(),
+            ...(locationNote.trim() ? { location_note: locationNote.trim() } : {}),
+            ...(notes.trim() ? { notes: notes.trim() } : {}),
+          },
+        })
+      } else {
+        const task = (myTasks ?? []).find((t) => t.id === taskId)
+        await submit.mutateAsync({
+          task_id: taskId || null,
+          project_id: task?.project_id ?? null,
+          submission_link: link.trim(),
+          ...(locationNote.trim() ? { location_note: locationNote.trim() } : {}),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+        })
+      }
       setOpen(false)
-      setLink('')
-      setNotes('')
+      if (!isEdit) {
+        setTaskId('')
+        setLink('')
+        setLocationNote('')
+        setNotes('')
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not submit.')
+      setError(err instanceof Error ? err.message : `Could not ${isEdit ? 'update' : 'submit'}.`)
     }
   }
+
+  const busy = submit.isPending || update.isPending
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus /> Submit work
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus /> Submit work
+          </Button>
+        )}
       </DialogTrigger>
-      <DialogContent title="Submit work" description="Share a link or drive location for review.">
+      <DialogContent title={isEdit ? 'Edit submission' : 'Submit work'} description="Share a link or drive location for review.">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          {!isEdit && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Task</Label>
+              <Select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+                <option value="">Not linked to a task</option>
+                {(myTasks ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div className="flex flex-col gap-1.5">
-            <Label>Link / location</Label>
+            <Label>Link</Label>
             <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/…" required autoFocus />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Drive / folder (optional)</Label>
+            <Input value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="e.g. Backup HDD 3, /Weddings/Sharma" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Notes</Label>
@@ -148,8 +220,8 @@ function SubmitDialog() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={submit.isPending}>
-              {submit.isPending ? 'Submitting…' : 'Submit'}
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Submit'}
             </Button>
           </div>
         </form>

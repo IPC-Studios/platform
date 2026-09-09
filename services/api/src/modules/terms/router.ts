@@ -18,9 +18,53 @@ const issueTermsResponse = z.object({ document_id: z.string().uuid(), token: z.s
 const termsBody = z.object({ body: z.string() })
 const ackRequest = z.object({ name: z.string().trim().min(1).max(160), email: z.string().max(200).optional() })
 
+/** One row per project: its most recent terms document and whether it's been agreed to. */
+const termsDocument = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid().nullable(),
+  project_name: z.string().nullable(),
+  client_name: z.string().nullable(),
+  client_phone: z.string().nullable(),
+  acknowledged_at: z.string().nullable(),
+  acknowledged_by_name: z.string().nullable(),
+  has_active_link: z.boolean(),
+  link_expires_at: z.string().nullable(),
+  created_at: z.string(),
+})
+const termsDocumentList = termsDocument.array()
+
 /** Studio side: issue a terms document + client acknowledgement link. */
 export const termsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
+
+  // The dashboard: every project's paperwork, one row each, newest document
+  // first per project. `distinct on` picks that latest row without a second
+  // query per project.
+  .get('/documents', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'terms.documents', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select distinct on (d.project_id)
+               d.id, d.project_id, p.name as project_name,
+               cl.name as client_name, cl.phone as client_phone,
+               d.acknowledged_at, d.acknowledged_by_name, d.created_at,
+               (t.id is not null and t.used_at is null and (t.expires_at is null or t.expires_at > now())) as has_active_link,
+               t.expires_at as link_expires_at
+          from project_terms_documents d
+          left join projects p on p.id = d.project_id
+          left join clients cl on cl.id = p.client_id
+          left join lateral (
+            select id, expires_at, used_at from access_tokens
+             where purpose = 'terms_ack' and subject_id = d.id
+             order by created_at desc limit 1
+          ) t on true
+         where d.company_id = ${c.get('auth').companyId}
+         order by d.project_id, d.created_at desc`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load project documents.')
+    return c.json(termsDocumentList.parse(rows))
+  })
+
   .post('/issue', requireAction('projects', 'edit'), async (c) => {
     const parsed = issueTermsRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Terms text is required.')

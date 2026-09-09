@@ -20,6 +20,8 @@ export const reminder = z.object({
   status: reminderStatus,
   entity_type: reminderEntityType.nullable(),
   entity_id: uuid.nullable(),
+  /** Resolved server-side from entity_type/entity_id — a lead's name, a project's name, and so on. */
+  entity_name: z.string().nullable().default(null),
   due_at: isoDateTime.nullable(),
   created_at: isoDateTime,
 })

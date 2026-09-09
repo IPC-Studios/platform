@@ -45,3 +45,13 @@ export const createTeamPayoutRequest = z.object({
   notes: z.string().trim().max(500).nullish(),
 }).refine((d) => d.period_end >= d.period_start, { message: 'period_end must be on or after period_start', path: ['period_end'] })
 export type CreateTeamPayoutRequest = z.infer<typeof createTeamPayoutRequest>
+
+export const updateTeamPayoutRequest = z.object({
+  amount: money.refine((v) => v > 0, 'amount must be positive').optional(),
+  period_start: isoDate.optional(),
+  period_end: isoDate.optional(),
+  payment_mode: z.string().trim().max(40).nullable().optional(),
+  reference: z.string().trim().max(120).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+})
+export type UpdateTeamPayoutRequest = z.infer<typeof updateTeamPayoutRequest>

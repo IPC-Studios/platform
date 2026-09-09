@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
-import { dataRecord, type CreateDataRecordRequest } from '@ipc/contracts'
+import { dataRecord, type CreateDataRecordRequest, type UpdateDataRecordRequest } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -39,6 +39,29 @@ export function useCreateDataRecord() {
       callApi('/data', { method: 'POST', body: input, responseSchema: dataRecord }),
     onSuccess: () => {
       toast.success('Card logged')
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
+  })
+}
+
+export function useUpdateDataRecord() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateDataRecordRequest }) =>
+      callApi(`/data/${id}`, { method: 'PATCH', body: patch, responseSchema: dataRecord }),
+    onSuccess: () => {
+      toast.success('Record updated')
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
+  })
+}
+
+export function useDeleteDataRecord() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/data/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Record deleted')
       void qc.invalidateQueries({ queryKey: ['data'] })
     },
   })

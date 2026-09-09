@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import type {
+  Deliverable,
   DeliverableInput,
   PaymentInput,
   ProjectStatus,
@@ -43,6 +44,7 @@ import {
   useProject,
   useUpdateProject,
   useAddDeliverable,
+  useUpdateDeliverable,
   useDeleteDeliverable,
   useAddPayment,
   useDeleteProject,
@@ -165,6 +167,7 @@ function ProjectDetail() {
               name={data.name}
               status={data.status}
               packageCost={data.package_cost}
+              showQuotation={data.show_quotation}
             />
             <Button
               variant="outline"
@@ -317,6 +320,7 @@ function ProjectDetail() {
                       {d.is_additional_charge && (
                         <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>
                       )}
+                      {canEdit && <EditDeliverableDialog id={id} deliverable={d} />}
                       {canEdit && (
                         <Button variant="ghost" size="icon" onClick={() => void removeDeliverable(d.id, d.title)}>
                           <Trash2 />
@@ -428,15 +432,22 @@ function EditProjectDialog({
   name,
   status,
   packageCost,
+  showQuotation,
 }: {
   id: string
   name: string
   status: ProjectStatus
   packageCost: number
+  showQuotation: boolean
 }) {
   const update = useUpdateProject(id)
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState<UpdateProjectRequest>({ name, status, package_cost: packageCost })
+  const [form, setForm] = useState<UpdateProjectRequest>({
+    name,
+    status,
+    package_cost: packageCost,
+    show_quotation: showQuotation,
+  })
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -477,6 +488,14 @@ function EditProjectDialog({
               />
             </div>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.show_quotation ?? false}
+              onChange={(e) => setForm({ ...form, show_quotation: e.target.checked })}
+            />
+            Show quotation to client
+          </label>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
@@ -499,6 +518,8 @@ function AddDeliverableDialog({ id }: { id: string }) {
   const [title, setTitle] = useState('')
   const [charge, setCharge] = useState(false)
   const [amount, setAmount] = useState(0)
+  const [workType, setWorkType] = useState('')
+  const [internalNotes, setInternalNotes] = useState('')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -510,12 +531,16 @@ function AddDeliverableDialog({ id }: { id: string }) {
       visibility_scope: 'client',
       show_on_quotation: true,
       start_rule: 'whole_project',
+      ...(workType.trim() ? { work_type: workType.trim() } : {}),
+      ...(internalNotes.trim() ? { internal_notes: internalNotes.trim() } : {}),
     }
     await add.mutateAsync(body)
     setOpen(false)
     setTitle('')
     setCharge(false)
     setAmount(0)
+    setWorkType('')
+    setInternalNotes('')
   }
 
   return (
@@ -531,6 +556,10 @@ function AddDeliverableDialog({ id }: { id: string }) {
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Work type (optional)</Label>
+            <Input value={workType} onChange={(e) => setWorkType(e.target.value)} placeholder="e.g. Editing, Album design" />
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={charge} onChange={(e) => setCharge(e.target.checked)} />
             Additional charge
@@ -541,6 +570,16 @@ function AddDeliverableDialog({ id }: { id: string }) {
               <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
             </div>
           )}
+          <div className="flex flex-col gap-1.5">
+            <Label>Internal notes (optional)</Label>
+            <textarea
+              value={internalNotes}
+              onChange={(e) => setInternalNotes(e.target.value)}
+              rows={2}
+              placeholder="Never shown to the client"
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
@@ -549,6 +588,89 @@ function AddDeliverableDialog({ id }: { id: string }) {
             </DialogClose>
             <Button type="submit" disabled={add.isPending}>
               {add.isPending ? 'Adding…' : 'Add'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: Deliverable }) {
+  const update = useUpdateDeliverable(id)
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState(deliverable.title)
+  const [charge, setCharge] = useState(deliverable.is_additional_charge)
+  const [amount, setAmount] = useState(deliverable.additional_charge_amount)
+  const [showOnQuotation, setShowOnQuotation] = useState(deliverable.show_on_quotation)
+  const [workType, setWorkType] = useState(deliverable.work_type ?? '')
+  const [internalNotes, setInternalNotes] = useState(deliverable.internal_notes ?? '')
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    await update.mutateAsync({
+      deliverableId: deliverable.id,
+      patch: {
+        title: title.trim(),
+        is_additional_charge: charge,
+        additional_charge_amount: amount,
+        show_on_quotation: showOnQuotation,
+        work_type: workType.trim() || null,
+        internal_notes: internalNotes.trim() || null,
+      },
+    })
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" title="Edit">
+          <Pencil />
+        </Button>
+      </DialogTrigger>
+      <DialogContent title="Edit deliverable">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Title</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Work type (optional)</Label>
+            <Input value={workType} onChange={(e) => setWorkType(e.target.value)} placeholder="e.g. Editing, Album design" />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={charge} onChange={(e) => setCharge(e.target.checked)} />
+            Additional charge
+          </label>
+          {charge && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Amount (₹)</Label>
+              <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={showOnQuotation} onChange={(e) => setShowOnQuotation(e.target.checked)} />
+            Show on quotation
+          </label>
+          <div className="flex flex-col gap-1.5">
+            <Label>Internal notes (optional)</Label>
+            <textarea
+              value={internalNotes}
+              onChange={(e) => setInternalNotes(e.target.value)}
+              rows={2}
+              placeholder="Never shown to the client"
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>
         </form>

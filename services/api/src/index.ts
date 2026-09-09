@@ -16,7 +16,7 @@ import { tasksRouter } from './modules/tasks/router'
 import { teamRouter } from './modules/team/router'
 import { allocationRouter } from './modules/allocation/router'
 import { dataRouter } from './modules/data/router'
-import { workRouter } from './modules/work/router'
+import { workRouter, workReminderSettingsRouter } from './modules/work/router'
 import { billingRouter } from './modules/billing/router'
 import { financialsRouter } from './modules/financials/router'
 import { crmRouter } from './modules/crm/router'
@@ -31,6 +31,7 @@ import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/rou
 import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
 import { enquiriesRouter } from './modules/enquiries/router'
 import { personalExpensesRouter } from './modules/personal-expenses/router'
+import { partiesRouter } from './modules/parties/router'
 import { settingsRouter } from './modules/settings/router'
 import { platformRouter } from './modules/platform/router'
 import { referralsRouter, publicReferralsRouter } from './modules/referrals/router'
@@ -124,6 +125,7 @@ app.route('/team', teamRouter)
 app.route('/allocation', allocationRouter)
 app.route('/data', dataRouter)
 app.route('/work', workRouter)
+app.route('/work/reminder-settings', workReminderSettingsRouter)
 app.route('/billing', billingRouter)
 app.route('/financials', financialsRouter)
 app.route('/crm', crmRouter)
@@ -138,6 +140,7 @@ app.route('/public', publicTermsRouter)
 app.route('/documents', documentsRouter)
 app.route('/enquiries', enquiriesRouter)
 app.route('/personal-expenses', personalExpensesRouter)
+app.route('/parties', partiesRouter)
 app.route('/public', publicQuotesRouter)
 app.route('/public', publicTeamTermsRouter)
 app.route('/public', publicDocumentsRouter)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2 } from 'lucide-react'
+import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2, Pencil } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -14,10 +14,15 @@ import { Select } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
+import { Switch } from '@/shared/ui/switch'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
-import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup } from '@/features/settings/api'
+import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup, useUpdateCustomLookup } from '@/features/settings/api'
+import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
+import { useTaskPriorities, useCreateTaskPriority, useUpdateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
+import { useWorkReminderSettings, useUpdateWorkReminderSettings } from '@/features/work/api'
+import type { TaskPriorityTone } from '@ipc/contracts'
 
 const when = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -63,6 +68,9 @@ function System() {
       {session?.is_owner ? (
         <>
           <CustomLookups />
+          <Services />
+          <TaskPriorities />
+          <WorkReminders />
           <AuditLog />
           <CronRuns />
         </>
@@ -270,7 +278,9 @@ function CustomLookups() {
   const [newValue, setNewValue] = useState('')
   const { data: items, isLoading } = useCustomLookups(activeCategory)
   const create = useCreateCustomLookup()
+  const update = useUpdateCustomLookup()
   const del = useDeleteCustomLookup()
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
 
   function handleAdd() {
     if (!newValue.trim()) return
@@ -317,28 +327,357 @@ function CustomLookups() {
             <EmptyState title="No values yet" description="Add your first lookup value above." />
           ) : (
             <ul className="divide-y divide-border">
-              {items.map((item) => (
-                <li key={item.id} className="flex items-center justify-between py-2 text-sm">
-                  <div className="flex items-center gap-3">
-                    <span className="font-medium">{item.value}</span>
-                    <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
-                      {item.is_active ? 'Active' : 'Inactive'}
-                    </StatusBadge>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => del.mutate(item.id)}
-                    disabled={del.isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </li>
-              ))}
+              {items.map((item) =>
+                editing?.id === item.id ? (
+                  <li key={item.id} className="flex items-center gap-2 py-2">
+                    <Input
+                      value={editing.value}
+                      onChange={(e) => setEditing({ id: item.id, value: e.target.value })}
+                      className="h-8"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        update.mutate({ id: item.id, patch: { value: editing.value.trim() } }, { onSuccess: () => setEditing(null) })
+                      }
+                      disabled={!editing.value.trim() || update.isPending}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={item.id} className="flex items-center justify-between py-2 text-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{item.value}</span>
+                      <StatusBadge tone={item.is_active ? 'success' : 'neutral'}>
+                        {item.is_active ? 'Active' : 'Inactive'}
+                      </StatusBadge>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setEditing({ id: item.id, value: item.value })}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7"
+                        onClick={() => update.mutate({ id: item.id, patch: { is_active: !item.is_active } })}
+                      >
+                        {item.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(item.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ),
+              )}
             </ul>
           )}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** The service catalog shoots and the project wizard suggest from — a studio's own vocabulary for what it books. */
+function Services() {
+  const { data: items, isLoading } = useServices()
+  const create = useCreateService()
+  const update = useUpdateService()
+  const del = useDeleteService()
+  const [newName, setNewName] = useState('')
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
+
+  function handleAdd() {
+    if (!newName.trim()) return
+    create.mutate(newName.trim(), { onSuccess: () => setNewName('') })
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Services
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Reusable service catalog suggested when scheduling a shoot — Wedding Photography, Pre-wedding, and so on.
+        </p>
+
+        <div className="mt-4 flex gap-2">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="e.g. Wedding Photography"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+          <Button size="sm" onClick={handleAdd} disabled={!newName.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="mt-4">
+          {isLoading ? (
+            <SkeletonList rows={4} columns={2} />
+          ) : !items || items.length === 0 ? (
+            <EmptyState title="No services yet" description="Add your first service above." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((s) =>
+                editing?.id === s.id ? (
+                  <li key={s.id} className="flex items-center gap-2 py-2">
+                    <Input
+                      value={editing.name}
+                      onChange={(e) => setEditing({ id: s.id, name: e.target.value })}
+                      className="h-8"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => update.mutate({ id: s.id, name: editing.name.trim() }, { onSuccess: () => setEditing(null) })}
+                      disabled={!editing.name.trim() || update.isPending}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={s.id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="font-medium">{s.name}</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing({ id: s.id, name: s.name })}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(s.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const TONE_OPTIONS: { value: TaskPriorityTone; label: string }[] = [
+  { value: 'neutral', label: 'Gray' },
+  { value: 'info', label: 'Blue' },
+  { value: 'warning', label: 'Amber' },
+  { value: 'danger', label: 'Red' },
+  { value: 'success', label: 'Green' },
+]
+
+/** A studio's own priority labels — "Rush", "Whenever" — shown on tasks instead of the plain Low/Medium/High/Urgent. */
+function TaskPriorities() {
+  const { data: items, isLoading } = useTaskPriorities()
+  const create = useCreateTaskPriority()
+  const update = useUpdateTaskPriority()
+  const del = useDeleteTaskPriority()
+  const [label, setLabel] = useState('')
+  const [tone, setTone] = useState<TaskPriorityTone>('neutral')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editLabel, setEditLabel] = useState('')
+  const [editTone, setEditTone] = useState<TaskPriorityTone>('neutral')
+
+  function handleAdd() {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    const code = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    create.mutate({ code: code || `p-${Date.now()}`, label: trimmed, tone }, { onSuccess: () => setLabel('') })
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Task Priorities
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Your own labels for how urgent a task is — shown on tasks instead of the plain Low/Medium/High/Urgent.
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Rush"
+            className="max-w-xs"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+          <Select value={tone} onChange={(e) => setTone(e.target.value as TaskPriorityTone)} className="w-32">
+            {TONE_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </Select>
+          <Button size="sm" onClick={handleAdd} disabled={!label.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="mt-4">
+          {isLoading ? (
+            <SkeletonList rows={3} columns={2} />
+          ) : !items || items.length === 0 ? (
+            <EmptyState title="No custom priorities yet" description="Tasks show the default Low/Medium/High/Urgent until you add one." />
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((p) =>
+                editingId === p.id ? (
+                  <li key={p.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                    <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className="h-8 max-w-xs" autoFocus />
+                    <Select value={editTone} onChange={(e) => setEditTone(e.target.value as TaskPriorityTone)} className="h-8 w-28">
+                      {TONE_OPTIONS.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </Select>
+                    <Button
+                      size="sm"
+                      disabled={!editLabel.trim() || update.isPending}
+                      onClick={() =>
+                        update.mutate(
+                          { id: p.id, patch: { label: editLabel.trim(), tone: editTone } },
+                          { onSuccess: () => setEditingId(null) },
+                        )
+                      }
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </Button>
+                  </li>
+                ) : (
+                  <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                    <StatusBadge tone={p.tone}>{p.label}</StatusBadge>
+                    <span className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setEditingId(p.id)
+                          setEditLabel(p.label)
+                          setEditTone(p.tone)
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => del.mutate(p.id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </span>
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const REMINDER_PRESET_DAYS = [14, 7, 3, 1, 0]
+
+/** When a team member gets nudged about work due soon, and how far ahead. */
+function WorkReminders() {
+  const { data, isLoading } = useWorkReminderSettings()
+  const update = useUpdateWorkReminderSettings()
+  const [enabled, setEnabled] = useState(true)
+  const [days, setDays] = useState<number[]>([7, 3, 1])
+  const [loaded, setLoaded] = useState(false)
+
+  if (data && !loaded) {
+    setEnabled(data.enabled)
+    setDays(data.reminder_days)
+    setLoaded(true)
+  }
+
+  function toggleDay(d: number) {
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]).sort((a, b) => b - a))
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-5 sm:p-6">
+        <h3 className="font-semibold tracking-tight flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Work Submission Reminders
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Nudge whoever a task is assigned to before its due date, if nothing has been submitted yet.
+        </p>
+
+        {isLoading ? (
+          <SkeletonList rows={2} columns={1} className="mt-4" />
+        ) : (
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="rounded-lg border border-border p-3">
+              <Switch checked={enabled} onChange={setEnabled} label="Enable reminders" />
+            </div>
+
+            <div>
+              <p className="text-sm font-medium">Remind this many days before the due date</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">0 means "on the due date".</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {REMINDER_PRESET_DAYS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => toggleDay(d)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      days.includes(d) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {d === 0 ? 'Due day' : `${d}d before`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => update.mutate({ enabled, reminder_days: days })}
+                disabled={update.isPending}
+              >
+                {update.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

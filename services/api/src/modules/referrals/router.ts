@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import {
   createReferralCampaignRequest,
+  publicReferralCampaign,
   referralCampaignList,
+  referralCampaignStatus,
   referralSubmissionList,
   submitReferralRequest,
   z,
@@ -29,7 +31,7 @@ export const referralsRouter = new Hono<AppEnv>()
     const rows = await attempt(c, 'referrals.campaigns', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const campaigns = await sql`
-          select id, company_id, name, description, reward_type, reward_value,
+          select id, company_id, name, slug, description, reward_type, reward_value,
                  reward_description, status, created_at
             from referral_campaigns
            where company_id = ${c.get('auth').companyId}
@@ -54,16 +56,16 @@ export const referralsRouter = new Hono<AppEnv>()
     const d = parsed.data
     const rows = await attempt(c, 'referrals.campaign_create', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const made = await sql<{ id: string }[]>`
-          insert into referral_campaigns (company_id, name, description, reward_type, reward_value, reward_description, created_by)
-          values (${auth.companyId}, ${d.name}, ${d.description ?? null}, ${d.reward_type}, ${d.reward_value}, ${d.reward_description ?? null}, ${auth.userId})
-          returning id`
+        const made = await sql<{ id: string; slug: string }[]>`
+          insert into referral_campaigns (company_id, name, description, reward_type, reward_value, reward_description, created_by, slug)
+          values (${auth.companyId}, ${d.name}, ${d.description ?? null}, ${d.reward_type}, ${d.reward_value}, ${d.reward_description ?? null}, ${auth.userId}, generate_referral_slug(${d.name}))
+          returning id, slug`
         return made
       }),
     )
     if (!rows?.[0]) fail(400, 'We could not create this campaign.')
     await audit(c, { action: 'referral_campaign.create', entityType: 'referral_campaign', entityId: rows[0].id, after: d })
-    return c.json({ id: rows[0].id }, 201)
+    return c.json({ id: rows[0].id, slug: rows[0].slug }, 201)
   })
 
   .patch('/:id', requireAction('referrals', 'edit'), async (c) => {
@@ -86,6 +88,30 @@ export const referralsRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not save this campaign.')
     if (!rows.length) fail(404, 'We could not find that campaign.')
     await audit(c, { action: 'referral_campaign.update', entityType: 'referral_campaign', entityId: id, after: d })
+    return c.json(okResponse.parse({ ok: true }))
+  })
+
+  // A paused/ended campaign fails closed on both public routes above
+  // (get_public_referral_campaign and submit_referral each check
+  // status = 'active') -- stopping a live link is a status flip, not a
+  // delete, which would otherwise erase the campaign's own submission
+  // history along with it.
+  .patch('/:id/status', requireAction('referrals', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const parsed = referralCampaignStatus.safeParse((await c.req.json().catch(() => ({})) as { status?: unknown }).status)
+    if (!parsed.success) fail(422, 'Invalid status.')
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'referrals.campaign_status', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        return sql<{ id: string }[]>`
+          update referral_campaigns set status = ${parsed.data}
+          where id = ${id} and company_id = ${auth.companyId}
+          returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not update this campaign.')
+    if (!rows.length) fail(404, 'We could not find that campaign.')
+    await audit(c, { action: 'referral_campaign.status', entityType: 'referral_campaign', entityId: id, after: { status: parsed.data } })
     return c.json(okResponse.parse({ ok: true }))
   })
 
@@ -171,6 +197,19 @@ export const referralsRouter = new Hono<AppEnv>()
 
 // ── Public route (no auth) ─────────────────────────────────
 const publicReferralsRouter = new Hono<AppEnv>()
+
+publicReferralsRouter.get('/referrals/campaign/:slug', async (c) => {
+  const slug = c.req.param('slug')
+  const row = await attempt(c, 'referrals.public_campaign', () =>
+    withService(c.env, async (sql) => {
+      const rows = await sql<{ get_public_referral_campaign: unknown }[]>`
+        select get_public_referral_campaign(${slug}) as get_public_referral_campaign`
+      return rows[0]?.get_public_referral_campaign ?? null
+    }),
+  )
+  if (!row) fail(404, 'This referral link is no longer active.')
+  return c.json(publicReferralCampaign.parse(row))
+})
 
 publicReferralsRouter.post('/referrals/submit', async (c) => {
   const parsed = submitReferralRequest.safeParse(await c.req.json().catch(() => ({})))

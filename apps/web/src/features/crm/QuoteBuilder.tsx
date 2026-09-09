@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
-import { createQuoteRequest, type CreateQuoteRequest, type CrmLead } from '@ipc/contracts'
+import { createQuoteRequest, updateQuoteRequest, type CreateQuoteRequest, type CrmLead, type CrmQuote } from '@ipc/contracts'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { formatINR } from '@/shared/ui/format'
-import { useCreateQuote } from './api'
+import { useCreateQuote, useUpdateQuote } from './api'
 
 interface Line {
   description: string
@@ -27,20 +27,37 @@ function iso(d: Date): string {
  * computed here with the same arithmetic the invoices use, so what the
  * client accepts is what they will later be billed.
  */
-export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boolean; onClose: (createdId?: string) => void }) {
+export function QuoteBuilder({
+  lead,
+  quote,
+  open,
+  onClose,
+}: {
+  lead: CrmLead
+  quote?: CrmQuote
+  open: boolean
+  onClose: (createdId?: string) => void
+}) {
+  const isEdit = !!quote
   const create = useCreateQuote()
-  const [title, setTitle] = useState(lead.title ?? `${lead.name ?? 'Wedding'} package`)
-  const [lines, setLines] = useState<Line[]>([{ description: 'Photography coverage', quantity: '1', rate: lead.deal_value ? String(lead.deal_value) : '', gst_rate: 18 }])
-  const [discount, setDiscount] = useState('0')
-  const [intra, setIntra] = useState(true)
-  const [place, setPlace] = useState('')
+  const update = useUpdateQuote()
+  const [title, setTitle] = useState(quote?.title ?? lead.title ?? `${lead.name ?? 'Wedding'} package`)
+  const [lines, setLines] = useState<Line[]>(
+    quote
+      ? quote.items.map((i) => ({ description: i.description, quantity: String(i.quantity), rate: String(i.rate), gst_rate: i.gst_rate as GstSlab }))
+      : [{ description: 'Photography coverage', quantity: '1', rate: lead.deal_value ? String(lead.deal_value) : '', gst_rate: 18 }],
+  )
+  const [discount, setDiscount] = useState(quote ? String(quote.discount) : '0')
+  const [intra, setIntra] = useState(quote?.intra_state ?? true)
+  const [place, setPlace] = useState(quote?.place_of_supply ?? '')
   const [validUntil, setValidUntil] = useState(() => {
+    if (quote?.valid_until) return quote.valid_until
     const d = new Date()
     d.setDate(d.getDate() + 14)
     return iso(d)
   })
-  const [notes, setNotes] = useState('')
-  const [terms, setTerms] = useState('50% advance to confirm the date; balance before delivery.')
+  const [notes, setNotes] = useState(quote?.notes ?? '')
+  const [terms, setTerms] = useState(quote?.terms ?? '50% advance to confirm the date; balance before delivery.')
   const [error, setError] = useState<string | null>(null)
 
   const parsedLines = useMemo(
@@ -66,8 +83,7 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
 
   function save() {
     setError(null)
-    const body: CreateQuoteRequest = {
-      lead_id: lead.id,
+    const shared = {
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(validUntil ? { valid_until: validUntil } : {}),
       place_of_supply: place.trim(),
@@ -77,6 +93,16 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
       ...(terms.trim() ? { terms: terms.trim() } : {}),
       lines: parsedLines,
     }
+    if (isEdit) {
+      const parsed = updateQuoteRequest.safeParse(shared)
+      if (!parsed.success) {
+        setError(parsed.error.issues[0]?.message ?? 'Please check the quote.')
+        return
+      }
+      update.mutate({ id: quote.id, patch: parsed.data }, { onSuccess: () => onClose() })
+      return
+    }
+    const body: CreateQuoteRequest = { lead_id: lead.id, ...shared }
     const parsed = createQuoteRequest.safeParse(body)
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Please check the quote.')
@@ -85,9 +111,15 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
     create.mutate(parsed.data, { onSuccess: (q) => onClose(q.id) })
   }
 
+  const busy = create.isPending || update.isPending
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={`Quote for ${lead.name ?? lead.phone ?? 'this deal'}`} description="Lines, discount and GST. The client gets a link to accept or decline." className="max-w-2xl">
+      <DialogContent
+        title={isEdit ? `Edit quote ${quote.quote_number}` : `Quote for ${lead.name ?? lead.phone ?? 'this deal'}`}
+        description="Lines, discount and GST. The client gets a link to accept or decline."
+        className="max-w-2xl"
+      >
         <div className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto pr-1">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="flex flex-col gap-1 sm:col-span-2">
@@ -187,8 +219,8 @@ export function QuoteBuilder({ lead, open, onClose }: { lead: CrmLead; open: boo
             <Button variant="outline" onClick={() => onClose()}>
               Cancel
             </Button>
-            <Button disabled={create.isPending || parsedLines.length === 0} onClick={save}>
-              {create.isPending ? 'Saving…' : 'Create quote'}
+            <Button disabled={busy || parsedLines.length === 0} onClick={save}>
+              {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create quote'}
             </Button>
           </div>
         </div>

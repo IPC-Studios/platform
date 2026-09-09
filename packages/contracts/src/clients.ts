@@ -10,6 +10,10 @@ export const client = z.object({
   alternate_phone: z.string().nullable(),
   address: z.string().nullable(),
   city: z.string().nullable(),
+  /** Free-text tag — Referral, Repeat, Vendor — used for segmentation, not an enum. */
+  relation: z.string().nullable(),
+  /** For a compliant B2B tax invoice; absent for most retail/individual clients. */
+  gstin: z.string().nullable(),
   notes: z.string().nullable(),
   created_at: isoDateTime,
 })
@@ -22,9 +26,22 @@ export const createClientRequest = z.object({
   alternate_phone: z.string().trim().max(20).optional(),
   address: z.string().trim().max(400).optional(),
   city: z.string().trim().max(120).optional(),
+  relation: z.string().trim().max(60).optional(),
+  gstin: z.string().trim().max(20).optional(),
   notes: z.string().trim().max(2000).optional(),
 })
 export type CreateClientRequest = z.infer<typeof createClientRequest>
 
-export const updateClientRequest = createClientRequest.partial()
+/** Every optional field accepts null so an edit can explicitly clear one, not just leave it out. */
+export const updateClientRequest = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  email: z.preprocess((v) => (v === '' ? null : v), emailSchema.nullable().optional()),
+  phone: z.string().trim().max(20).nullable().optional(),
+  alternate_phone: z.string().trim().max(20).nullable().optional(),
+  address: z.string().trim().max(400).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  relation: z.string().trim().max(60).nullable().optional(),
+  gstin: z.string().trim().max(20).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+})
 export type UpdateClientRequest = z.infer<typeof updateClientRequest>

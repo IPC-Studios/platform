@@ -120,6 +120,22 @@ export function useCreateCustomLookup() {
   })
 }
 
+export function useUpdateCustomLookup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { value?: string; sort_order?: number; is_active?: boolean } }) =>
+      callApi(`/settings/lookups/${id}`, {
+        method: 'PATCH',
+        body: patch,
+        responseSchema: z.object({ ok: z.boolean() }),
+      }),
+    onSuccess: () => {
+      toast.success('Lookup updated')
+      void qc.invalidateQueries({ queryKey: ['settings', 'lookups'] })
+    },
+  })
+}
+
 export function useDeleteCustomLookup() {
   const qc = useQueryClient()
   return useMutation({

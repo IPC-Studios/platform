@@ -1,10 +1,12 @@
-import { Users } from 'lucide-react'
+import { Users, Trash2 } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { Button } from '@/shared/ui/button'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { SkeletonList } from '@/shared/ui/skeleton'
+import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { useClients } from '@/features/clients/api'
+import { useClients, useDeleteClient } from '@/features/clients/api'
 import { ClientFormDialog } from '@/features/clients/ClientFormDialog'
 
 export function ClientsListPage() {
@@ -17,7 +19,20 @@ export function ClientsListPage() {
 
 function ClientsList() {
   const { data, isLoading, isError, refetch } = useClients()
+  const del = useDeleteClient()
+  const confirm = useConfirm()
   const isMobile = useIsMobile()
+
+  async function onDelete(id: string, name: string) {
+    const yes = await confirm({
+      title: `Delete ${name}?`,
+      description: 'Clients with linked projects cannot be deleted.',
+      destructive: true,
+      confirmLabel: 'Delete',
+    })
+    if (!yes) return
+    del.mutate(id)
+  }
 
   return (
     <>
@@ -41,10 +56,20 @@ function ClientsList() {
         <div className="flex flex-col gap-3">
           {data.map((c) => (
             <div key={c.id} className="rounded-lg border border-border p-4">
-              <p className="font-medium">{c.name}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {[c.phone, c.city].filter(Boolean).join(' · ') || '—'}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-medium">{c.name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {[c.phone, c.city, c.relation].filter(Boolean).join(' · ') || '—'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <ClientFormDialog client={c} />
+                  <Button variant="outline" size="icon" aria-label={`Delete ${c.name}`} onClick={() => void onDelete(c.id, c.name)}>
+                    <Trash2 />
+                  </Button>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -56,7 +81,9 @@ function ClientsList() {
                 <th className="px-4 py-2 font-medium">Name</th>
                 <th className="px-4 py-2 font-medium">Phone</th>
                 <th className="px-4 py-2 font-medium">City</th>
+                <th className="px-4 py-2 font-medium">Relation</th>
                 <th className="px-4 py-2 font-medium">Email</th>
+                <th className="px-4 py-2 font-medium" />
               </tr>
             </thead>
             <tbody>
@@ -70,7 +97,16 @@ function ClientsList() {
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">{c.phone ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">{c.city ?? '—'}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{c.relation ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">{c.email ?? '—'}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex justify-end gap-1">
+                      <ClientFormDialog client={c} />
+                      <Button variant="outline" size="icon" aria-label={`Delete ${c.name}`} onClick={() => void onDelete(c.id, c.name)}>
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

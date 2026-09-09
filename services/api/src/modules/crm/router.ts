@@ -16,6 +16,7 @@ import {
   createLeadResponse,
   createLeadSourceRequest,
   createTemplateRequest,
+  updateTemplateRequest,
   crmLead,
   crmSettings,
   crmStats,
@@ -75,6 +76,7 @@ const selectLead = (sql: TransactionSql) => sql`
          l.merged_into, l.converted_project_id, l.deal_value, l.probability, l.lost_reason, l.lost_competitor,
          l.sla_due_at, l.pipeline_id, l.stage_id, s.name as stage_name, l.contact_id, l.crm_company_id,
          co.name as crm_company_name, l.title, l.close_date, l.currency, l.score, l.created_at,
+         l.event_type, l.event_date, l.event_location, l.alternate_phone, l.city,
          u.name as assignee_name
   from crm_leads l
   left join users u on u.user_id = l.assigned_to
@@ -162,6 +164,11 @@ export const crmRouter = new Hono<AppEnv>()
         if (v.probability !== undefined) extra.probability = v.probability
         if (v.title !== undefined) extra.title = v.title
         if (v.close_date !== undefined) extra.close_date = v.close_date
+        if (v.event_type !== undefined) extra.event_type = v.event_type
+        if (v.event_date !== undefined) extra.event_date = v.event_date
+        if (v.event_location !== undefined) extra.event_location = v.event_location
+        if (v.alternate_phone !== undefined) extra.alternate_phone = v.alternate_phone
+        if (v.city !== undefined) extra.city = v.city
         if (v.crm_company_id !== undefined) extra.crm_company_id = v.crm_company_id
         // A known number hands back the existing row; only a fresh one is
         // placed in the pipeline the caller asked for.
@@ -442,6 +449,25 @@ export const crmRouter = new Hono<AppEnv>()
     const created = crmTemplate.parse(row)
     await audit(c, { action: 'template.create', entityType: 'crm_template', entityId: created.id, after: { name, kind } })
     return c.json(created, 201)
+  })
+
+  .patch('/templates/:id', edit, async (c) => {
+    const parsed = updateTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Check template fields.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const row = await attempt(c, 'crm.template_update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          update crm_templates set ${sql(parsed.data)} where id = ${id}
+          returning id, name, body, kind, created_at`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That template was not found.')
+    const updated = crmTemplate.parse(row)
+    await audit(c, { action: 'template.update', entityType: 'crm_template', entityId: id, after: parsed.data })
+    return c.json(updated)
   })
 
   .delete('/templates/:id', remove, async (c) => {

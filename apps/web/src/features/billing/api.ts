@@ -4,8 +4,10 @@ import {
   gstState,
   invoiceDetail,
   invoiceListItem,
+  invoiceTemplateList,
   type CreateInvoiceRequest,
   type RecordPaymentRequest,
+  type UpdateInvoiceRequest,
 } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
@@ -37,6 +39,17 @@ export function useStates() {
   })
 }
 
+export function useInvoiceTemplates() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['billing', 'templates'],
+    queryFn: () => callApi('/billing/templates', { responseSchema: invoiceTemplateList }),
+    enabled: !!session && access.hasModule('billing'),
+    staleTime: 60_000,
+  })
+}
+
 export function useInvoice(id: string) {
   const { session } = useAuth()
   const access = useAccess()
@@ -58,6 +71,30 @@ export function useCreateInvoice() {
       }),
     onSuccess: () => {
       toast.success('Invoice created')
+      void qc.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
+export function useUpdateInvoice(invoiceId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: UpdateInvoiceRequest) =>
+      callApi(`/billing/invoices/${invoiceId}`, { method: 'PATCH', body: input, responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Invoice updated')
+      void qc.invalidateQueries({ queryKey: ['invoices'] })
+      void qc.invalidateQueries({ queryKey: ['invoices', invoiceId] })
+    },
+  })
+}
+
+export function useDeleteInvoice() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/billing/invoices/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Invoice deleted')
       void qc.invalidateQueries({ queryKey: ['invoices'] })
     },
   })

@@ -6,6 +6,7 @@ import {
   z,
   type SaveShootPresetRequest,
   type ShootPresetKind,
+  type UpdateShootRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -16,11 +17,8 @@ const presets = shootPreset.array()
 const anySchema = z.any()
 
 /**
- * Every service this studio has asked for before, for the requirement picker.
- *
- * There is no services admin screen: the list is a by-product of booking
- * shoots, so it starts empty and fills itself with whatever the studio
- * actually books. Cached for a while — it changes about once a season.
+ * Every service this studio has on its catalog, for the requirement picker
+ * and for Settings → Services. Cached for a while — it changes rarely.
  */
 export function useServices() {
   const { session } = useAuth()
@@ -30,6 +28,51 @@ export function useServices() {
     queryFn: () => callApi('/shoots/services', { responseSchema: services }),
     enabled: !!session && access.hasModule('projects'),
     staleTime: 5 * 60_000,
+  })
+}
+
+function useServiceMutation<TArgs>(fn: (a: TArgs) => Promise<unknown>, message: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      toast.success(message)
+      void qc.invalidateQueries({ queryKey: ['shoots', 'services'] })
+    },
+  })
+}
+
+export function useCreateService() {
+  return useServiceMutation(
+    (name: string) => callApi('/shoots/services', { method: 'POST', body: { name }, responseSchema: serviceOption }),
+    'Service added',
+  )
+}
+
+export function useUpdateService() {
+  return useServiceMutation(
+    ({ id, name }: { id: string; name: string }) =>
+      callApi(`/shoots/services/${id}`, { method: 'PATCH', body: { name }, responseSchema: serviceOption }),
+    'Service updated',
+  )
+}
+
+export function useDeleteService() {
+  return useServiceMutation(
+    (id: string) => callApi(`/shoots/services/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    'Service deleted',
+  )
+}
+
+export function useUpdateShoot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateShootRequest }) =>
+      callApi(`/shoots/${id}`, { method: 'PATCH', body: patch, responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Shoot updated')
+      void qc.invalidateQueries({ queryKey: ['shoots'] })
+    },
   })
 }
 

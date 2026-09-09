@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { uuid, isoDateTime, money } from './shared/primitives'
 
 export const slotStatus = z.enum(['booked', 'released', 'cancelled'])
+export type SlotStatus = z.infer<typeof slotStatus>
 
 export const teamSlot = z.object({
   id: uuid,
@@ -27,6 +28,7 @@ export const bookSlotRequest = z.object({
 export type BookSlotRequest = z.infer<typeof bookSlotRequest>
 
 export const setSlotStatusRequest = z.object({ status: slotStatus })
+export type SetSlotStatusRequest = z.infer<typeof setSlotStatusRequest>
 
 /** Lightweight team member for pickers (assignees, bookings). */
 export const teamMember = z.object({

@@ -18,10 +18,15 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import {
   usePersonalExpenses,
+  usePersonalExpenseReport,
   useSavePersonalExpense,
   useDeletePersonalExpense,
 } from '@/features/personal-expenses/api'
 import { PERSONAL_EXPENSE_CATEGORIES, type CreatePersonalExpenseRequest } from '@ipc/contracts'
+import { PartyPicker } from '@/features/parties/PartyPicker'
+
+const GST_RATES = [0, 5, 12, 18, 28]
+const todayISO = () => new Date().toISOString().slice(0, 10)
 import { Plus, Search, Trash2, Edit, Wallet, Calendar, BarChart3 } from 'lucide-react'
 
 function PersonalExpensesContent() {
@@ -34,7 +39,9 @@ function PersonalExpensesContent() {
     amount: 0,
     category: null,
     description: null,
+    expense_date: todayISO(),
     gst_treatment: 'non_gst',
+    gst_rate: null,
     party_id: null,
   })
 
@@ -51,7 +58,15 @@ function PersonalExpensesContent() {
 
   function openCreate() {
     setEditingId(null)
-    setForm({ amount: 0, category: null, description: null, gst_treatment: 'non_gst', party_id: null })
+    setForm({
+      amount: 0,
+      category: null,
+      description: null,
+      expense_date: todayISO(),
+      gst_treatment: 'non_gst',
+      gst_rate: null,
+      party_id: null,
+    })
     setDialogOpen(true)
   }
 
@@ -61,7 +76,9 @@ function PersonalExpensesContent() {
       amount: item.amount,
       category: item.category as CreatePersonalExpenseRequest['category'],
       description: item.description,
+      expense_date: item.expense_date,
       gst_treatment: item.gst_treatment as CreatePersonalExpenseRequest['gst_treatment'],
+      gst_rate: item.gst_rate,
       party_id: item.party_id,
     })
     setDialogOpen(true)
@@ -91,9 +108,12 @@ function PersonalExpensesContent() {
         title="Personal Expenses"
         description="Track your personal expenses"
         actions={
-          <Button onClick={openCreate} size="sm">
-            <Plus className="mr-1 h-4 w-4" /> Add Expense
-          </Button>
+          <div className="flex gap-2">
+            <ReportDialog />
+            <Button onClick={openCreate} size="sm">
+              <Plus className="mr-1 h-4 w-4" /> Add Expense
+            </Button>
+          </div>
         }
       />
 
@@ -194,6 +214,14 @@ function PersonalExpensesContent() {
               />
             </div>
             <div>
+              <label className="text-sm font-medium">Date</label>
+              <Input
+                type="date"
+                value={form.expense_date ?? todayISO()}
+                onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
+              />
+            </div>
+            <div>
               <label className="text-sm font-medium">Category</label>
               <Select value={form.category ?? ''} onChange={(e) => setForm({ ...form, category: (e.target.value || null) as CreatePersonalExpenseRequest['category'] })}>
                 <option value="">Select category</option>
@@ -201,6 +229,33 @@ function PersonalExpensesContent() {
                   <option key={c} value={c}>{categoryLabels[c] ?? c}</option>
                 ))}
               </Select>
+            </div>
+            <PartyPicker value={form.party_id ?? ''} onChange={(id) => setForm({ ...form, party_id: id || null })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">GST treatment</label>
+                <Select
+                  value={form.gst_treatment}
+                  onChange={(e) => setForm({ ...form, gst_treatment: e.target.value as CreatePersonalExpenseRequest['gst_treatment'] })}
+                >
+                  <option value="non_gst">No GST</option>
+                  <option value="gst_applicable">GST applicable</option>
+                  <option value="exempt">Exempt</option>
+                  <option value="reverse_charge">Reverse charge</option>
+                </Select>
+              </div>
+              {form.gst_treatment === 'gst_applicable' && (
+                <div>
+                  <label className="text-sm font-medium">GST rate</label>
+                  <Select value={form.gst_rate ?? 18} onChange={(e) => setForm({ ...form, gst_rate: Number(e.target.value) })}>
+                    {GST_RATES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}%
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">Description</label>
@@ -220,6 +275,94 @@ function PersonalExpensesContent() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function firstOfMonth(): string {
+  const d = new Date()
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+}
+
+/** Category and day breakdown for a date range — the backend's had this since round 1, the UI never asked for it. */
+function ReportDialog() {
+  const [open, setOpen] = useState(false)
+  const [startDate, setStartDate] = useState(firstOfMonth())
+  const [endDate, setEndDate] = useState(todayISO())
+  const { data, isLoading, isError } = usePersonalExpenseReport(open ? startDate : '', open ? endDate : '')
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <BarChart3 className="mr-1 h-4 w-4" /> Report
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent title="Personal expense report" description="Category and day-by-day breakdown for a date range.">
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">From</label>
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} max={endDate} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">To</label>
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} />
+            </div>
+          </div>
+
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : isError ? (
+            <p className="text-sm text-destructive">Could not load the report.</p>
+          ) : !data ? null : (
+            <>
+              <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Total, {data.period_start} to {data.period_end}</p>
+                <p className="text-xl font-semibold">₹{data.total_amount.toLocaleString()}</p>
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-medium">By category</p>
+                {data.by_category.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No expenses in this range.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {data.by_category.map((c) => (
+                      <li key={c.category ?? '—'} className="flex items-center justify-between text-sm">
+                        <span>
+                          {c.category ?? 'Uncategorised'} <span className="text-muted-foreground">({c.count})</span>
+                        </span>
+                        <span className="font-medium">₹{c.amount.toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {data.daily_breakdown.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-medium">By day</p>
+                  <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                    {data.daily_breakdown.map((d) => (
+                      <li key={d.date} className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{d.date}</span>
+                        <span>₹{d.amount.toLocaleString()} · {d.count} {d.count === 1 ? 'expense' : 'expenses'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

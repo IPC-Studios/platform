@@ -5,6 +5,7 @@ import {
   referralSubmissionList,
   z,
   type CreateReferralCampaignRequest,
+  type ReferralCampaignStatus,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -67,6 +68,14 @@ export function useSaveReferralCampaign() {
         responseSchema: id ? anySchema : created,
       }),
     'Campaign saved',
+  )
+}
+
+export function useUpdateReferralCampaignStatus() {
+  return useReferralMutation(
+    ({ id, status }: { id: string; status: ReferralCampaignStatus }) =>
+      callApi(`/referrals/${id}/status`, { method: 'PATCH', body: { status }, responseSchema: anySchema }),
+    'Campaign status updated',
   )
 }
 

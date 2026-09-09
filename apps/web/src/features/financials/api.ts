@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { expense, projectFinancials, type CreateExpenseRequest } from '@ipc/contracts'
+import { expense, projectFinancials, z, type CreateExpenseRequest, type UpdateExpenseRequest } from '@ipc/contracts'
+
+const noContent = z.unknown()
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -26,6 +28,29 @@ export function useCreateExpense() {
       callApi('/financials/expenses', { method: 'POST', body: input, responseSchema: expense }),
     onSuccess: () => {
       toast.success('Expense added')
+      void qc.invalidateQueries({ queryKey: ['expenses'] })
+    },
+  })
+}
+
+export function useUpdateExpense() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateExpenseRequest }) =>
+      callApi(`/financials/expenses/${id}`, { method: 'PATCH', body: patch, responseSchema: expense }),
+    onSuccess: () => {
+      toast.success('Expense updated')
+      void qc.invalidateQueries({ queryKey: ['expenses'] })
+    },
+  })
+}
+
+export function useDeleteExpense() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/financials/expenses/${id}`, { method: 'DELETE', responseSchema: noContent }),
+    onSuccess: () => {
+      toast.success('Expense deleted')
       void qc.invalidateQueries({ queryKey: ['expenses'] })
     },
   })

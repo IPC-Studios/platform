@@ -30,7 +30,10 @@ export const shootListItem = z.object({
   project_name: z.string().nullable(),
   client_name: z.string().nullable(),
   shoot_date: isoDate.nullable(),
+  start_at: isoDateTime.nullable(),
+  end_at: isoDateTime.nullable(),
   location: z.string().nullable(),
+  map_link: z.string().nullable(),
   status: shootStatus,
   /** What the day was planned to need — the booking screen fills against it. */
   requirements: z.array(shootRequirement),
@@ -40,6 +43,12 @@ export type ShootListItem = z.infer<typeof shootListItem>
 /** A service this company has used before, offered as you type. */
 export const serviceOption = z.object({ id: uuid, name: z.string() })
 export type ServiceOption = z.infer<typeof serviceOption>
+
+export const createServiceRequest = z.object({ name: z.string().trim().min(1).max(120) })
+export type CreateServiceRequest = z.infer<typeof createServiceRequest>
+
+export const updateServiceRequest = createServiceRequest
+export type UpdateServiceRequest = z.infer<typeof updateServiceRequest>
 
 /**
  * A map link is a link. Storing an address here instead would put the driver's

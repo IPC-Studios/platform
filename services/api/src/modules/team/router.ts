@@ -4,6 +4,7 @@ import {
   addMemberResponse,
   assignRolesRequest,
   createInvitationRequest,
+  updateInvitationRequest,
   directoryMember,
   employeeRole,
   invitation,
@@ -48,12 +49,17 @@ async function companyName(c: Context<AppEnv>): Promise<string> {
 export const teamRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
+  // Every caller of this endpoint uses it as a "who can this go to" picker
+  // (a deal owner, a distribution rota, a workflow step, a booking slot) --
+  // never a place to see who used to work here, so a deactivated member
+  // (status = 'inactive', deleted_at still null) is excluded the same as a
+  // removed one.
   .get('/members', async (c) => {
     const rows = await attempt(c, 'team.members', () =>
       withUser(
         c.env,
         c.get('auth').userId,
-        (sql) => sql`select user_id, name, role from users where deleted_at is null order by name`,
+        (sql) => sql`select user_id, name, role from users where deleted_at is null and status = 'active' order by name`,
       ),
     )
     if (!rows) fail(400, 'We could not load the team.')
@@ -72,6 +78,8 @@ export const teamRouter = new Hono<AppEnv>()
           select
             u.user_id, u.name, u.email, u.role, u.phone, u.alternate_phone, u.status,
             u.engagement_type, u.login_enabled, u.salary, u.address, u.created_at,
+            u.payout_type, u.commission_pct, u.commission_basis, u.stipend_amount,
+            u.pay_effective_from, u.pay_effective_to, u.compensation_notes,
             coalesce(
               array_agg(er.type_name order by er.type_name) filter (where er.id is not null),
               '{}'::text[]
@@ -92,7 +100,17 @@ export const teamRouter = new Hono<AppEnv>()
 
     const canSeeSalary = c.get('auth').access.hasModule('team_salaries')
     const list = directoryMember.array().parse(rows)
-    return c.json(canSeeSalary ? list : list.map((m) => ({ ...m, salary: null })))
+    return c.json(
+      canSeeSalary
+        ? list
+        : list.map((m) => ({
+            ...m,
+            salary: null,
+            commission_pct: null,
+            stipend_amount: null,
+            compensation_notes: null,
+          })),
+    )
   })
 
   // The catalogue behind the "add from the library" chips. Declared above
@@ -251,6 +269,13 @@ export const teamRouter = new Hono<AppEnv>()
       salary,
       address,
       role_ids,
+      payout_type,
+      commission_pct,
+      commission_basis,
+      stipend_amount,
+      pay_effective_from,
+      pay_effective_to,
+      compensation_notes,
     } = parsed.data
 
     const pwHash = create_login && password ? await hashPassword(password) : null
@@ -285,6 +310,13 @@ export const teamRouter = new Hono<AppEnv>()
               engagement_type,
               salary: salary ?? null,
               address: address ?? null,
+              payout_type: payout_type ?? null,
+              commission_pct: commission_pct ?? null,
+              commission_basis: commission_basis ?? null,
+              stipend_amount: stipend_amount ?? null,
+              pay_effective_from: pay_effective_from ?? null,
+              pay_effective_to: pay_effective_to ?? null,
+              compensation_notes: compensation_notes ?? null,
               login_enabled: create_login,
             })}`
           for (const roleId of role_ids) {
@@ -334,13 +366,21 @@ export const teamRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not update this member.')
     if (!rows.length) fail(404, 'We could not find that team member.')
-    // Salary is sensitive: record that it changed, not what it changed to.
-    const { salary, ...rest } = patch
+    // Pay is sensitive: record that it changed, not what it changed to.
+    const { salary, commission_pct, stipend_amount, compensation_notes, ...rest } = patch
     await audit(c, {
       action: 'member.update',
       entityType: 'user',
       entityId: id,
-      after: { ...rest, ...(salary !== undefined ? { salary_changed: true } : {}) },
+      after: {
+        ...rest,
+        ...(salary !== undefined ||
+        commission_pct !== undefined ||
+        stipend_amount !== undefined ||
+        compensation_notes !== undefined
+          ? { compensation_changed: true }
+          : {}),
+      },
     })
     return c.json({ ok: true })
   })
@@ -514,6 +554,31 @@ export const teamRouter = new Hono<AppEnv>()
     return c.json(
       invitationLink.parse({ id, invite_link: inviteLink(c.env, raw), expires_at: rows[0]!.expires_at }),
     )
+  })
+
+  .patch('/invitations/:id', requireOwner(), async (c) => {
+    const parsed = updateInvitationRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the invitation details.')
+    const { name, role } = parsed.data
+    if (name === undefined && role === undefined) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'team.invite_update', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`
+          update user_invitations set ${sql({
+            ...(name !== undefined ? { pending_name: name } : {}),
+            ...(role !== undefined ? { role } : {}),
+          })}
+          where id = ${id} and accepted_at is null and revoked_at is null
+          returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not update this invitation.')
+    if (!rows.length) fail(404, 'We could not find that invitation.')
+    await audit(c, { action: 'invitation.update', entityType: 'user_invitation', entityId: id, after: parsed.data })
+    return c.json({ ok: true })
   })
 
   .delete('/invitations/:id', requireOwner(), async (c) => {

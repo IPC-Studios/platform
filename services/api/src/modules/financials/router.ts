@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
-import { createExpenseRequest, expense, projectFinancials, gopoSummary, gstAnalysis, gstAnalysisRequest } from '@ipc/contracts'
+import { createExpenseRequest, updateExpenseRequest, expense, projectFinancials, gopoSummary, gstAnalysis, gstAnalysisRequest } from '@ipc/contracts'
 import { grossProfit, balancePending } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
+import { uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { rpcJson } from '../../lib/rpc'
@@ -32,8 +33,11 @@ export const financialsRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, project_id, category, description, amount, expense_date, gst_treatment, is_fixed_overhead
-          from expenses order by expense_date desc`,
+          select e.id, e.project_id, e.party_id, p.name as party_name, e.category, e.description,
+                 e.amount, e.expense_date, e.gst_treatment, e.gst_rate, e.is_fixed_overhead
+          from expenses e
+          left join parties p on p.id = e.party_id
+          order by e.expense_date desc`,
       ),
     )
     if (!rows) fail(400, 'We could not load expenses.')
@@ -48,7 +52,9 @@ export const financialsRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           insert into expenses ${sql({ ...parsed.data, company_id: auth.companyId, created_by: auth.userId })}
-          returning id, project_id, category, description, amount, expense_date, gst_treatment, is_fixed_overhead`
+          returning id, project_id, party_id,
+                    (select name from parties where id = party_id) as party_name,
+                    category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead`
         return rows[0] ?? null
       }),
     )
@@ -56,6 +62,39 @@ export const financialsRouter = new Hono<AppEnv>()
     const created = expense.parse(row)
     await audit(c, { action: 'expense.create', entityType: 'expense', entityId: created.id, after: parsed.data })
     return c.json(created, 201)
+  })
+
+  .patch('/expenses/:id', requireModule('company_expenses'), async (c) => {
+    const parsed = updateExpenseRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the expense details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const row = await attempt(c, 'financials.expense_update', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
+          update expenses set ${sql(parsed.data)} where id = ${id}
+          returning id, project_id, party_id,
+                    (select name from parties where id = party_id) as party_name,
+                    category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That expense was not found.')
+    const updated = expense.parse(row)
+    await audit(c, { action: 'expense.update', entityType: 'expense', entityId: id, after: parsed.data })
+    return c.json(updated)
+  })
+
+  .delete('/expenses/:id', requireModule('company_expenses'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'financials.expense_delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from expenses where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this expense.')
+    if (!rows.length) fail(404, 'That expense was not found.')
+    await audit(c, { action: 'expense.delete', entityType: 'expense', entityId: id })
+    return c.body(null, 204)
   })
 
   // ── Profit summary (financials module) ──────────────────────

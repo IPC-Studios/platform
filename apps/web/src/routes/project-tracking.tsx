@@ -257,6 +257,12 @@ function ProjectRow({ project: p }: { project: TrackedProject }) {
           </div>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
             {p.client_name ?? 'No client'} · {formatINR(p.total_cost)}
+            {p.shoots_total > 0 && (
+              <>
+                {' · '}
+                {p.shoots_done}/{p.shoots_total} shoots done
+              </>
+            )}
             {p.next_shoot_date && (
               <>
                 {' · '}
@@ -264,6 +270,9 @@ function ProjectRow({ project: p }: { project: TrackedProject }) {
                 {dayFormat.format(new Date(`${p.next_shoot_date}T00:00:00`))}
               </>
             )}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            Last activity {dayFormat.format(new Date(p.last_activity_at))}
           </p>
         </div>
 

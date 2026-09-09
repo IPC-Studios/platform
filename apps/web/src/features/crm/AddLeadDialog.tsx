@@ -44,6 +44,11 @@ export function AddLeadDialog({
   const [notes, setNotes] = useState('')
   const [value, setValue] = useState('')
   const [closeDate, setCloseDate] = useState('')
+  const [eventType, setEventType] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [eventLocation, setEventLocation] = useState('')
+  const [alternatePhone, setAlternatePhone] = useState('')
+  const [city, setCity] = useState('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -54,6 +59,11 @@ export function AddLeadDialog({
     setNotes('')
     setValue('')
     setCloseDate('')
+    setEventType('')
+    setEventDate('')
+    setEventLocation('')
+    setAlternatePhone('')
+    setCity('')
     setErrors({})
   }
 
@@ -67,6 +77,11 @@ export function AddLeadDialog({
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(value.trim() && Number(value) >= 0 ? { deal_value: Number(value) } : {}),
       ...(closeDate ? { close_date: closeDate } : {}),
+      ...(eventType.trim() ? { event_type: eventType.trim() } : {}),
+      ...(eventDate ? { event_date: eventDate } : {}),
+      ...(eventLocation.trim() ? { event_location: eventLocation.trim() } : {}),
+      ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
+      ...(city.trim() ? { city: city.trim() } : {}),
     }
     const found = fieldErrors<Field>(createLeadRequest, body, { labels: LABELS })
     setErrors(found)
@@ -128,6 +143,11 @@ export function AddLeadDialog({
             {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <Label>Alternate phone</Label>
+            <Input value={alternatePhone} onChange={(e) => setAlternatePhone(e.target.value)} placeholder="Optional" />
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Email</Label>
@@ -152,6 +172,28 @@ export function AddLeadDialog({
                 <option value="webform">Web form</option>
                 <option value="facebook">Facebook</option>
               </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Event type</Label>
+              <Input value={eventType} onChange={(e) => setEventType(e.target.value)} placeholder="Wedding, Pre-wedding…" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Event date</Label>
+              <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Venue / location</Label>
+              <Input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>City</Label>
+              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Optional" />
             </div>
           </div>
 

@@ -12,6 +12,7 @@ import {
   type IssueQuotationRequest,
   type PaymentInput,
   type SaveDeliverableSetRequest,
+  type UpdateDeliverableRequest,
   type UpdateProjectRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
@@ -82,6 +83,14 @@ export function useAddDeliverable(id: string) {
     mutationFn: (input: DeliverableInput) =>
       callApi(`/projects/${id}/deliverables`, { method: 'POST', body: input, responseSchema: anySchema }),
     onSuccess: useProjectMutation(id, 'Deliverable added'),
+  })
+}
+
+export function useUpdateDeliverable(id: string) {
+  return useMutation({
+    mutationFn: ({ deliverableId, patch }: { deliverableId: string; patch: UpdateDeliverableRequest }) =>
+      callApi(`/projects/${id}/deliverables/${deliverableId}`, { method: 'PATCH', body: patch, responseSchema: anySchema }),
+    onSuccess: useProjectMutation(id, 'Deliverable updated'),
   })
 }
 

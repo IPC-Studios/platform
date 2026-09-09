@@ -7,6 +7,9 @@ export const dataRecord = z.object({
   id: uuid,
   data_label: z.string(),
   data_type: z.string().nullable(),
+  project_id: uuid.nullable(),
+  project_name: z.string().nullable(),
+  shoot_id: uuid.nullable(),
   primary_status: custodyStatus,
   backup_status: custodyStatus,
   card_count: z.number().int(),
@@ -24,5 +27,15 @@ export const createDataRecordRequest = z.object({
   size_gb: z.number().min(0).default(0),
 })
 export type CreateDataRecordRequest = z.infer<typeof createDataRecordRequest>
+
+export const updateDataRecordRequest = z.object({
+  shoot_id: uuid.nullable().optional(),
+  project_id: uuid.nullable().optional(),
+  data_label: z.string().trim().min(1).max(160).optional(),
+  data_type: z.string().max(80).nullable().optional(),
+  card_count: z.number().int().min(0).optional(),
+  size_gb: z.number().min(0).optional(),
+})
+export type UpdateDataRecordRequest = z.infer<typeof updateDataRecordRequest>
 
 export const verifyDataRequest = z.object({ track: z.enum(['primary', 'backup']) })

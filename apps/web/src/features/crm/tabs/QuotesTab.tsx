@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Copy, FileText, Mail, MessageCircle, RotateCcw, Send, Trash2, X } from 'lucide-react'
+import { Check, Copy, FileText, Mail, MessageCircle, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CrmQuote, QuoteStatus } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -67,7 +67,7 @@ export function QuotesTab({ onOpen }: { onOpen: (leadId: string) => void }) {
           <CardContent className="p-0">
             <ul className="divide-y divide-border">
               {rows.map((q) => (
-                <QuoteRow key={q.id} quote={q} onOpen={() => onOpen(q.lead_id)} />
+                <QuoteRow key={q.id} quote={q} onOpen={() => onOpen(q.lead_id)} onEdit={q.status === 'draft' ? () => onOpen(q.lead_id) : undefined} />
               ))}
             </ul>
           </CardContent>
@@ -78,7 +78,17 @@ export function QuotesTab({ onOpen }: { onOpen: (leadId: string) => void }) {
 }
 
 /** One quote with its actions; used by the tab and by the drawer's quote panel. */
-export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuote; onOpen?: () => void; compact?: boolean }) {
+export function QuoteRow({
+  quote: q,
+  onOpen,
+  onEdit,
+  compact = false,
+}: {
+  quote: CrmQuote
+  onOpen?: () => void
+  onEdit?: (() => void) | undefined
+  compact?: boolean
+}) {
   const send = useSendQuote()
   const outcome = useSetQuoteOutcome()
   const del = useDeleteQuote()
@@ -155,6 +165,12 @@ export function QuoteRow({ quote: q, onOpen, compact = false }: { quote: CrmQuot
       <StatusBadge tone={QUOTE_TONE[q.status]}>{q.status}</StatusBadge>
       {canEdit && (q.status === 'draft' || q.status === 'sent') && (
         <span className="flex gap-1">
+          {q.status === 'draft' && onEdit && (
+            <Button size="sm" variant="ghost" onClick={onEdit} title="Edit draft">
+              <Pencil />
+              <span className="sr-only">Edit</span>
+            </Button>
+          )}
           <Button size="sm" variant="outline" disabled={send.isPending} onClick={() => deliver('none')} title="Get the link">
             {q.status === 'draft' ? <Send /> : <Copy />} {q.status === 'draft' ? 'Send' : 'Link'}
           </Button>

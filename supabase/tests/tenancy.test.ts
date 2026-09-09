@@ -98,6 +98,20 @@ async function freshDb() {
   await db.exec(mig('0062_activity_log.sql'))
   await db.exec(mig('0063_security_fixes.sql'))
   await db.exec(mig('0064_gopo_gst_fixes.sql'))
+  await db.exec(mig('0065_client_fields.sql'))
+  await db.exec(mig('0066_crm_lead_event_fields.sql'))
+  await db.exec(mig('0067_referral_slug.sql'))
+  await db.exec(mig('0068_work_submission_reminders.sql'))
+  await db.exec(mig('0069_employee_compensation.sql'))
+  await db.exec(mig('0070_overhead_allocation.sql'))
+  await db.exec(mig('0071_crm_lead_contact_fields.sql'))
+  await db.exec(mig('0072_personal_expense_gst_rate.sql'))
+  await db.exec(mig('0073_work_submission_location.sql'))
+  await db.exec(mig('0074_invoice_edit.sql'))
+  await db.exec(mig('0075_quote_edit.sql'))
+  await db.exec(mig('0076_work_submission_edit.sql'))
+  await db.exec(mig('0077_reminder_entity_name.sql'))
+  await db.exec(mig('0078_invoice_template_link.sql'))
   return db
 }
 
@@ -690,6 +704,156 @@ describe('billing & invoicing (Phase 9)', () => {
     row = await db.query(`select status, balance_due from invoices where id = '${id}';`)
     expect(row.rows[0]!.status).toBe('paid')
     expect(Number(row.rows[0]!.balance_due)).toBe(0)
+  })
+
+  it('a mistake on a freshly created invoice -- wrong client, wrong line item -- can still be corrected', async () => {
+    const wrongClient = await db.query<{ id: string }>(
+      `insert into clients (company_id, name) values (get_current_company_id(), 'Wrong Client') returning id;`,
+    )
+    const items = JSON.stringify([
+      { description: 'Typo Package', quantity: 1, rate: 5000, amount: 5000, gst_rate: 18, taxable: 5000, cgst: 450, sgst: 450, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(
+      `select id from create_invoice('${wrongClient.rows[0]!.id}', null, '27', current_date, null,
+        5000, 0, 5000, 900, 5900, '${items}'::jsonb, 'v1');`,
+    )
+    const id = inv.rows[0]!.id
+
+    const newItems = JSON.stringify([
+      { description: 'Wedding Package', quantity: 1, rate: 100000, amount: 100000, gst_rate: 18, taxable: 100000, cgst: 9000, sgst: 9000, igst: 0 },
+    ])
+    await db.query(`
+      select update_invoice(
+        p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+        p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+        p_subtotal => 100000, p_discount => 0, p_taxable => 100000, p_tax => 18000, p_total => 118000,
+        p_items => '${newItems}'::jsonb, p_notes => 'v2'
+      );
+    `)
+    const row = await db.query<{ client_id: string; total: string; notes: string }>(
+      `select client_id, total, notes from invoices where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ client_id: clientId, total: '118000.00', notes: 'v2' })
+    const lineItems = await db.query<{ description: string }>(`select description from invoice_items where invoice_id = '${id}';`)
+    expect(lineItems.rows.map((r) => r.description)).toEqual(['Wedding Package'])
+  })
+
+  it('an invoice with a recorded payment can no longer be edited or deleted', async () => {
+    const items = JSON.stringify([
+      { description: 'Retainer', quantity: 1, rate: 20000, amount: 20000, gst_rate: 18, taxable: 20000, cgst: 1800, sgst: 1800, igst: 0 },
+    ])
+    const inv = await db.query<{ id: string }>(
+      `select id from create_invoice('${clientId}', null, '27', current_date, null,
+        20000, 0, 20000, 3600, 23600, '${items}'::jsonb, null);`,
+    )
+    const id = inv.rows[0]!.id
+    await db.query(`select record_invoice_payment('${id}', 5000);`)
+
+    await expect(
+      db.query(`
+        select update_invoice(
+          p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+          p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+          p_subtotal => 0, p_discount => 0, p_taxable => 0, p_tax => 0, p_total => 0,
+          p_items => '[]'::jsonb, p_notes => null
+        );
+      `),
+    ).rejects.toThrow(/cannot be edited/)
+
+    // The API's delete guard mirrors update_invoice's own rule (amount_paid = 0).
+    const attempted = await db.query(`delete from invoices where id = '${id}' and amount_paid = 0 returning id;`)
+    expect(attempted.rows.length).toBe(0)
+    const stillThere = await db.query(`select id from invoices where id = '${id}';`)
+    expect(stillThere.rows.length).toBe(1)
+  })
+
+  it('an invoice can be created and edited with a template, and the old no-template call shape still works', async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const tpl = await db.query<{ id: string }>(
+      `insert into invoice_templates (company_id, name, layout_json)
+       values ('${companyId}', 'Letterhead', '{"show_header": false}'::jsonb) returning id;`,
+    )
+    const templateId = tpl.rows[0]!.id
+
+    // The pre-0078 call shape (no p_template_id) must still resolve unambiguously.
+    const untemplated = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 180, p_total => 1180,
+        p_items => '[]'::jsonb, p_notes => 'no template'
+      );
+    `)
+    expect(
+      (await db.query<{ template_id: string | null }>(`select template_id from invoices where id = '${untemplated.rows[0]!.id}';`)).rows[0]!
+        .template_id,
+    ).toBeNull()
+
+    const created = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null,
+        p_subtotal => 1000, p_discount => 0, p_taxable => 1000, p_tax => 180, p_total => 1180,
+        p_items => '[]'::jsonb, p_notes => 'with template', p_template_id => '${templateId}'
+      );
+    `)
+    const id = created.rows[0]!.id
+    expect((await db.query<{ template_id: string }>(`select template_id from invoices where id = '${id}';`)).rows[0]!.template_id).toBe(
+      templateId,
+    )
+
+    await db.query(`
+      select update_invoice(
+        p_invoice_id => '${id}', p_client_id => '${clientId}', p_project_id => null,
+        p_place_of_supply => '27', p_intra_state => true, p_invoice_date => null, p_due_date => null,
+        p_subtotal => 2000, p_discount => 0, p_taxable => 2000, p_tax => 360, p_total => 2360,
+        p_items => '[]'::jsonb, p_notes => 'template cleared', p_template_id => null
+      );
+    `)
+    expect((await db.query<{ template_id: string | null }>(`select template_id from invoices where id = '${id}';`)).rows[0]!.template_id).toBeNull()
+  })
+
+  it("an invoice's template resolves to its own choice, else falls back to the company default", async () => {
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`update invoice_templates set is_default = false where company_id = '${companyId}';`)
+    await db.exec(
+      `insert into invoice_templates (company_id, name, layout_json, is_default)
+       values ('${companyId}', 'Default Layout', '{"show_gst": true}'::jsonb, true);`,
+    )
+    const own = await db.query<{ id: string }>(
+      `insert into invoice_templates (company_id, name, layout_json)
+       values ('${companyId}', 'No GST Layout', '{"show_gst": false}'::jsonb) returning id;`,
+    )
+
+    const withOwn = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null, p_subtotal => 500, p_discount => 0,
+        p_taxable => 500, p_tax => 0, p_total => 500, p_items => '[]'::jsonb,
+        p_notes => null, p_template_id => '${own.rows[0]!.id}'
+      );
+    `)
+    const withoutOwn = await db.query<{ id: string }>(`
+      select * from create_invoice(
+        p_client_id => '${clientId}', p_project_id => null, p_place_of_supply => '27',
+        p_invoice_date => null, p_due_date => null, p_subtotal => 500, p_discount => 0,
+        p_taxable => 500, p_tax => 0, p_total => 500, p_items => '[]'::jsonb, p_notes => null
+      );
+    `)
+
+    const resolve = async (invoiceId: string) =>
+      (
+        await db.query<{ show_gst_text: string }>(`
+          select coalesce(
+            (select it.layout_json from invoice_templates it where it.id = i.template_id),
+            (select it.layout_json from invoice_templates it where it.company_id = i.company_id and it.is_default = true limit 1)
+          ) ->> 'show_gst' as show_gst_text
+          from invoices i where i.id = '${invoiceId}';
+        `)
+      ).rows[0]!.show_gst_text
+
+    expect(await resolve(withOwn.rows[0]!.id)).toBe('false')
+    expect(await resolve(withoutOwn.rows[0]!.id)).toBe('true')
   })
 })
 
@@ -1956,6 +2120,29 @@ describe('shoot details (0038)', () => {
          values ('${company.rows[0]!.id}', 'moodboard', 'x');`,
       ),
     ).rejects.toThrow()
+  })
+
+  it('a shoot round-trips its map link and start/end time, and both can be corrected after scheduling', async () => {
+    const company = await db.query<{ id: string }>(`select id from companies limit 1;`)
+    const companyId = company.rows[0]!.id
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Shoot client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Shoot client';`)
+    const proj = await db.query<{ id: string }>(
+      `select create_project_with_details('${client.rows[0]!.id}', 'Shoot Proj', 50000) as id;`,
+    )
+    const shoot = await db.query<{ id: string }>(
+      `insert into shoots (company_id, project_id, name, shoot_date, start_at, end_at, map_link)
+       values ('${companyId}', '${proj.rows[0]!.id}', 'Wedding day', '2026-05-01',
+               '2026-05-01T09:00:00Z', '2026-05-01T18:00:00Z', 'https://maps.example.com/wrong')
+       returning id;`,
+    )
+    const id = shoot.rows[0]!.id
+    await db.exec(`update shoots set map_link = 'https://maps.example.com/right', end_at = '2026-05-01T20:00:00Z' where id = '${id}';`)
+    const row = await db.query<{ map_link: string; start_at: Date; end_at: Date }>(
+      `select map_link, start_at, end_at from shoots where id = '${id}';`,
+    )
+    expect(row.rows[0]!.map_link).toBe('https://maps.example.com/right')
+    expect(row.rows[0]!.end_at.toISOString()).toBe('2026-05-01T20:00:00.000Z')
   })
 })
 
@@ -3333,6 +3520,36 @@ describe('CRM quotes, preferences, lost analysis (0041)', () => {
     const p = await db.query<{ prefs: { columns: string[] } }>(`select prefs from crm_user_prefs where user_id = '${owner}';`)
     expect(p.rows[0]!.prefs.columns).toEqual(['name'])
   })
+
+  it('a draft quote can be corrected in full -- title, lines, and notes together', async () => {
+    const lead = await add('Draft edit', '9876970020')
+    const q = await quote(lead)
+    const newItems = JSON.stringify([
+      { description: 'Photo + Video', quantity: 1, rate: 150000, amount: 150000, gst_rate: 18, taxable: 150000, cgst: 13500, sgst: 13500, igst: 0 },
+    ])
+    await db.query(`
+      select update_quote('${q.id}', 'Wedding package v2', current_date + 21, 'MH', true,
+        150000, 0, 150000, 27000, 177000, '${newItems}'::jsonb, 'Revised', 'Full in advance.');
+    `)
+    const row = await db.query<{ title: string; total: string; notes: string }>(
+      `select title, total, notes from crm_quotes where id = '${q.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ title: 'Wedding package v2', total: '177000.00', notes: 'Revised' })
+    const items = await db.query<{ description: string }>(`select description from crm_quote_items where quote_id = '${q.id}';`)
+    expect(items.rows.map((r) => r.description)).toEqual(['Photo + Video'])
+  })
+
+  it('a quote that has been sent can no longer be edited', async () => {
+    const lead = await add('Sent edit refused', '9876970021')
+    const q = await quote(lead)
+    await db.query(`select issue_quote_link('${q.id}', 48);`)
+    await expect(
+      db.query(`
+        select update_quote('${q.id}', 'x', null, 'MH', true, 0, 0, 0, 0, 0,
+          '[{"description":"x","quantity":1,"rate":1,"amount":1,"gst_rate":0,"taxable":1,"cgst":0,"sgst":0,"igst":0}]'::jsonb, null, null);
+      `),
+    ).rejects.toThrow(/cannot be edited/)
+  })
 })
 
 describe('CRM guards — execute privileges and cross-studio calls', () => {
@@ -4218,5 +4435,968 @@ describe('registration defers to a live invitation', () => {
     for (const e of ['expired@s.test', 'revoked@s.test', 'accepted@s.test', 'nobody@s.test']) {
       expect((await pending(e)).rows).toHaveLength(0)
     }
+  })
+})
+
+/**
+ * Lovable-parity additions: client relation/GSTIN, lead event fields, and the
+ * referral slug + public lookup. Each of these landed alongside a UI change,
+ * so this proves the SQL side independent of what the frontend sends.
+ */
+describe('Lovable parity: client, lead and referral fields (0065-0067)', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a client can carry a relation tag and a GSTIN', async () => {
+    const r = await db.query<{ id: string }>(
+      `insert into clients (company_id, name, relation, gstin)
+       values (get_current_company_id(), 'Acme', 'Referral', '27ABCDE1234F1Z5')
+       returning id;`,
+    )
+    const row = await db.query<{ relation: string; gstin: string }>(
+      `select relation, gstin from clients where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ relation: 'Referral', gstin: '27ABCDE1234F1Z5' })
+  })
+
+  it('a lead can carry an event type, date and location', async () => {
+    const r = await db.query<{ id: string }>(
+      `insert into crm_leads (company_id, phone, phone_norm, event_type, event_date, event_location)
+       values (get_current_company_id(), '9000000000', '9000000000', 'Wedding', '2026-12-14', 'Taj Palace, Jaipur')
+       returning id;`,
+    )
+    const row = await db.query<{ event_type: string; event_date: string; event_location: string }>(
+      `select event_type, event_date, event_location from crm_leads where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]!.event_type).toBe('Wedding')
+    expect(row.rows[0]!.event_location).toBe('Taj Palace, Jaipur')
+  })
+
+  it('generate_referral_slug is readable, unique, and stable to look up', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const a = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Wedding Referral', generate_referral_slug('Wedding Referral')) returning slug;`,
+    )
+    const b = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug) values ('${co}', 'Wedding Referral', generate_referral_slug('Wedding Referral')) returning slug;`,
+    )
+    expect(a.rows[0]!.slug).not.toBe(b.rows[0]!.slug)
+    expect(a.rows[0]!.slug).toMatch(/^wedding-referral-/)
+
+    const lookup = await db.query<{ v: { name: string; campaign_id: string } }>(
+      `select get_public_referral_campaign('${a.rows[0]!.slug}') as v;`,
+    )
+    expect(lookup.rows[0]!.v.name).toBe('Wedding Referral')
+  })
+
+  it('an ended campaign is not reachable through the public lookup', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const made = await db.query<{ slug: string }>(
+      `insert into referral_campaigns (company_id, name, slug, status)
+       values ('${co}', 'Old Promo', generate_referral_slug('Old Promo'), 'ended') returning slug;`,
+    )
+    const lookup = await db.query<{ v: unknown }>(`select get_public_referral_campaign('${made.rows[0]!.slug}') as v;`)
+    expect(lookup.rows[0]!.v).toBeNull()
+  })
+
+  it('the service catalog rejects a duplicate name per company', async () => {
+    await db.exec(`insert into services (company_id, name) values (get_current_company_id(), 'Wedding Photography');`)
+    await expect(
+      db.exec(`insert into services (company_id, name) values (get_current_company_id(), 'Wedding Photography');`),
+    ).rejects.toThrow()
+  })
+})
+
+/**
+ * Project Documents (terms dashboard) and Team Work Preview's admin-scoped
+ * filters -- both new call paths this session added, neither previously
+ * called by any test.
+ */
+describe('Lovable parity: project documents and per-assignee filters', () => {
+  let db: PGlite
+  let projectId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into clients (company_id, name, phone) values (get_current_company_id(), 'Acme', '9000000000');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values (get_current_company_id(), (select id from clients limit 1), 'Wedding', 100000, 'active');
+    `)
+    projectId = (await db.query<{ id: string }>(`select id from projects limit 1;`)).rows[0]!.id
+  })
+
+  it('issuing terms twice for a project keeps both documents, latest first', async () => {
+    await db.query(`select * from issue_terms_document(p_project_id => '${projectId}', p_rendered_body => 'v1');`)
+    await db.query(`select * from issue_terms_document(p_project_id => '${projectId}', p_rendered_body => 'v2');`)
+    const rows = await db.query<{ id: number }>(
+      `select count(*)::int as id from project_terms_documents where project_id = '${projectId}';`,
+    )
+    expect(rows.rows[0]!.id).toBe(2)
+  })
+
+  it("tasks and shoots can be filtered to one person's assignments", async () => {
+    await db.query(`select register_company_and_admin('Studio','Owner');`) // no-op, idempotent
+    const uid = OWNER
+    await db.exec(`
+      insert into tasks (company_id, title, status, priority) values (get_current_company_id(), 'Edit gallery', 'to_do', 'medium');
+      insert into task_assignees (company_id, task_id, user_id)
+        values (get_current_company_id(), (select id from tasks limit 1), '${uid}');
+    `)
+    const mine = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+        where exists (select 1 from task_assignees a where a.task_id = t.id and a.user_id = '${uid}');`,
+    )
+    expect(mine.rows[0]!.count).toBe(1)
+    const someoneElse = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+        where exists (select 1 from task_assignees a where a.task_id = t.id and a.user_id = '22222222-2222-2222-2222-222222222222');`,
+    )
+    expect(someoneElse.rows[0]!.count).toBe(0)
+  })
+})
+
+/**
+ * Task priorities catalogue (0007's company_task_priorities, orphaned until
+ * this session -- no route or contract referenced it before). Proves a task
+ * tagged with a custom code joins back to its label and tone.
+ */
+describe('Lovable parity: custom task priorities', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into company_task_priorities (company_id, code, label, tone, sort_order)
+        values (get_current_company_id(), 'rush', 'Rush', 'danger', 10);
+      insert into tasks (company_id, title, status, priority, custom_priority_code)
+        values (get_current_company_id(), 'Cull gallery', 'to_do', 'high', 'rush');
+      insert into tasks (company_id, title, status, priority)
+        values (get_current_company_id(), 'Untitled task', 'to_do', 'medium');
+    `)
+  })
+
+  it("a task tagged with a custom code resolves to that priority's label and tone", async () => {
+    const rows = await db.query<{ title: string; custom_priority_label: string | null; custom_priority_tone: string | null }>(`
+      select t.title, cp.label as custom_priority_label, cp.tone as custom_priority_tone
+        from tasks t
+        left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
+       where t.company_id = get_current_company_id()
+       order by t.title;
+    `)
+    expect(rows.rows).toEqual([
+      { title: 'Cull gallery', custom_priority_label: 'Rush', custom_priority_tone: 'danger' },
+      { title: 'Untitled task', custom_priority_label: null, custom_priority_tone: null },
+    ])
+  })
+
+  it('a duplicate priority code within the same company is rejected', async () => {
+    await expect(
+      db.exec(`insert into company_task_priorities (company_id, code, label) values (get_current_company_id(), 'rush', 'Also Rush');`),
+    ).rejects.toThrow()
+  })
+})
+
+/**
+ * Work submission reminders (0068). The setting, its default, and the sweep
+ * that turns an overdue-soon task with no submission into a notification --
+ * none of this existed before this session; the old app had the setting,
+ * the rebuild had neither the setting nor the sweep.
+ */
+describe('Lovable parity: work submission reminders', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('defaults to enabled with 7/3/1 day thresholds before any setting exists', async () => {
+    const r = await db.query<{ v: { enabled: boolean; reminder_days: number[] } }>(
+      `select get_work_submission_reminder_settings() as v;`,
+    )
+    expect(r.rows[0]!.v).toEqual({ enabled: true, reminder_days: [7, 3, 1] })
+  })
+
+  it('the owner can change the cadence, and it sticks', async () => {
+    await db.query(`select set_work_submission_reminder_settings(true, array[14,7,1,0]);`)
+    const r = await db.query<{ v: { reminder_days: number[] } }>(`select get_work_submission_reminder_settings() as v;`)
+    expect(r.rows[0]!.v.reminder_days).toEqual([14, 7, 1, 0])
+  })
+
+  it('nudges the assignee of a task due at a configured threshold with no submission yet, once per day', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into tasks (company_id, title, status, priority, due_date)
+        values ('${co}', 'Edit gallery', 'to_do', 'high', current_date + 1);
+      insert into task_assignees (company_id, task_id, user_id)
+        values ('${co}', (select id from tasks where title = 'Edit gallery'), '${OWNER}');
+    `)
+    const first = await db.query<{ v: { tasks_due: number; notifications_created: number } }>(
+      `select run_work_submission_reminder_cron(false) as v;`,
+    )
+    expect(first.rows[0]!.v.tasks_due).toBe(1)
+    expect(first.rows[0]!.v.notifications_created).toBe(1)
+
+    const second = await db.query<{ v: { notifications_created: number } }>(
+      `select run_work_submission_reminder_cron(false) as v;`,
+    )
+    expect(second.rows[0]!.v.notifications_created).toBe(0)
+  })
+
+  it('a task with an approved submission is not nudged again', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const taskId = (
+      await db.query<{ id: string }>(
+        `insert into tasks (company_id, title, status, priority, due_date)
+         values ('${co}', 'Deliver album', 'to_do', 'high', current_date + 1) returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(`
+      insert into task_assignees (company_id, task_id, user_id) values ('${co}', '${taskId}', '${OWNER}');
+      insert into team_work_submissions (company_id, task_id, submitted_by, submission_link, status)
+        values ('${co}', '${taskId}', '${OWNER}', 'https://example.com/album', 'approved');
+    `)
+    const rows = await db.query<{ count: number }>(
+      `select count(*)::int as count
+         from tasks t
+         join task_assignees a on a.task_id = t.id
+        where t.id = '${taskId}'
+          and not exists (select 1 from team_work_submissions w where w.task_id = t.id and w.status <> 'rejected');`,
+    )
+    expect(rows.rows[0]!.count).toBe(0)
+  })
+})
+
+/**
+ * Employee compensation structure (0069). The old wizard's flexible pay
+ * model -- payout type, commission, stipend, an effective date range --
+ * reduced to a flat `salary` in the rebuild. Added as columns on `users`
+ * (0069's own comment explains why, not a new table): this proves they
+ * round-trip and that the date-range check constraint actually holds.
+ */
+describe('Lovable parity: employee compensation structure', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a per-shoot payout with a revenue commission and a stipend round-trips', async () => {
+    await db.exec(`
+      update users set payout_type = 'per_shoot', commission_pct = 12.5, commission_basis = 'revenue',
+        stipend_amount = 2000, pay_effective_from = '2026-01-01', compensation_notes = 'Second shooter rate'
+      where user_id = '${OWNER}';
+    `)
+    const row = await db.query<{
+      payout_type: string
+      commission_pct: string
+      commission_basis: string
+      stipend_amount: string
+    }>(`select payout_type, commission_pct, commission_basis, stipend_amount from users where user_id = '${OWNER}';`)
+    expect(row.rows[0]).toEqual({
+      payout_type: 'per_shoot',
+      commission_pct: '12.50',
+      commission_basis: 'revenue',
+      stipend_amount: '2000.00',
+    })
+  })
+
+  it('an effective-to date before effective-from is rejected', async () => {
+    await expect(
+      db.exec(`update users set pay_effective_from = '2026-06-01', pay_effective_to = '2026-01-01' where user_id = '${OWNER}';`),
+    ).rejects.toThrow()
+  })
+
+  it('an unrecognised payout type is rejected', async () => {
+    await expect(
+      db.exec(`update users set payout_type = 'whenever_i_feel_like_it' where user_id = '${OWNER}';`),
+    ).rejects.toThrow()
+  })
+})
+
+/**
+ * Round 2 of the Lovable parity pass: fixed-overhead allocation, invoice/
+ * quote numbering exposure, expense GST fields, and the lead fields found on
+ * a second read of the old lead form.
+ */
+describe('Lovable parity round 2: overhead allocation and company settings', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a company-wide fixed-overhead expense is split equally across every active project', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into clients (company_id, name) values ('${co}', 'Acme');
+      insert into projects (company_id, client_id, name, package_cost, status) values
+        ('${co}', (select id from clients limit 1), 'Wedding A', 1000, 'active'),
+        ('${co}', (select id from clients limit 1), 'Wedding B', 1000, 'active'),
+        ('${co}', (select id from clients limit 1), 'Cancelled shoot', 1000, 'cancelled');
+      insert into expenses (company_id, project_id, category, amount, is_fixed_overhead)
+        values ('${co}', null, 'Rent', 1000, true);
+    `)
+    const rows = await db.query<{ name: string; project_expenses: string }>(
+      `select name, project_expenses from project_financials where company_id = '${co}' order by name;`,
+    )
+    const byName = Object.fromEntries(rows.rows.map((r) => [r.name, Number(r.project_expenses)]))
+    expect(byName['Wedding A']).toBe(500)
+    expect(byName['Wedding B']).toBe(500)
+    // Cancelled projects don't absorb overhead, and their own direct expenses stay untouched (none here).
+    expect(byName['Cancelled shoot']).toBe(0)
+  })
+
+  it('a project-linked expense is unaffected by the overhead split', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const proj = (await db.query<{ id: string }>(`select id from projects where name = 'Wedding A';`)).rows[0]!.id
+    await db.exec(`insert into expenses (company_id, project_id, category, amount) values ('${co}', '${proj}', 'Venue deposit', 200);`)
+    const row = await db.query<{ project_expenses: string }>(
+      `select project_expenses from project_financials where project_id = '${proj}';`,
+    )
+    // 200 direct + 500 overhead share from the previous test's fixture.
+    expect(Number(row.rows[0]!.project_expenses)).toBe(700)
+  })
+
+  it('a company with no fixed-overhead expenses allocates nothing extra', async () => {
+    const db2 = await freshDb()
+    await db2.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner2@s.test');`)
+    await asUser(db2, OWNER)
+    await db2.query(`select register_company_and_admin('Studio 2','Owner');`)
+    const co2 = (await db2.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db2.exec(`
+      insert into clients (company_id, name) values ('${co2}', 'Client');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values ('${co2}', (select id from clients limit 1), 'Solo project', 1000, 'active');
+    `)
+    const row = await db2.query<{ project_expenses: string }>(`select project_expenses from project_financials where company_id = '${co2}';`)
+    expect(Number(row.rows[0]!.project_expenses)).toBe(0)
+  })
+
+  it('invoice/quote numbering and the logo default correctly and can be changed', async () => {
+    const before = await db.query<{ invoice_number_prefix: string; invoice_next_number: number; quote_number_prefix: string }>(
+      `select invoice_number_prefix, invoice_next_number, quote_number_prefix from companies where id = get_current_company_id();`,
+    )
+    expect(before.rows[0]).toEqual({ invoice_number_prefix: 'INV-', invoice_next_number: 1, quote_number_prefix: 'Q-' })
+    await db.exec(`update companies set invoice_number_prefix = 'IPC-', avatar_url = 'https://example.com/logo.png' where id = get_current_company_id();`)
+    const after = await db.query<{ invoice_number_prefix: string; avatar_url: string }>(
+      `select invoice_number_prefix, avatar_url from companies where id = get_current_company_id();`,
+    )
+    expect(after.rows[0]).toEqual({ invoice_number_prefix: 'IPC-', avatar_url: 'https://example.com/logo.png' })
+  })
+
+  it('an expense can carry a GST rate now that the form exposes it', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into expenses (company_id, category, amount, gst_treatment, gst_rate) values ('${co}', 'Software', 5000, 'gst_applicable', 18);`)
+    const row = await db.query<{ gst_treatment: string; gst_rate: string }>(
+      `select gst_treatment, gst_rate from expenses where category = 'Software';`,
+    )
+    expect(row.rows[0]).toEqual({ gst_treatment: 'gst_applicable', gst_rate: '18.00' })
+  })
+
+  it('a lead carries an alternate phone and a city', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into crm_leads (company_id, phone, phone_norm, alternate_phone, city)
+        values ('${co}', '9000000001', '9000000001', '9000000002', 'Mumbai');
+    `)
+    const row = await db.query<{ alternate_phone: string; city: string }>(
+      `select alternate_phone, city from crm_leads where phone = '9000000001';`,
+    )
+    expect(row.rows[0]).toEqual({ alternate_phone: '9000000002', city: 'Mumbai' })
+  })
+})
+
+/**
+ * Round 3 of the Lovable parity pass: parties (vendors/freelancers) were a
+ * completely orphaned table -- no route anywhere referenced them, despite
+ * both expense tables already joining to one for display. Both expense forms
+ * could never actually set party_id, gst_treatment (personal), gst_rate
+ * (personal), or expense_date (personal) -- everything below now round-trips
+ * because the form actually sends it.
+ */
+describe('Lovable parity round 3: parties and expense form completeness', () => {
+  let db: PGlite
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+  })
+
+  it('a party can be created, is unique enough to be useful, and a company expense can reference it', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const party = await db.query<{ id: string }>(
+      `insert into parties (company_id, name, kind) values ('${co}', 'Prop House', 'vendor') returning id;`,
+    )
+    await db.exec(`
+      insert into expenses (company_id, party_id, category, amount, gst_treatment, gst_rate)
+        values ('${co}', '${party.rows[0]!.id}', 'Props', 3000, 'gst_applicable', 12);
+    `)
+    const row = await db.query<{ party_name: string; gst_rate: string }>(`
+      select p.name as party_name, e.gst_rate from expenses e
+      join parties p on p.id = e.party_id where e.category = 'Props';
+    `)
+    expect(row.rows[0]).toEqual({ party_name: 'Prop House', gst_rate: '12.00' })
+  })
+
+  it('deleting a party in use leaves the expense in place with the reference cleared', async () => {
+    const partyId = (await db.query<{ id: string }>(`select party_id as id from expenses where category = 'Props';`)).rows[0]!.id
+    await db.exec(`delete from parties where id = '${partyId}';`)
+    const row = await db.query<{ category: string; party_id: string | null }>(`select category, party_id from expenses where category = 'Props';`)
+    expect(row.rows[0]).toEqual({ category: 'Props', party_id: null })
+  })
+
+  it('a personal expense carries its own date, party, and GST rate', async () => {
+    const co = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    const party = (
+      await db.query<{ id: string }>(`insert into parties (company_id, name, kind) values ('${co}', 'Rental Co', 'vendor') returning id;`)
+    ).rows[0]!.id
+    await db.exec(`
+      insert into personal_expense (company_id, user_id, party_id, amount, expense_date, gst_treatment, gst_rate)
+        values ('${co}', '${OWNER}', '${party}', 750, '2026-03-01', 'gst_applicable', 5);
+    `)
+    const r = await db.query<{ v: { items: { party_name: string; expense_date: string; gst_rate: number }[] } }>(
+      `select list_personal_expenses(null, null, null, 10) as v;`,
+    )
+    const item = r.rows[0]!.v.items.find((i) => i.expense_date === '2026-03-01')
+    expect(item?.party_name).toBe('Rental Co')
+    expect(item?.gst_rate).toBe(5)
+  })
+})
+
+/**
+ * Round 4: data custody linkage and the work-submission location note.
+ *
+ * The old data-management form linked every card to the shoot it came off;
+ * the rebuild's create form hardcoded shoot_id/project_id to null on every
+ * submission, so a logged card floated with no way to tell which project it
+ * belonged to. Same story for work submissions and location_note, which has
+ * existed on team_work_submissions since 0010 and was read by nothing.
+ */
+describe('Lovable parity round 4: data custody linkage, work location note', () => {
+  let db: PGlite
+  let projectId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`
+      insert into clients (company_id, name) values (get_current_company_id(), 'Acme');
+      insert into projects (company_id, client_id, name, package_cost, status)
+        values (get_current_company_id(), (select id from clients limit 1), 'Wedding', 100000, 'active');
+    `)
+    projectId = (await db.query<{ id: string }>(`select id from projects limit 1;`)).rows[0]!.id
+  })
+
+  it('a data record can be linked to the project it came from, and reads back joined', async () => {
+    await db.exec(`
+      insert into shoot_data_records (company_id, project_id, data_label, data_type, card_count, size_gb, copied_by_uid)
+        values (get_current_company_id(), '${projectId}', 'CF Card A', 'Photos (RAW)', 2, 64, '${OWNER}');
+    `)
+    const row = await db.query<{ project_name: string; data_type: string }>(`
+      select p.name as project_name, d.data_type from shoot_data_records d
+      join projects p on p.id = d.project_id where d.data_label = 'CF Card A';
+    `)
+    expect(row.rows[0]).toEqual({ project_name: 'Wedding', data_type: 'Photos (RAW)' })
+  })
+
+  it('submit_work has exactly one signature, and the API call shape (4 named args) resolves without ambiguity', async () => {
+    const overloads = await db.query<{ n: number }>(`select count(*)::int as n from pg_proc where proname = 'submit_work';`)
+    expect(overloads.rows[0]!.n).toBe(1)
+    const r = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => '${projectId}', p_link => 'https://drive.example.com/x', p_notes => 'test') as id;`,
+    )
+    expect(r.rows[0]!.id).toBeTruthy()
+  })
+
+  it('a work submission carries its location note separately from the link', async () => {
+    const r = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => '${projectId}', p_link => 'https://drive.example.com/y', p_notes => null, p_location_note => 'Backup HDD 3') as id;`,
+    )
+    const row = await db.query<{ location_note: string; submission_link: string }>(
+      `select location_note, submission_link from team_work_submissions where id = '${r.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ location_note: 'Backup HDD 3', submission_link: 'https://drive.example.com/y' })
+  })
+})
+
+/**
+ * Round 5: post-creation editability. The audit that produced rounds 1-4
+ * checked that every create form had the right fields; this round checks the
+ * matching claim -- that a team member or a company expense entered wrong can
+ * actually be corrected afterwards, not just created. No new migration: both
+ * routes patch columns that already existed.
+ */
+describe('Lovable parity round 5: editing a team member and a company expense', () => {
+  let db: PGlite
+  let companyId: string
+  const MEMBER = '99999999-9999-9999-9999-999999999999'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${MEMBER}', 'member@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email, phone, engagement_type)
+       values ('${MEMBER}', '${companyId}', 'employee', 'Rahul Sharma', 'member@s.test', '9000000001', 'in_house');`,
+    )
+  })
+
+  it('a misspelled team member name and a wrong engagement type can both be corrected', async () => {
+    await db.exec(
+      `update users set name = 'Rahul Verma', engagement_type = 'freelancer', phone = '9000000099' where user_id = '${MEMBER}';`,
+    )
+    const row = await db.query<{ name: string; engagement_type: string; phone: string }>(
+      `select name, engagement_type, phone from users where user_id = '${MEMBER}';`,
+    )
+    expect(row.rows[0]).toEqual({ name: 'Rahul Verma', engagement_type: 'freelancer', phone: '9000000099' })
+  })
+
+  it('a company expense logged with the wrong amount, date, and GST rate can be corrected', async () => {
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, category, amount, expense_date, gst_treatment, gst_rate)
+       values ('${companyId}', 'Travel', 500, '2026-01-01', 'non_gst', 0) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(
+      `update expenses set amount = 750, expense_date = '2026-01-02', gst_treatment = 'gst_applicable', gst_rate = 5 where id = '${id}';`,
+    )
+    const row = await db.query<{ amount: string; expense_date: Date; gst_treatment: string; gst_rate: string }>(
+      `select amount, expense_date, gst_treatment, gst_rate from expenses where id = '${id}';`,
+    )
+    expect({ ...row.rows[0], expense_date: row.rows[0]!.expense_date.toISOString().slice(0, 10) }).toEqual({
+      amount: '750.00',
+      expense_date: '2026-01-02',
+      gst_treatment: 'gst_applicable',
+      gst_rate: '5.00',
+    })
+  })
+
+  it('an expense logged against the wrong project can be re-pointed to another, or unlinked to become an overhead cost', async () => {
+    const [projA, projB] = await Promise.all(
+      ['Wedding A', 'Wedding B'].map(async (name) => {
+        await db.exec(`insert into clients (company_id, name) values ('${companyId}', '${name} client');`)
+        const client = await db.query<{ id: string }>(`select id from clients where name = '${name} client';`)
+        const proj = await db.query<{ id: string }>(
+          `insert into projects (company_id, client_id, name, package_cost, status)
+           values ('${companyId}', '${client.rows[0]!.id}', '${name}', 50000, 'active') returning id;`,
+        )
+        return proj.rows[0]!.id
+      }),
+    )
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, project_id, category, amount) values ('${companyId}', '${projA}', 'Venue', 1000) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(`update expenses set project_id = '${projB}' where id = '${id}';`)
+    expect((await db.query<{ project_id: string }>(`select project_id from expenses where id = '${id}';`)).rows[0]!.project_id).toBe(projB)
+    await db.exec(`update expenses set project_id = null, is_fixed_overhead = true where id = '${id}';`)
+    const unlinked = await db.query<{ project_id: string | null; is_fixed_overhead: boolean }>(
+      `select project_id, is_fixed_overhead from expenses where id = '${id}';`,
+    )
+    expect(unlinked.rows[0]).toEqual({ project_id: null, is_fixed_overhead: true })
+  })
+
+  it('a deleted expense is gone, not merely hidden', async () => {
+    const created = await db.query<{ id: string }>(
+      `insert into expenses (company_id, category, amount) values ('${companyId}', 'Misc', 100) returning id;`,
+    )
+    const id = created.rows[0]!.id
+    await db.exec(`delete from expenses where id = '${id}';`)
+    const row = await db.query(`select id from expenses where id = '${id}';`)
+    expect(row.rows.length).toBe(0)
+  })
+
+  it('a misspelled vendor name can be corrected in place, so every expense already pointing at it picks up the fix', async () => {
+    const party = await db.query<{ id: string }>(
+      `insert into parties (company_id, name, kind) values ('${companyId}', 'Prop Hosue', 'vendor') returning id;`,
+    )
+    const id = party.rows[0]!.id
+    await db.exec(`insert into expenses (company_id, party_id, category, amount) values ('${companyId}', '${id}', 'Props', 500);`)
+    await db.exec(`update parties set name = 'Prop House', kind = 'freelancer' where id = '${id}';`)
+    const row = await db.query<{ party_name: string }>(
+      `select p.name as party_name from expenses e join parties p on p.id = e.party_id where e.category = 'Props';`,
+    )
+    expect(row.rows[0]).toEqual({ party_name: 'Prop House' })
+  })
+
+  it('a data record\'s label, size, and project link can all be corrected after logging', async () => {
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Data client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Data client';`)
+    const proj = await db.query<{ id: string }>(
+      `insert into projects (company_id, client_id, name, package_cost, status)
+       values ('${companyId}', '${client.rows[0]!.id}', 'Data Wedding', 50000, 'active') returning id;`,
+    )
+    const projectId = proj.rows[0]!.id
+    const record = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, data_type, card_count, size_gb, copied_by_uid)
+       values ('${companyId}', 'CF Card X', 'Photos (RAW)', 1, 32, '${OWNER}') returning id;`,
+    )
+    const id = record.rows[0]!.id
+    await db.exec(
+      `update shoot_data_records set data_label = 'CF Card X (relabeled)', size_gb = 64, project_id = '${projectId}' where id = '${id}';`,
+    )
+    const row = await db.query<{ data_label: string; size_gb: string; project_id: string }>(
+      `select data_label, size_gb, project_id from shoot_data_records where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ data_label: 'CF Card X (relabeled)', size_gb: '64.00', project_id: projectId })
+  })
+
+  it('an unverified data record can be deleted outright, but one with a confirmed copy cannot', async () => {
+    const pending = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, card_count, size_gb, copied_by_uid)
+       values ('${companyId}', 'CF Card Pending', 1, 10, '${OWNER}') returning id;`,
+    )
+    const verified = await db.query<{ id: string }>(
+      `insert into shoot_data_records (company_id, data_label, card_count, size_gb, copied_by_uid, primary_status)
+       values ('${companyId}', 'CF Card Verified', 1, 10, '${OWNER}', 'verified') returning id;`,
+    )
+    const guardedDelete = `delete from shoot_data_records
+      where id = $1 and primary_status = 'pending' and backup_status = 'pending' returning id;`
+    const okDelete = await db.query(guardedDelete.replace('$1', `'${pending.rows[0]!.id}'`))
+    expect(okDelete.rows.length).toBe(1)
+    const blockedDelete = await db.query(guardedDelete.replace('$1', `'${verified.rows[0]!.id}'`))
+    expect(blockedDelete.rows.length).toBe(0)
+    const stillThere = await db.query(`select id from shoot_data_records where id = '${verified.rows[0]!.id}';`)
+    expect(stillThere.rows.length).toBe(1)
+  })
+})
+
+/**
+ * Round 6: a task could only be created and status-flipped -- a wrong title,
+ * priority, due date, or assignee list had no fix path short of deleting and
+ * recreating (and there was no delete either). PATCH /tasks/:id now covers
+ * the same fields the create form sets, plus replacing the assignee set.
+ */
+describe('Lovable parity round 6: editing and deleting a task', () => {
+  let db: PGlite
+  let taskId: string
+  const EMP_A = '77777777-7777-7777-7777-777777777771'
+  const EMP_B = '77777777-7777-7777-7777-777777777772'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into auth.users (id, email) values ('${EMP_A}', 'a@s.test'), ('${EMP_B}', 'b@s.test');
+      insert into users (user_id, company_id, role, name, email) values
+        ('${EMP_A}', '${companyId}', 'employee', 'Editor A', 'a@s.test'),
+        ('${EMP_B}', '${companyId}', 'employee', 'Editor B', 'b@s.test');
+    `)
+    const created = await db.query<{ id: string }>(
+      `select create_task_with_assignees(p_project_id => null, p_deliverable_id => null, p_title => 'Cull photos',
+         p_assignees => array['${EMP_A}']::uuid[]) as id;`,
+    )
+    taskId = created.rows[0]!.id
+  })
+
+  it('a task\'s title, priority, and due date can all be corrected after creation', async () => {
+    await db.exec(
+      `update tasks set title = 'Cull and select', priority = 'urgent', due_date = '2026-04-01' where id = '${taskId}';`,
+    )
+    const row = await db.query<{ title: string; priority: string; due_date: Date }>(
+      `select title, priority, due_date from tasks where id = '${taskId}';`,
+    )
+    expect(row.rows[0]!.title).toBe('Cull and select')
+    expect(row.rows[0]!.priority).toBe('urgent')
+    expect(row.rows[0]!.due_date.toISOString().slice(0, 10)).toBe('2026-04-01')
+  })
+
+  it('reassigning a task replaces the assignee set rather than adding to it', async () => {
+    await db.exec(`delete from task_assignees where task_id = '${taskId}';`)
+    await db.exec(`insert into task_assignees (task_id, user_id, company_id)
+      values ('${taskId}', '${EMP_B}', (select get_current_company_id()));`)
+    const assignees = await db.query<{ user_id: string }>(`select user_id from task_assignees where task_id = '${taskId}';`)
+    expect(assignees.rows.map((r) => r.user_id)).toEqual([EMP_B])
+  })
+
+  it('a deleted task takes its assignee rows with it, cascade, not left dangling', async () => {
+    const before = await db.query<{ n: string }>(`select count(*)::text as n from task_assignees where task_id = '${taskId}';`)
+    expect(Number(before.rows[0]!.n)).toBeGreaterThan(0)
+    await db.exec(`delete from tasks where id = '${taskId}';`)
+    const after = await db.query<{ n: string }>(`select count(*)::text as n from task_assignees where task_id = '${taskId}';`)
+    expect(Number(after.rows[0]!.n)).toBe(0)
+  })
+})
+
+describe('Lovable parity round 7: editing a project deliverable', () => {
+  let db: PGlite
+  let projectId: string
+  let deliverableId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    await db.exec(`insert into clients (company_id, name) values (get_current_company_id(), 'Deliverable client');`)
+    const client = await db.query<{ id: string }>(`select id from clients where name = 'Deliverable client';`)
+    const proj = await db.query<{ id: string }>(
+      `select create_project_with_details('${client.rows[0]!.id}', 'Deliverable Proj', 50000) as id;`,
+    )
+    projectId = proj.rows[0]!.id
+    await db.exec(
+      `insert into deliverables (company_id, project_id, title, show_on_quotation)
+       values (get_current_company_id(), '${projectId}', 'Album', true);`,
+    )
+    deliverableId = (await db.query<{ id: string }>(`select id from deliverables where project_id = '${projectId}';`)).rows[0]!.id
+  })
+
+  it('a deliverable\'s title and quotation visibility can be corrected without touching the others', async () => {
+    await db.exec(
+      `update deliverables set title = 'Wedding Album (Premium)', show_on_quotation = false where id = '${deliverableId}';`,
+    )
+    const row = await db.query<{ title: string; show_on_quotation: boolean }>(
+      `select title, show_on_quotation from deliverables where id = '${deliverableId}';`,
+    )
+    expect(row.rows[0]).toEqual({ title: 'Wedding Album (Premium)', show_on_quotation: false })
+  })
+})
+
+/**
+ * Round 8: a batch of smaller settings/reference objects that could be
+ * created and deleted but never corrected in place -- a mistyped priority
+ * label, a bundle checklist, a lead template, a picklist value, a pending
+ * invitation, an unpaid payout, and a work submission awaiting review.
+ */
+describe('Lovable parity round 8: editing settings, invitations, payouts, and work submissions', () => {
+  let db: PGlite
+  let companyId: string
+  const MEMBER = '88888888-8888-8888-8888-888888888881'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`insert into auth.users (id, email) values ('${MEMBER}', 'member8@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${MEMBER}', '${companyId}', 'employee', 'Member Eight', 'member8@s.test');`,
+    )
+  })
+
+  it('a custom task priority label and tone can be corrected, but its code stays fixed', async () => {
+    const p = await db.query<{ id: string }>(
+      `insert into company_task_priorities (company_id, code, label, tone) values ('${companyId}', 'rush', 'Rsh', 'neutral') returning id;`,
+    )
+    await db.exec(`update company_task_priorities set label = 'Rush', tone = 'danger' where id = '${p.rows[0]!.id}';`)
+    const row = await db.query<{ code: string; label: string; tone: string }>(
+      `select code, label, tone from company_task_priorities where id = '${p.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ code: 'rush', label: 'Rush', tone: 'danger' })
+  })
+
+  it('a task bundle can be renamed and have its checklist replaced wholesale', async () => {
+    const bundle = await db.query<{ id: string }>(
+      `insert into task_bundles (company_id, name) values ('${companyId}', 'Wedding editin') returning id;`,
+    )
+    const bundleId = bundle.rows[0]!.id
+    await db.exec(`insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order)
+      values ('${bundleId}', '${companyId}', 'Cull', 'medium', 0);`)
+    await db.exec(`update task_bundles set name = 'Wedding editing' where id = '${bundleId}';`)
+    await db.exec(`delete from task_bundle_items where bundle_id = '${bundleId}';`)
+    await db.exec(`insert into task_bundle_items (bundle_id, company_id, title, priority, sort_order) values
+      ('${bundleId}', '${companyId}', 'Cull and select', 'medium', 0),
+      ('${bundleId}', '${companyId}', 'Colour grade', 'medium', 1);`)
+    const name = await db.query<{ name: string }>(`select name from task_bundles where id = '${bundleId}';`)
+    expect(name.rows[0]!.name).toBe('Wedding editing')
+    const items = await db.query<{ title: string }>(`select title from task_bundle_items where bundle_id = '${bundleId}' order by sort_order;`)
+    expect(items.rows.map((r) => r.title)).toEqual(['Cull and select', 'Colour grade'])
+  })
+
+  it('a lead send-template\'s wording can be fixed after saving it', async () => {
+    const t = await db.query<{ id: string }>(
+      `insert into crm_templates (company_id, name, body, kind) values ('${companyId}', 'Follow-up', 'Hi {{nam}}', 'whatsapp') returning id;`,
+    )
+    await db.exec(`update crm_templates set body = 'Hi {{name}}, thanks for reaching out!' where id = '${t.rows[0]!.id}';`)
+    const row = await db.query<{ body: string }>(`select body from crm_templates where id = '${t.rows[0]!.id}';`)
+    expect(row.rows[0]!.body).toBe('Hi {{name}}, thanks for reaching out!')
+  })
+
+  it('a custom lookup value and its active flag can both be corrected', async () => {
+    const l = await db.query<{ id: string }>(
+      `insert into custom_lookups (company_id, category, value) values ('${companyId}', 'lead_source', 'Instagam') returning id;`,
+    )
+    await db.exec(`update custom_lookups set value = 'Instagram', is_active = false where id = '${l.rows[0]!.id}';`)
+    const row = await db.query<{ value: string; is_active: boolean }>(`select value, is_active from custom_lookups where id = '${l.rows[0]!.id}';`)
+    expect(row.rows[0]).toEqual({ value: 'Instagram', is_active: false })
+  })
+
+  it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {
+    const inv = await db.query<{ id: string }>(
+      `insert into user_invitations (company_id, email, token_hash, role, pending_name, expires_at)
+       values ('${companyId}', 'invitee@s.test', 'x', 'employee', 'Rahul Sharm', now() + interval '7 days') returning id;`,
+    )
+    await db.exec(`update user_invitations set pending_name = 'Rahul Sharma', role = 'manager' where id = '${inv.rows[0]!.id}';`)
+    const row = await db.query<{ pending_name: string; role: string }>(
+      `select pending_name, role from user_invitations where id = '${inv.rows[0]!.id}';`,
+    )
+    expect(row.rows[0]).toEqual({ pending_name: 'Rahul Sharma', role: 'manager' })
+  })
+
+  it('a pending payout\'s amount can be corrected, but the same guarded update is a no-op once it is completed', async () => {
+    const payoutId = await db.query<{ id: string }>(
+      `select create_team_payout('${MEMBER}', 5000, current_date - 7, current_date) as id;`,
+    )
+    const id = payoutId.rows[0]!.id
+    const fixed = await db.query(`update team_payouts set amount = 6000 where id = '${id}' and status = 'pending' returning id;`)
+    expect(fixed.rows.length).toBe(1)
+    await db.exec(`update team_payouts set status = 'completed' where id = '${id}';`)
+    const blocked = await db.query(`update team_payouts set amount = 9999 where id = '${id}' and status = 'pending' returning id;`)
+    expect(blocked.rows.length).toBe(0)
+    const row = await db.query<{ amount: string }>(`select amount from team_payouts where id = '${id}';`)
+    expect(Number(row.rows[0]!.amount)).toBe(6000)
+  })
+
+  it('a work submission\'s link and notes can be fixed by the person who submitted it, before review', async () => {
+    await asUser(db, MEMBER)
+    const sub = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/wrong') as id;`,
+    )
+    const id = sub.rows[0]!.id
+    await db.query(`select update_work_submission('${id}', 'https://drive.example.com/right', 'fixed', 'HDD 2');`)
+    const row = await db.query<{ submission_link: string; notes: string; location_note: string }>(
+      `select submission_link, notes, location_note from team_work_submissions where id = '${id}';`,
+    )
+    expect(row.rows[0]).toEqual({ submission_link: 'https://drive.example.com/right', notes: 'fixed', location_note: 'HDD 2' })
+  })
+
+  it('a work submission cannot be edited by someone else, or once it has been reviewed', async () => {
+    await asUser(db, MEMBER)
+    const sub = await db.query<{ id: string }>(
+      `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/x') as id;`,
+    )
+    const id = sub.rows[0]!.id
+
+    const OTHER = '88888888-8888-8888-8888-888888888882'
+    await asUser(db, OWNER)
+    await db.exec(`insert into auth.users (id, email) values ('${OTHER}', 'other8@s.test');`)
+    await db.exec(
+      `insert into users (user_id, company_id, role, name, email)
+       values ('${OTHER}', '${companyId}', 'employee', 'Other Eight', 'other8@s.test');`,
+    )
+    await asUser(db, OTHER)
+    await expect(db.query(`select update_work_submission('${id}', 'https://hijack.example.com');`)).rejects.toThrow(/not allowed/)
+
+    await asUser(db, OWNER)
+    await db.query(`select review_work(p_submission_id => '${id}', p_approve => true);`)
+    await expect(db.query(`select update_work_submission('${id}', 'https://drive.example.com/after');`)).rejects.toThrow(/cannot be edited/)
+  })
+})
+
+/**
+ * GET /team/members backs every "who can this go to" picker in the CRM --
+ * deal owner, distribution rota, workflow assign/notify steps, timeline
+ * actor, booking slots. It filtered only deleted_at, so a member the studio
+ * deactivated (status = 'inactive', not removed) still showed up as
+ * assignable everywhere, even though they can no longer log in to act on it.
+ */
+describe('team members picker excludes deactivated staff, not just removed staff', () => {
+  let db: PGlite
+  const owner = '99999999-1111-1111-1111-999999999999'
+  const active = '99999999-1111-1111-1111-999999999901'
+  const inactive = '99999999-1111-1111-1111-999999999902'
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${owner}', 'owner@picker.test');`)
+    await asUser(db, owner)
+    await db.query(`select register_company_and_admin('Picker Studio','Owner');`)
+    const companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+    await db.exec(`
+      insert into auth.users (id, email) values ('${active}', 'active@picker.test'), ('${inactive}', 'inactive@picker.test');
+      insert into users (user_id, company_id, role, name, email, status) values
+        ('${active}', '${companyId}', 'employee', 'Active Ana', 'active@picker.test', 'active'),
+        ('${inactive}', '${companyId}', 'employee', 'Inactive Ivan', 'inactive@picker.test', 'inactive');
+    `)
+  })
+
+  it('the picker query returns only active, non-deleted members', async () => {
+    const rows = await db.query<{ name: string }>(
+      `select name from users where deleted_at is null and status = 'active' order by name;`,
+    )
+    const names = rows.rows.map((r) => r.name)
+    expect(names).toContain('Active Ana')
+    expect(names).not.toContain('Inactive Ivan')
+  })
+})
+
+/**
+ * list_reminders() carried entity_type/entity_id since 0060 but never
+ * resolved a display name for the link -- the UI had nothing to show but a
+ * raw type and a uuid, so it never built a picker for it either (0077).
+ */
+describe('reminders resolve a display name for whatever they are linked to', () => {
+  let db: PGlite
+  let companyId: string
+
+  beforeAll(async () => {
+    db = await freshDb()
+    await db.exec(`insert into auth.users (id, email) values ('${OWNER}', 'owner@s.test');`)
+    await asUser(db, OWNER)
+    await db.query(`select register_company_and_admin('Studio','Owner');`)
+    companyId = (await db.query<{ c: string }>(`select get_current_company_id() as c`)).rows[0]!.c
+  })
+
+  it('resolves a lead, a project, a client, and an invoice by name, and leaves an unlinked reminder alone', async () => {
+    await db.exec(`insert into crm_leads (company_id, phone, phone_norm, name) values ('${companyId}', '9000000010', '9000000010', 'Sharma Deal');`)
+    const lead = (await db.query<{ id: string }>(`select id from crm_leads where phone = '9000000010';`)).rows[0]!.id
+
+    await db.exec(`insert into clients (company_id, name) values ('${companyId}', 'Verma Client');`)
+    const client = (await db.query<{ id: string }>(`select id from clients where name = 'Verma Client';`)).rows[0]!.id
+    const project = (await db.query<{ id: string }>(`select create_project_with_details('${client}', 'Verma Wedding', 50000) as id;`)).rows[0]!.id
+    const invoice = (
+      await db.query<{ id: string }>(
+        `select id from create_invoice('${client}', null, '27', current_date, null, 1000, 0, 1000, 180, 1180, '[]'::jsonb);`,
+      )
+    ).rows[0]!.id
+
+    await db.exec(`
+      insert into reminders (company_id, user_id, title, priority, entity_type, entity_id) values
+        ('${companyId}', '${OWNER}', 'Follow up on deal', 'high', 'lead', '${lead}'),
+        ('${companyId}', '${OWNER}', 'Check on project', 'medium', 'project', '${project}'),
+        ('${companyId}', '${OWNER}', 'Call client', 'low', 'client', '${client}'),
+        ('${companyId}', '${OWNER}', 'Chase invoice', 'urgent', 'invoice', '${invoice}'),
+        ('${companyId}', '${OWNER}', 'Buy printer paper', 'low', null, null);
+    `)
+
+    const result = await db.query<{ v: { items: { title: string; entity_type: string | null; entity_name: string | null }[] } }>(
+      `select list_reminders() as v;`,
+    )
+    const byTitle = new Map(result.rows[0]!.v.items.map((i) => [i.title, i]))
+    expect(byTitle.get('Follow up on deal')?.entity_name).toBe('Sharma Deal')
+    expect(byTitle.get('Check on project')?.entity_name).toBe('Verma Wedding')
+    expect(byTitle.get('Call client')?.entity_name).toBe('Verma Client')
+    expect(byTitle.get('Chase invoice')?.entity_name).toMatch(/^INV-/)
+    expect(byTitle.get('Buy printer paper')?.entity_name).toBeNull()
   })
 })

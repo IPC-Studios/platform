@@ -12,20 +12,23 @@ const layoutJsonDefaults = {
   terms_and_conditions: null as string | null,
 }
 
+export const invoiceTemplateLayout = z.object({
+  show_header: z.boolean().default(true),
+  show_footer: z.boolean().default(true),
+  show_gst: z.boolean().default(true),
+  show_bank_details: z.boolean().default(false),
+  header_text: z.string().nullable().default(null),
+  footer_text: z.string().nullable().default(null),
+  bank_details: z.string().nullable().default(null),
+  terms_and_conditions: z.string().nullable().default(null),
+})
+export type InvoiceTemplateLayout = z.infer<typeof invoiceTemplateLayout>
+
 export const invoiceTemplate = z.object({
   id: uuid,
   company_id: uuid,
   name: z.string(),
-  layout_json: z.object({
-    show_header: z.boolean().default(true),
-    show_footer: z.boolean().default(true),
-    show_gst: z.boolean().default(true),
-    show_bank_details: z.boolean().default(false),
-    header_text: z.string().nullable().default(null),
-    footer_text: z.string().nullable().default(null),
-    bank_details: z.string().nullable().default(null),
-    terms_and_conditions: z.string().nullable().default(null),
-  }).default(layoutJsonDefaults),
+  layout_json: invoiceTemplateLayout.default(layoutJsonDefaults),
   is_default: z.boolean().default(false),
   created_at: isoDateTime,
 })

@@ -3,6 +3,7 @@ import type { TransactionSql } from 'postgres'
 import {
   acceptQuoteRequest,
   createQuoteRequest,
+  updateQuoteRequest,
   crmQuote,
   crmQuoteStatusResponse,
   crmUserPrefs,
@@ -108,6 +109,49 @@ export const crmQuotesRouter = new Hono<AppEnv>()
     const created = crmQuote.parse(row)
     await audit(c, { action: 'quote.create', entityType: 'crm_quote', entityId: created.id, after: { lead_id: v.lead_id, total: totals.total, lines: v.lines.length } })
     return c.json(created, 201)
+  })
+
+  // A draft can be corrected in full; update_quote() itself refuses once
+  // it's been sent -- that's the record of the offer actually made.
+  .patch('/quotes/:id', edit, async (c) => {
+    const parsed = updateQuoteRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, parsed.error.issues[0]?.message ?? 'Please check the quote.')
+    const v = parsed.data
+    const id = uuidParam(c)
+    const totals = computeInvoice(
+      v.lines.map((l) => ({ ...l, gst_rate: l.gst_rate as GstSlab })),
+      { intraState: v.intra_state, discount: v.discount },
+    )
+    const items = totals.lines.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      rate: l.rate,
+      amount: l.amount,
+      gst_rate: l.gst_rate,
+      taxable: l.taxable,
+      cgst: l.cgst,
+      sgst: l.sgst,
+      igst: l.igst,
+    }))
+    const row = await attempt(
+      c,
+      'crm.quote_update',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          await sql`select update_quote(
+            ${id}, ${v.title ?? null}, ${v.valid_until ?? null}, ${v.place_of_supply || null}, ${v.intra_state},
+            ${totals.subtotal}, ${totals.discount}, ${totals.taxable}, ${totals.tax}, ${totals.total},
+            ${sql.json(items)}, ${v.notes ?? null}, ${v.terms ?? null})`
+          const [full] = await sql`${selectQuotes(sql)} where q.id = ${id}`
+          return full ?? null
+        }),
+      { onCode: (code) => (code === '23514' ? 'sent' : undefined) },
+    )
+    if (row === 'sent') fail(409, 'A quote that has been sent cannot be edited.')
+    if (!row) fail(400, 'We could not update this quote.')
+    const updated = crmQuote.parse(row)
+    await audit(c, { action: 'quote.update', entityType: 'crm_quote', entityId: id, after: { total: totals.total, lines: v.lines.length } })
+    return c.json(updated)
   })
 
   // Sending issues the public link; optionally the link goes out on WhatsApp
