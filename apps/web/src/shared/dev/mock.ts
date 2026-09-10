@@ -67,6 +67,13 @@ function member(
     created_at: string
     role_ids: string[]
     role_names: string[]
+    payout_type: 'salary' | 'per_shoot' | 'per_day' | 'per_project' | 'custom' | null
+    commission_pct: number | null
+    commission_basis: 'revenue' | 'payment' | 'profit' | 'manual' | null
+    stipend_amount: number | null
+    pay_effective_from: string | null
+    pay_effective_to: string | null
+    compensation_notes: string | null
   }> = {},
 ) {
   return {
@@ -84,6 +91,13 @@ function member(
     created_at: '2026-05-01T10:00:00Z',
     role_ids: [],
     role_names: [],
+    payout_type: null,
+    commission_pct: null,
+    commission_basis: null,
+    stipend_amount: null,
+    pay_effective_from: null,
+    pay_effective_to: null,
+    compensation_notes: null,
     ...over,
   }
 }
@@ -152,6 +166,7 @@ const profileFx = {
   phone: '9800000000',
   role: 'super_admin',
   status: 'active',
+  avatar_url: null,
 }
 
 const themeState = { preset_key: 'ipc_classic', font_key: null as string | null, color_scheme: 'light' }
@@ -314,6 +329,11 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path === '/financials/expenses') return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
+  if (method === 'GET' && path === '/financials/gopo') return gopoFx
+  if (method === 'GET' && path.startsWith('/financials/gst-analysis')) return gstAnalysisFx
+  if (method === 'GET' && path.startsWith('/financials/profitability')) return profitabilityReportFx
+  if (method === 'GET' && path.startsWith('/activity')) return activityLogFx
+  if (method === 'POST' && path === '/activity') return { id: uid(0xea) }
   if (method === 'GET' && /^\/crm\/leads\/[^/]+\/timeline/.test(path)) return crmTimelineFx
   if (method === 'GET' && /^\/crm\/activities\/[^/]+\/ics$/.test(path)) return NOT_MOCKED
   if (method === 'POST' && path === '/crm/activities/call') return { activity: crmActivitiesFx[0], placed: false, provider: 'manual', call_sid: null, dial_url: 'tel:+919876500001' }
@@ -517,6 +537,9 @@ const dataRecords = [
     id: uid(0x71),
     data_label: 'CF Card A (Cam 1)',
     data_type: 'photo',
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    shoot_id: uid(0x61),
     primary_status: 'verified',
     backup_status: 'verified',
     card_count: 2,
@@ -527,6 +550,9 @@ const dataRecords = [
     id: uid(0x72),
     data_label: 'SD Card B (Cam 2)',
     data_type: 'photo',
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    shoot_id: uid(0x61),
     primary_status: 'copied',
     backup_status: 'pending',
     card_count: 1,
@@ -537,6 +563,9 @@ const dataRecords = [
     id: uid(0x73),
     data_label: 'Cinema drive',
     data_type: 'video',
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    shoot_id: uid(0x62),
     primary_status: 'copied',
     backup_status: 'copied',
     card_count: 4,
@@ -845,6 +874,145 @@ const projectFin = [
     balance_pending: 0,
   },
 ]
+
+const gopoFx = {
+  score_card: {
+    health_score: 78,
+    health_label: 'good',
+    total_revenue: 299000,
+    total_received: 222000,
+    total_expenses: 23000,
+    total_direct_team_cost: 58000,
+    net_profit: 218000,
+    collection_rate: 74,
+    profit_margin: 73,
+    outstanding_balance: 77000,
+  },
+  expense_breakdown: [
+    { category: 'Team cost', amount: 58000, percentage: 72, count: 5 },
+    { category: 'Project expenses', amount: 23000, percentage: 28, count: 4 },
+  ],
+  project_performance: projectFin.map((p) => ({
+    project_id: p.project_id,
+    project_name: p.name,
+    revenue: p.revenue,
+    received: p.received,
+    direct_team_cost: p.direct_team_cost,
+    project_expenses: p.project_expenses,
+    gross_profit: p.gross_profit,
+    balance_pending: p.balance_pending,
+    profit_margin: p.revenue ? Math.round((p.gross_profit / p.revenue) * 100) : 0,
+    status: 'active',
+  })),
+  attention_items: [
+    {
+      kind: 'overdue_payment',
+      severity: 'warning',
+      message: 'Sharma Wedding has ₹77,000 pending past the due date.',
+      project_id: PROJ.p1,
+      project_name: 'Sharma Wedding',
+      amount: 77000,
+    },
+  ],
+  recent_activity: [
+    { date: '2026-09-05', description: 'Payment received — Nova Product Shoot', amount: 72000, type: 'income' },
+    { date: '2026-09-01', description: 'Studio rent', amount: 15000, type: 'expense' },
+  ],
+}
+
+const gstAnalysisFx = {
+  period_start: '2026-08-31',
+  period_end: '2026-09-29',
+  total_income: 299000,
+  total_expenses: 23000,
+  gst_collected: 45610,
+  gst_paid: 4140,
+  net_gst_liability: 41470,
+  reverse_charge: 0,
+  input_tax_credit: 4140,
+  by_state: [
+    { state: 'Maharashtra', income: 227000, gst: 40860 },
+    { state: 'Karnataka', income: 72000, gst: 4750 },
+  ],
+  by_gst_rate: [
+    { rate: 18, taxable_amount: 227000, cgst: 20430, sgst: 20430, igst: 0 },
+    { rate: 12, taxable_amount: 72000, cgst: 0, sgst: 0, igst: 4750 },
+  ],
+}
+
+const profitabilityReportFx = {
+  items: projectFin.map((p) => ({
+    project_id: p.project_id,
+    project_name: p.name,
+    client_id: CLIENT.sharma,
+    client_name: p.name === 'Sharma Wedding' ? 'Sharma Family' : 'Nova Events',
+    project_status: 'active',
+    created_at: '2026-06-01T10:00:00Z',
+    project_total_value: p.revenue,
+    paid_income: p.received,
+    receivables: p.revenue - p.received,
+    company_expense_total: p.project_expenses,
+    gross_profit: p.gross_profit,
+    expected_project_profit: p.gross_profit,
+    gross_margin: p.revenue ? Math.round((p.gross_profit / p.revenue) * 100) : 0,
+    expected_margin: p.revenue ? Math.round((p.gross_profit / p.revenue) * 100) : 0,
+    collection_rate: p.revenue ? Math.round((p.received / p.revenue) * 100) : 0,
+    expense_ratio: p.revenue ? Math.round((p.project_expenses / p.revenue) * 100) : 0,
+    balance_status: p.balance_pending > 0 ? 'pending' : 'settled',
+    profitability_status: 'healthy',
+    attention_flags: [] as string[],
+  })),
+  summary: {
+    project_count: projectFin.length,
+    total_project_value: projectFin.reduce((s, p) => s + p.revenue, 0),
+    total_paid_income: projectFin.reduce((s, p) => s + p.received, 0),
+    total_receivables: projectFin.reduce((s, p) => s + (p.revenue - p.received), 0),
+    total_company_expenses: projectFin.reduce((s, p) => s + p.project_expenses, 0),
+    total_gross_profit: projectFin.reduce((s, p) => s + p.gross_profit, 0),
+    average_gross_margin: 70,
+    average_collection_rate: 90,
+    loss_project_count: 0,
+    pending_project_count: projectFin.filter((p) => p.balance_pending > 0).length,
+    over_collected_project_count: 0,
+  },
+  pagination: { page: 1, page_size: 50, total_count: projectFin.length, total_pages: 1 },
+}
+
+const activityLogFx = {
+  items: [
+    {
+      id: uid(0xeb),
+      user_id: uid(0x1),
+      user_name: 'Demo Owner',
+      action: 'company.update',
+      entity_type: 'company',
+      entity_id: null,
+      metadata: { name: 'Demo Studio' },
+      created_at: '2026-09-05T13:00:00Z',
+    },
+    {
+      id: uid(0xec),
+      user_id: uid(0x1),
+      user_name: 'Demo Owner',
+      action: 'lead.created',
+      entity_type: 'lead',
+      entity_id: uid(0xb1),
+      metadata: { name: 'Priya & Arjun' },
+      created_at: '2026-09-05T10:00:00Z',
+    },
+    {
+      id: uid(0xed),
+      user_id: uid(0xe1),
+      user_name: 'Rahul Sharma',
+      action: 'task.completed',
+      entity_type: 'task',
+      entity_id: null,
+      metadata: { title: 'Edit teaser' },
+      created_at: '2026-09-04T16:30:00Z',
+    },
+  ],
+  next_cursor: null,
+}
 
 const invoiceDetailFx = {
   id: uid(0x91),
@@ -1208,7 +1376,10 @@ const shootsFx = [
     project_name: 'Sharma Wedding',
     client_name: 'Priya Sharma',
     shoot_date: shootDay(3),
+    start_at: null,
+    end_at: null,
     location: 'Bandra, Mumbai',
+    map_link: null,
     status: 'confirmed',
     requirements: [
       { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
@@ -1222,7 +1393,10 @@ const shootsFx = [
     project_name: 'Sharma Wedding',
     client_name: 'Priya Sharma',
     shoot_date: shootDay(9),
+    start_at: null,
+    end_at: null,
     location: 'Taj Lands End',
+    map_link: null,
     status: 'planned',
     requirements: [
       { service_id: uid(0x74), name: 'Candid Photographer', quantity: 2 },
@@ -1238,7 +1412,10 @@ const shootsFx = [
     project_name: 'Nova Product Shoot',
     client_name: 'Nova Retail',
     shoot_date: shootDay(-4),
+    start_at: null,
+    end_at: null,
     location: 'Studio',
+    map_link: null,
     status: 'completed',
     requirements: [],
   },
@@ -1253,6 +1430,11 @@ const companyFx = {
   country: 'India',
   website: 'https://demostudio.in',
   invoice_gst_number: '27ABCDE1234F1Z5',
+  avatar_url: null,
+  invoice_number_prefix: 'INV-',
+  invoice_next_number: 4,
+  quote_number_prefix: 'QT-',
+  quote_next_number: 1,
 }
 
 

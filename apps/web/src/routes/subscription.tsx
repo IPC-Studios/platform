@@ -12,6 +12,7 @@ import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
@@ -112,6 +113,7 @@ function Subscription() {
           )
         }
       />
+      <SettingsTabs />
       {session?.plan_expiry && (
         <p className="mb-4 text-sm text-muted-foreground">
           Current plan runs until {new Date(session.plan_expiry).toLocaleDateString('en-IN')}. Paying

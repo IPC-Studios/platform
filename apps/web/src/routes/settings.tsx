@@ -21,6 +21,7 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
+import { ErrorState } from '@/shared/ui/states'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Label } from '@/shared/ui/input'
@@ -198,6 +199,24 @@ function ProfileCard({ className, canEditCompany }: { className?: string; canEdi
       <Card className={className}>
         <CardContent className="p-6">
           <SkeletonCards count={3} />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Blank fields backed by a failed fetch would submit as a real rename —
+  // stop short of the form entirely rather than let that overwrite anything.
+  if (company.isError || profile.isError) {
+    return (
+      <Card className={className}>
+        <CardContent className="p-6">
+          <ErrorState
+            error={company.error ?? profile.error}
+            onRetry={() => {
+              void company.refetch()
+              void profile.refetch()
+            }}
+          />
         </CardContent>
       </Card>
     )

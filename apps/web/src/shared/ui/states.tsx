@@ -27,7 +27,10 @@ export function ErrorState({
   error?: unknown
   onRetry?: () => void
 }) {
-  const text = message ?? (error instanceof Error ? error.message : undefined)
+  // Only an ApiError's message came from the server meant for a person to read.
+  // Anything else — a schema mismatch, a network TypeError — carries a message
+  // written for a developer, so it falls back to a generic line instead.
+  const text = message ?? (error instanceof ApiError ? error.message : error ? 'Something went wrong. Please try again.' : undefined)
   const reference = error instanceof ApiError ? error.correlationId : null
   return (
     <div className="flex flex-col items-center gap-3 py-16 text-center" role="alert">

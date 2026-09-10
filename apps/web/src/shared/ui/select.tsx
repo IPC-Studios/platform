@@ -239,6 +239,11 @@ export function Select({ className, children, disabled, ...props }: ComponentPro
     }
   }
 
+  // A Radix Dialog/AlertDialog sets `body { pointer-events: none }` while open
+  // and restores its own Content to `auto` — a modal's whole point is that
+  // nothing outside that subtree is clickable. This panel is portalled to
+  // body, so it inherits `none` and sits there fully visible but inert
+  // unless it re-asserts `auto` on itself, regardless of z-index.
   const list = open && box && (
     <div
       ref={panel}
@@ -255,7 +260,7 @@ export function Select({ className, children, disabled, ...props }: ComponentPro
         maxHeight: box.maxHeight,
         ...(box.up ? { bottom: window.innerHeight - box.top } : { top: box.top }),
       }}
-      className="ipc-menu fixed z-[60] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
+      className="ipc-menu pointer-events-auto fixed z-[60] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
     >
       {items.length === 0 && <p className="px-2.5 py-2 text-sm text-muted-foreground">Nothing to choose from</p>}
       {items.map((item, i) => {
