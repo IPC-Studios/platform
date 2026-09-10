@@ -138,6 +138,42 @@ check(
     campaignList.json.summary.total_campaigns >= 1,
 )
 
+// Invoice templates: layout_json is a jsonb column written with a manual
+// `${JSON.stringify(x)}::jsonb` cast instead of the driver's own sql.json()
+// helper used everywhere else in this file for the same kind of param. That
+// pattern double-encoded the value on write for most (not all -- data-
+// dependent) requests, so the list endpoint's response-schema parse blew up
+// with a 500 for every studio the moment more than one template existed.
+// Create two (the first request alone didn't reproduce it live -- the bug
+// was data/timing-dependent, not "always broken").
+const template1 = await api('/billing/templates', {
+  token: a.token,
+  method: 'POST',
+  body: { name: `Template ${rand()}`, layout_json: { header_text: 'From the studio' } },
+})
+const template2 = await api('/billing/templates', {
+  token: a.token,
+  method: 'POST',
+  body: { name: `Template ${rand()}`, layout_json: { header_text: 'Second one' } },
+})
+check(
+  'invoice templates: create returns the full row, not just an id',
+  template1.status === 201 &&
+    template1.json.layout_json?.header_text === 'From the studio' &&
+    template2.status === 201 &&
+    template2.json.layout_json?.header_text === 'Second one',
+)
+const templateList = await api('/billing/templates', { token: a.token })
+const byId = new Map((templateList.json.items ?? []).map((t) => [t.id, t]))
+check(
+  'invoice templates: list loads and layout_json round-trips as an object for every row',
+  templateList.status === 200 &&
+    typeof byId.get(template1.json.id)?.layout_json === 'object' &&
+    byId.get(template1.json.id)?.layout_json.header_text === 'From the studio' &&
+    typeof byId.get(template2.json.id)?.layout_json === 'object' &&
+    byId.get(template2.json.id)?.layout_json.header_text === 'Second one',
+)
+
 // Numeric query params must survive driver serialization (regression: custom
 // pg serializers once returned numbers unchanged and every LIMIT query died
 // with ERR_INVALID_ARG_TYPE in production while string-only routes stayed up).

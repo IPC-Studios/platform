@@ -7,6 +7,7 @@ import {
   invoiceListItem,
   recordPaymentRequest,
   createInvoiceTemplateRequest,
+  invoiceTemplate,
   invoiceTemplateList,
   createInvoiceNoteTemplateRequest,
   invoiceNoteTemplateList,
@@ -251,11 +252,7 @@ export const billingRouter = new Hono<AppEnv>()
          order by is_default desc, created_at desc`),
     )
     if (!rows) fail(400, 'We could not load templates.')
-    const parsedList = invoiceTemplateList.safeParse({ items: rows })
-    if (!parsedList.success) {
-      fail(422, JSON.stringify({ issues: parsedList.error.issues, sample: rows[0] }))
-    }
-    return c.json(parsedList.data)
+    return c.json(invoiceTemplateList.parse({ items: rows }))
   })
 
   .post('/templates', requireAction('billing', 'edit'), async (c) => {
@@ -269,16 +266,16 @@ export const billingRouter = new Hono<AppEnv>()
         if (d.is_default) {
           await sql`update invoice_templates set is_default = false where company_id = ${auth.companyId} and is_default = true`
         }
-        const made = await sql<{ id: string }[]>`
+        const made = await sql<{ id: string; company_id: string; name: string; layout_json: unknown; is_default: boolean; created_at: string }[]>`
           insert into invoice_templates (company_id, name, layout_json, is_default)
-          values (${auth.companyId}, ${d.name}, ${JSON.stringify(d.layout_json)}::jsonb, ${d.is_default})
-          returning id`
+          values (${auth.companyId}, ${d.name}, ${sql.json(d.layout_json)}, ${d.is_default})
+          returning id, company_id, name, layout_json, is_default, created_at`
         return made
       }),
     )
     if (!rows?.[0]) fail(400, 'We could not create this template.')
     await audit(c, { action: 'invoice_template.create', entityType: 'invoice_template', entityId: rows[0].id, after: { name: d.name } })
-    return c.json({ id: rows[0].id }, 201)
+    return c.json(invoiceTemplate.parse(rows[0]), 201)
   })
 
   .patch('/templates/:id', requireAction('billing', 'edit'), async (c) => {
@@ -294,7 +291,7 @@ export const billingRouter = new Hono<AppEnv>()
         }
         return sql<{ id: string }[]>`
           update invoice_templates
-             set name = ${d.name}, layout_json = ${JSON.stringify(d.layout_json)}::jsonb, is_default = ${d.is_default}
+             set name = ${d.name}, layout_json = ${sql.json(d.layout_json)}, is_default = ${d.is_default}
            where id = ${id} and company_id = ${auth.companyId}
            returning id`
       }),

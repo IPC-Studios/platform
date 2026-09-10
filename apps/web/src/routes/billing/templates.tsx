@@ -6,6 +6,7 @@ import { Input } from '@/shared/ui/input'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
+import { ErrorState } from '@/shared/ui/states'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { callApi } from '@/shared/api/client'
 import {
@@ -44,7 +45,7 @@ export function InvoiceTemplatesPage() {
 
 function TemplatesContent() {
   const qc = useQueryClient()
-  const { data, isLoading } = useInvoiceTemplates()
+  const { data, isLoading, isError, refetch } = useInvoiceTemplates()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<CreateInvoiceTemplateRequest>(emptyForm())
@@ -118,6 +119,8 @@ function TemplatesContent() {
       />
       {isLoading ? (
         <div className="py-12 text-center text-muted-foreground">Loading…</div>
+      ) : isError ? (
+        <ErrorState onRetry={() => void refetch()} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((t) => (
