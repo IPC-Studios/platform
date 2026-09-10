@@ -130,6 +130,7 @@ async function freshDb() {
   await db.exec(mig('0089_invoice_note_templates.sql'))
   await db.exec(mig('0090_team_payout_settlements.sql'))
   await db.exec(mig('0091_auth_users_email_optional.sql'))
+  await db.exec(mig('0092_gst_analysis_state_name.sql'))
   return db
 }
 
@@ -4498,6 +4499,24 @@ describe('dashboard RPCs run and return contract-shaped data (0064)', () => {
     expect(Array.isArray(v.by_gst_rate)).toBe(true)
     // Expense-side credit is derived from expenses.gst_rate, added in 0064.
     expect(v.input_tax_credit).toBe(0)
+  })
+
+  it('by_state resolves the stored GST state code to a readable name', async () => {
+    // place_of_supply on invoices is the 2-digit GST state code ('27'), not a
+    // name -- gst_analysis() once grouped and returned that raw code, so the
+    // report showed "27" instead of "Maharashtra".
+    await db.query(`
+      select create_invoice(
+        (select id from clients limit 1), (select id from projects limit 1), '27',
+        current_date, current_date, 1000, 0, 1000, 180, 1180,
+        '[{"description":"Shoot","quantity":1,"rate":1000,"amount":1000,"gst_rate":18,"taxable":1000,"cgst":90,"sgst":90,"igst":0}]'::jsonb
+      );
+    `)
+    const r = await db.query<{ v: Record<string, never> }>(
+      `select gst_analysis(current_date - 1, current_date + 1) as v;`,
+    )
+    const v = r.rows[0]!.v as unknown as { by_state: { state: string; income: number; gst: number }[] }
+    expect(v.by_state).toEqual([{ state: 'Maharashtra', income: 1000, gst: 180 }])
   })
 
   it('expenses carries the gst_rate the credit is worked out from', async () => {
