@@ -44,6 +44,10 @@ function PersonalExpensesContent() {
     gst_rate: null,
     party_id: null,
   })
+  // Kept separate from `form.amount` (a number, for the request body) so the
+  // field displays exactly what was typed instead of fighting a
+  // type="number" input's leading-zero quirks.
+  const [amountText, setAmountText] = useState('')
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = usePersonalExpenses({
     search: debouncedSearch,
@@ -67,6 +71,7 @@ function PersonalExpensesContent() {
       gst_rate: null,
       party_id: null,
     })
+    setAmountText('')
     setDialogOpen(true)
   }
 
@@ -81,6 +86,7 @@ function PersonalExpensesContent() {
       gst_rate: item.gst_rate,
       party_id: item.party_id,
     })
+    setAmountText(String(item.amount))
     setDialogOpen(true)
   }
 
@@ -205,11 +211,12 @@ function PersonalExpensesContent() {
             <div>
               <label className="text-sm font-medium">Amount (₹)</label>
               <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount || ''}
-                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+                inputMode="decimal"
+                value={amountText}
+                onChange={(e) => {
+                  setAmountText(e.target.value)
+                  setForm({ ...form, amount: Number(e.target.value) || 0 })
+                }}
                 placeholder="0.00"
               />
             </div>

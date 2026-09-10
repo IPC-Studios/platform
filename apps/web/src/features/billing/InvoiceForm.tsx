@@ -473,8 +473,8 @@ export function InvoiceFormFields({
                 onChange={(e) => patchLine(i, { description: e.target.value })}
                 className="min-w-40 flex-1"
               />
-              <Input type="number" min={0} value={l.quantity} onChange={(e) => patchLine(i, { quantity: Number(e.target.value) })} className="w-16" />
-              <Input type="number" min={0} value={l.rate} onChange={(e) => patchLine(i, { rate: Number(e.target.value) })} className="w-28" placeholder="Rate" />
+              <Input inputMode="decimal" value={l.quantity} onChange={(e) => patchLine(i, { quantity: Number(e.target.value) || 0 })} className="w-16" />
+              <Input inputMode="decimal" value={l.rate} onChange={(e) => patchLine(i, { rate: Number(e.target.value) || 0 })} className="w-28" placeholder="Rate" />
               <Select value={l.gst_rate} onChange={(e) => patchLine(i, { gst_rate: Number(e.target.value) as GstSlab })} className="w-20">
                 {GST_SLABS.map((g) => (
                   <option key={g} value={g}>
@@ -516,11 +516,9 @@ export function InvoiceFormFields({
         <div className="flex items-center gap-2">
           <Label>Discount</Label>
           <Input
-            type="number"
-            min={0}
-            max={values.discount_type === 'percent' ? 100 : undefined}
+            inputMode="decimal"
             value={values.discount}
-            onChange={(e) => set('discount', Number(e.target.value))}
+            onChange={(e) => set('discount', Number(e.target.value) || 0)}
             className="w-28"
           />
           <Select

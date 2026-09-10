@@ -30,6 +30,10 @@ function ReferralsContent() {
     reward_value: 0,
     reward_description: null,
   })
+  // Kept separate from `form.reward_value` (a number, for the request body)
+  // so the field displays exactly what was typed instead of fighting a
+  // type="number" input's leading-zero quirks.
+  const [rewardValueText, setRewardValueText] = useState('0')
 
   const { data: campaignData } = useReferralCampaigns()
   const { data: submissionData, fetchNextPage, hasNextPage, isFetchingNextPage } = useReferralSubmissions()
@@ -45,6 +49,7 @@ function ReferralsContent() {
   function openCreate() {
     setEditingId(null)
     setForm({ name: '', description: null, reward_type: 'fixed', reward_value: 0, reward_description: null })
+    setRewardValueText('0')
     setDialogOpen(true)
   }
 
@@ -57,6 +62,7 @@ function ReferralsContent() {
       reward_value: campaign.reward_value,
       reward_description: campaign.reward_description,
     })
+    setRewardValueText(String(campaign.reward_value))
     setDialogOpen(true)
   }
 
@@ -251,10 +257,12 @@ function ReferralsContent() {
             <div>
               <label className="text-sm font-medium">Reward Value (₹)</label>
               <Input
-                type="number"
-                min="0"
-                value={form.reward_value || ''}
-                onChange={(e) => setForm({ ...form, reward_value: Number(e.target.value) })}
+                inputMode="decimal"
+                value={rewardValueText}
+                onChange={(e) => {
+                  setRewardValueText(e.target.value)
+                  setForm({ ...form, reward_value: Number(e.target.value) || 0 })
+                }}
               />
             </div>
             <div>

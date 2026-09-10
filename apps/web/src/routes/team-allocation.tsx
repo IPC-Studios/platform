@@ -719,7 +719,7 @@ function BookDialog({
   const [service, setService] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
-  const [cost, setCost] = useState(0)
+  const [cost, setCost] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const shoot = shoots.find((s) => s.id === shootId) ?? null
@@ -778,7 +778,7 @@ function BookDialog({
         service_name: service || undefined,
         start_at: new Date(start).toISOString(),
         end_at: new Date(end).toISOString(),
-        estimated_cost: cost || undefined,
+        estimated_cost: cost.trim() ? Number(cost) : undefined,
       }
       await book.mutateAsync(body)
       change(false)
@@ -786,7 +786,7 @@ function BookDialog({
       setService('')
       setStart('')
       setEnd('')
-      setCost(0)
+      setCost('')
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -881,10 +881,10 @@ function BookDialog({
           <div className="flex flex-col gap-1.5">
             <Label>Estimated cost (₹)</Label>
             <Input
-              type="number"
-              min={0}
+              inputMode="numeric"
+              placeholder="0"
               value={cost}
-              onChange={(e) => setCost(Number(e.target.value))}
+              onChange={(e) => setCost(e.target.value)}
             />
           </div>
 

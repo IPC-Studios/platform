@@ -448,6 +448,10 @@ function EditProjectDialog({
     package_cost: packageCost,
     show_quotation: showQuotation,
   })
+  // Kept separate from `form.package_cost` (a number, for the request body) so
+  // the field displays exactly what was typed instead of fighting a
+  // type="number" input's leading-zero quirks.
+  const [packageCostText, setPackageCostText] = useState(String(packageCost))
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -481,10 +485,12 @@ function EditProjectDialog({
             <div className="flex flex-col gap-1.5">
               <Label>Package (₹)</Label>
               <Input
-                type="number"
-                min={0}
-                value={form.package_cost ?? 0}
-                onChange={(e) => setForm({ ...form, package_cost: Number(e.target.value) })}
+                inputMode="decimal"
+                value={packageCostText}
+                onChange={(e) => {
+                  setPackageCostText(e.target.value)
+                  setForm({ ...form, package_cost: e.target.value.trim() ? Number(e.target.value) : 0 })
+                }}
               />
             </div>
           </div>
@@ -517,7 +523,7 @@ function AddDeliverableDialog({ id }: { id: string }) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [charge, setCharge] = useState(false)
-  const [amount, setAmount] = useState(0)
+  const [amount, setAmount] = useState('')
   const [workType, setWorkType] = useState('')
   const [internalNotes, setInternalNotes] = useState('')
 
@@ -527,7 +533,7 @@ function AddDeliverableDialog({ id }: { id: string }) {
       title: title.trim(),
       list_key: 'primary',
       is_additional_charge: charge,
-      additional_charge_amount: amount,
+      additional_charge_amount: Number(amount) || 0,
       visibility_scope: 'client',
       show_on_quotation: true,
       start_rule: 'whole_project',
@@ -538,7 +544,7 @@ function AddDeliverableDialog({ id }: { id: string }) {
     setOpen(false)
     setTitle('')
     setCharge(false)
-    setAmount(0)
+    setAmount('')
     setWorkType('')
     setInternalNotes('')
   }
@@ -567,7 +573,7 @@ function AddDeliverableDialog({ id }: { id: string }) {
           {charge && (
             <div className="flex flex-col gap-1.5">
               <Label>Amount (₹)</Label>
-              <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
+              <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           )}
           <div className="flex flex-col gap-1.5">
@@ -601,7 +607,7 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState(deliverable.title)
   const [charge, setCharge] = useState(deliverable.is_additional_charge)
-  const [amount, setAmount] = useState(deliverable.additional_charge_amount)
+  const [amount, setAmount] = useState(String(deliverable.additional_charge_amount ?? ''))
   const [showOnQuotation, setShowOnQuotation] = useState(deliverable.show_on_quotation)
   const [workType, setWorkType] = useState(deliverable.work_type ?? '')
   const [internalNotes, setInternalNotes] = useState(deliverable.internal_notes ?? '')
@@ -613,7 +619,7 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
       patch: {
         title: title.trim(),
         is_additional_charge: charge,
-        additional_charge_amount: amount,
+        additional_charge_amount: Number(amount) || 0,
         show_on_quotation: showOnQuotation,
         work_type: workType.trim() || null,
         internal_notes: internalNotes.trim() || null,
@@ -646,7 +652,7 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
           {charge && (
             <div className="flex flex-col gap-1.5">
               <Label>Amount (₹)</Label>
-              <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
+              <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           )}
           <label className="flex items-center gap-2 text-sm">
@@ -682,12 +688,12 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
 function AddPaymentDialog({ id, balance }: { id: string; balance: number }) {
   const add = useAddPayment(id)
   const [open, setOpen] = useState(false)
-  const [amount, setAmount] = useState(balance)
+  const [amount, setAmount] = useState(String(balance))
   const [mode, setMode] = useState('upi')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    const body: PaymentInput = { amount, mode }
+    const body: PaymentInput = { amount: Number(amount) || 0, mode }
     await add.mutateAsync(body)
     setOpen(false)
   }
@@ -703,7 +709,7 @@ function AddPaymentDialog({ id, balance }: { id: string; balance: number }) {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Amount</Label>
-            <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} autoFocus />
+            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Mode</Label>

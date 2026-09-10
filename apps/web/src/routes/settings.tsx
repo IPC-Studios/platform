@@ -464,10 +464,9 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
             </Field>
             <Field label="Next invoice number">
               <Input
-                type="number"
-                min={1}
+                inputMode="numeric"
                 value={form.invoice_next_number ?? 1}
-                onChange={(e) => set({ invoice_next_number: Number(e.target.value) })}
+                onChange={(e) => set({ invoice_next_number: Number(e.target.value) || 1 })}
                 disabled={readOnly}
               />
             </Field>
@@ -481,10 +480,9 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
             </Field>
             <Field label="Next quote number">
               <Input
-                type="number"
-                min={1}
+                inputMode="numeric"
                 value={form.quote_next_number ?? 1}
-                onChange={(e) => set({ quote_next_number: Number(e.target.value) })}
+                onChange={(e) => set({ quote_next_number: Number(e.target.value) || 1 })}
                 disabled={readOnly}
               />
             </Field>

@@ -248,7 +248,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
   const [open, setOpen] = useState(false)
   const [category, setCategory] = useState(expense?.category ?? '')
   const [description, setDescription] = useState(expense?.description ?? '')
-  const [amount, setAmount] = useState(expense?.amount ?? 0)
+  const [amount, setAmount] = useState(String(expense?.amount ?? ''))
   const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? todayISO())
   const [projectId, setProjectId] = useState(expense?.project_id ?? '')
   const [partyId, setPartyId] = useState(expense?.party_id ?? '')
@@ -260,7 +260,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
   function reset() {
     setCategory('')
     setDescription('')
-    setAmount(0)
+    setAmount('')
     setExpenseDate(todayISO())
     setProjectId('')
     setPartyId('')
@@ -279,7 +279,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
       const shared = {
         project_id: overhead ? null : projectId || null,
         party_id: partyId || null,
-        amount,
+        amount: amount.trim() ? Number(amount) : 0,
         expense_date: expenseDate,
         is_fixed_overhead: overhead,
         gst_treatment: gstTreatment,
@@ -324,7 +324,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
             <ExpenseCategoryPicker value={category} onChange={setCategory} />
             <div className="flex flex-col gap-1.5">
               <Label>Amount ₹</Label>
-              <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} required />
+              <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">

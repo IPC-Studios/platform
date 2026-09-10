@@ -137,8 +137,8 @@ function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: R
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState(record?.data_label ?? '')
   const [dataType, setDataType] = useState(record?.data_type ?? '')
-  const [cards, setCards] = useState(record?.card_count ?? 1)
-  const [size, setSize] = useState(record?.size_gb ?? 0)
+  const [cards, setCards] = useState(String(record?.card_count ?? 1))
+  const [size, setSize] = useState(String(record?.size_gb ?? ''))
   const [projectId, setProjectId] = useState(record?.project_id ?? '')
   const [shootId, setShootId] = useState(record?.shoot_id ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -157,8 +157,8 @@ function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: R
         shoot_id: shootId || null,
         project_id: projectId || null,
         data_label: label.trim(),
-        card_count: cards,
-        size_gb: size,
+        card_count: cards.trim() ? Number(cards) : 0,
+        size_gb: size.trim() ? Number(size) : 0,
       }
       if (isEdit) {
         // Resend data_type explicitly (null clears it) instead of a falsy
@@ -172,8 +172,8 @@ function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: R
       if (!isEdit) {
         setLabel('')
         setDataType('')
-        setCards(1)
-        setSize(0)
+        setCards('1')
+        setSize('')
         setProjectId('')
         setShootId('')
       }
@@ -243,11 +243,11 @@ function AddRecordDialog({ record, trigger }: { record?: DataRecord; trigger?: R
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Cards</Label>
-              <Input type="number" min={0} value={cards} onChange={(e) => setCards(Number(e.target.value))} />
+              <Input inputMode="numeric" value={cards} onChange={(e) => setCards(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Size (GB)</Label>
-              <Input type="number" min={0} value={size} onChange={(e) => setSize(Number(e.target.value))} />
+              <Input inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value)} />
             </div>
           </div>
           {error && (

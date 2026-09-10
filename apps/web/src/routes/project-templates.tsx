@@ -194,8 +194,7 @@ function ProjectTemplatesContent() {
                     }}
                   />
                   <Input
-                    type="number"
-                    min="1"
+                    inputMode="numeric"
                     placeholder="Qty"
                     className="w-20"
                     value={d.quantity}

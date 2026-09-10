@@ -120,14 +120,14 @@ function Shoots() {
 /** A simple add/remove list of "who and what this day needs" — no autocomplete, just name + quantity. */
 function RequirementsEditor({ value, onChange }: { value: ShootRequirementInput[]; onChange: (next: ShootRequirementInput[]) => void }) {
   const [name, setName] = useState('')
-  const [quantity, setQuantity] = useState(1)
+  const [quantity, setQuantity] = useState('1')
 
   function add() {
     const trimmed = name.trim()
     if (!trimmed) return
-    onChange([...value, { name: trimmed, quantity }])
+    onChange([...value, { name: trimmed, quantity: Number(quantity) || 1 }])
     setName('')
-    setQuantity(1)
+    setQuantity('1')
   }
 
   return (
@@ -156,11 +156,9 @@ function RequirementsEditor({ value, onChange }: { value: ShootRequirementInput[
       <div className="flex gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Drone pilot" className="flex-1" />
         <Input
-          type="number"
-          min={1}
-          max={99}
+          inputMode="numeric"
           value={quantity}
-          onChange={(e) => setQuantity(Number(e.target.value))}
+          onChange={(e) => setQuantity(e.target.value)}
           className="w-16"
         />
         <Button type="button" variant="outline" size="sm" onClick={add} disabled={!name.trim()}>

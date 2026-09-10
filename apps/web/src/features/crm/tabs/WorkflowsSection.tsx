@@ -524,7 +524,7 @@ function StepEditor({ step, index, total, onChange }: { step: WorkflowStepInput;
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col gap-1">
           <Label htmlFor={`st-amount-${index}`}>Wait</Label>
-          <Input id={`st-amount-${index}`} type="number" min={1} max={365} value={step.config.amount} onChange={(e) => onChange({ kind: 'delay', config: { ...step.config, amount: Math.max(1, Number(e.target.value) || 1) } })} className="w-24" />
+          <Input id={`st-amount-${index}`} inputMode="numeric" value={step.config.amount} onChange={(e) => onChange({ kind: 'delay', config: { ...step.config, amount: Math.max(1, Number(e.target.value) || 1) } })} className="w-24" />
         </div>
         <Select value={step.config.unit} onChange={(e) => onChange({ kind: 'delay', config: { ...step.config, unit: e.target.value as 'minutes' | 'hours' | 'days' } })} className="w-32" aria-label="Unit">
           <option value="minutes">minutes</option>
@@ -592,7 +592,7 @@ function StepEditor({ step, index, total, onChange }: { step: WorkflowStepInput;
         </Select>
       )}
       {c.action === 'set_follow_up_days' && (
-        <Input type="number" min={0} max={365} value={c.days ?? 1} onChange={(e) => set({ days: Number(e.target.value) || 0 })} className="w-24" aria-label="Days" />
+        <Input inputMode="numeric" value={c.days ?? 1} onChange={(e) => set({ days: Number(e.target.value) || 0 })} className="w-24" aria-label="Days" />
       )}
       {(c.action === 'add_note' || c.action === 'notify_assignee' || c.action === 'notify_user') && (
         <Input value={c.note ?? ''} onChange={(e) => set({ note: e.target.value || undefined })} placeholder={c.action === 'add_note' ? 'Note to add' : 'Message (optional)'} className="w-64" aria-label="Note" />
@@ -623,11 +623,11 @@ function StepEditor({ step, index, total, onChange }: { step: WorkflowStepInput;
       {c.action === 'create_task' && (
         <>
           <Input value={c.subject ?? ''} onChange={(e) => set({ subject: e.target.value || undefined })} placeholder="Task" className="w-56" aria-label="Task" />
-          <Input type="number" min={0} max={365} value={c.days ?? 0} onChange={(e) => set({ days: Number(e.target.value) || 0 })} className="w-24" aria-label="Due in days" title="Due in days" />
+          <Input inputMode="numeric" value={c.days ?? 0} onChange={(e) => set({ days: Number(e.target.value) || 0 })} className="w-24" aria-label="Due in days" title="Due in days" />
         </>
       )}
       {c.action === 'add_score' && (
-        <Input type="number" min={-100} max={100} value={c.points ?? 10} onChange={(e) => set({ points: Number(e.target.value) || 0 })} className="w-24" aria-label="Points" />
+        <Input inputMode="numeric" value={c.points ?? 10} onChange={(e) => set({ points: Number(e.target.value) || 0 })} className="w-24" aria-label="Points" />
       )}
       {c.action === 'send_template' && (
         <>

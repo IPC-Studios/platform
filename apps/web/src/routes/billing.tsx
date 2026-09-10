@@ -200,7 +200,7 @@ function NewInvoiceDialog() {
 function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: number }) {
   const record = useRecordPayment(invoiceId)
   const [open, setOpen] = useState(false)
-  const [amount, setAmount] = useState(balance)
+  const [amount, setAmount] = useState(String(balance))
   const [mode, setMode] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -208,7 +208,7 @@ function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: num
     e.preventDefault()
     setError(null)
     try {
-      await record.mutateAsync({ amount, ...(mode ? { mode } : {}) })
+      await record.mutateAsync({ amount: Number(amount) || 0, ...(mode ? { mode } : {}) })
       setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record payment.')
@@ -226,7 +226,7 @@ function PaymentDialog({ invoiceId, balance }: { invoiceId: string; balance: num
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Amount</Label>
-            <Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} autoFocus />
+            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
           </div>
           <PaymentModePicker value={mode} onChange={setMode} />
           {error && (

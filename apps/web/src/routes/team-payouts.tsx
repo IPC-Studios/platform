@@ -40,6 +40,10 @@ function TeamPayoutsContent() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<CreateTeamPayoutRequest>(emptyForm())
+  // Kept separate from `form.amount` (a number, for the request body) so the
+  // field displays exactly what was typed instead of fighting a
+  // type="number" input's leading-zero quirks.
+  const [amountText, setAmountText] = useState('')
 
   const { data } = useTeamPayouts()
   const { data: members } = useDirectory()
@@ -62,12 +66,14 @@ function TeamPayoutsContent() {
       reference: p.reference,
       notes: p.notes,
     })
+    setAmountText(String(p.amount))
     setDialogOpen(true)
   }
 
   function openCreate() {
     setEditingId(null)
     setForm(emptyForm())
+    setAmountText('')
     setDialogOpen(true)
   }
 
@@ -193,11 +199,12 @@ function TeamPayoutsContent() {
             <div>
               <label className="text-sm font-medium">Amount (₹)</label>
               <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount || ''}
-                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+                inputMode="decimal"
+                value={amountText}
+                onChange={(e) => {
+                  setAmountText(e.target.value)
+                  setForm({ ...form, amount: Number(e.target.value) || 0 })
+                }}
                 placeholder="0.00"
               />
             </div>
