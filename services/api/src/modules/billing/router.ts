@@ -251,7 +251,11 @@ export const billingRouter = new Hono<AppEnv>()
          order by is_default desc, created_at desc`),
     )
     if (!rows) fail(400, 'We could not load templates.')
-    return c.json(invoiceTemplateList.parse({ items: rows }))
+    const parsedList = invoiceTemplateList.safeParse({ items: rows })
+    if (!parsedList.success) {
+      fail(422, JSON.stringify({ issues: parsedList.error.issues, sample: rows[0] }))
+    }
+    return c.json(parsedList.data)
   })
 
   .post('/templates', requireAction('billing', 'edit'), async (c) => {
