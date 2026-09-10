@@ -6,6 +6,7 @@ import { Input } from '@/shared/ui/input'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
+import { ErrorState } from '@/shared/ui/states'
 import {
   useProjectTemplates,
   useSaveProjectTemplate,
@@ -29,7 +30,7 @@ function ProjectTemplatesContent() {
     tasks_json: [],
   })
 
-  const { data } = useProjectTemplates()
+  const { data, isLoading, isError, refetch } = useProjectTemplates()
   const saveTemplate = useSaveProjectTemplate()
   const deleteTemplate = useDeleteProjectTemplate()
   const applyTemplate = useApplyProjectTemplate()
@@ -109,6 +110,11 @@ function ProjectTemplatesContent() {
         }
       />
 
+      {isLoading ? (
+        <div className="py-12 text-center text-muted-foreground">Loading…</div>
+      ) : isError ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {templates.map((template) => (
           <Card key={template.id}>
@@ -152,6 +158,7 @@ function ProjectTemplatesContent() {
           </div>
         )}
       </div>
+      )}
 
       {/* Create/Edit Template Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

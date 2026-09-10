@@ -174,6 +174,35 @@ check(
     byId.get(template2.json.id)?.layout_json.header_text === 'Second one',
 )
 
+// Project templates: same double-encoding bug as invoice templates above --
+// deliverables_json/shoots_json/tasks_json were written with a manual
+// `${JSON.stringify(x)}::jsonb` cast instead of sql.json(), so every field
+// came back as a string and the list 500ed for every studio once a template
+// existed with more than a trivial payload.
+const projectTemplate = await api('/projects/templates', {
+  token: a.token,
+  method: 'POST',
+  body: {
+    name: `Template ${rand()}`,
+    deliverables_json: [{ name: 'Edited album', quantity: 1 }],
+    shoots_json: [{ name: 'Engagement', kind: 'pre-wedding' }],
+    tasks_json: [{ title: 'Cull photos' }],
+  },
+})
+check('project templates: create returns an id', projectTemplate.status === 201 && !!projectTemplate.json.id)
+const projectTemplateList = await api('/projects/templates', { token: a.token })
+const pt = (projectTemplateList.json.items ?? []).find((t) => t.id === projectTemplate.json.id)
+check(
+  'project templates: list loads and every jsonb field round-trips as an array',
+  projectTemplateList.status === 200 &&
+    Array.isArray(pt?.deliverables_json) &&
+    pt.deliverables_json[0]?.name === 'Edited album' &&
+    Array.isArray(pt?.shoots_json) &&
+    pt.shoots_json[0]?.name === 'Engagement' &&
+    Array.isArray(pt?.tasks_json) &&
+    pt.tasks_json[0]?.title === 'Cull photos',
+)
+
 // Numeric query params must survive driver serialization (regression: custom
 // pg serializers once returned numbers unchanged and every LIMIT query died
 // with ERR_INVALID_ARG_TYPE in production while string-only routes stayed up).

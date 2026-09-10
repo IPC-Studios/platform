@@ -219,9 +219,9 @@ export const projectsRouter = new Hono<AppEnv>()
         const made = await sql<{ id: string }[]>`
           insert into project_templates (company_id, name, description, deliverables_json, shoots_json, tasks_json, created_by)
           values (${auth.companyId}, ${d.name}, ${d.description ?? null},
-                  ${JSON.stringify(d.deliverables_json)}::jsonb,
-                  ${JSON.stringify(d.shoots_json)}::jsonb,
-                  ${JSON.stringify(d.tasks_json)}::jsonb,
+                  ${sql.json(d.deliverables_json)},
+                  ${sql.json(d.shoots_json)},
+                  ${sql.json(d.tasks_json)},
                   ${auth.userId})
           returning id`
         return made
@@ -243,9 +243,9 @@ export const projectsRouter = new Hono<AppEnv>()
         return sql<{ id: string }[]>`
           update project_templates
              set name = ${d.name}, description = ${d.description ?? null},
-                 deliverables_json = ${JSON.stringify(d.deliverables_json)}::jsonb,
-                 shoots_json = ${JSON.stringify(d.shoots_json)}::jsonb,
-                 tasks_json = ${JSON.stringify(d.tasks_json)}::jsonb
+                 deliverables_json = ${sql.json(d.deliverables_json)},
+                 shoots_json = ${sql.json(d.shoots_json)},
+                 tasks_json = ${sql.json(d.tasks_json)}
            where id = ${id} and company_id = ${auth.companyId}
            returning id`
       }),
