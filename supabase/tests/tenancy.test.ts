@@ -24,8 +24,13 @@ async function freshDb() {
   const db = new PGlite()
   // Shim the Supabase surface pglite lacks.
   await db.exec(`create schema if not exists auth;`)
+  // Matches deploy/db/00_bootstrap.sql exactly (unique not null) so a
+  // migration that relaxes this, like a real deploy, is the only thing that
+  // can make an insert with a null email succeed -- otherwise this shim
+  // quietly diverges from production and a NOT NULL regression like 0091
+  // fixes can pass here while failing for real.
   await db.exec(
-    `create table auth.users (id uuid primary key default gen_random_uuid(), email text, encrypted_password text);`,
+    `create table auth.users (id uuid primary key default gen_random_uuid(), email text unique not null, encrypted_password text);`,
   )
   await db.exec(
     `create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;`,
@@ -124,6 +129,7 @@ async function freshDb() {
   await db.exec(mig('0088_invoice_item_title.sql'))
   await db.exec(mig('0089_invoice_note_templates.sql'))
   await db.exec(mig('0090_team_payout_settlements.sql'))
+  await db.exec(mig('0091_auth_users_email_optional.sql'))
   return db
 }
 
@@ -1736,6 +1742,18 @@ describe('team directory + invitations (0026)', () => {
     )
     expect(r.rows[0]!.login_enabled).toBe(false)
     expect(r.rows[0]!.email).toBeNull()
+  })
+
+  it('a second directory-only member with no email does not collide on uniqueness', async () => {
+    // Two null emails are not "equal" for a unique constraint -- this is the
+    // exact real-world shape the add-member wizard hits every time a second
+    // freelancer is added with only a phone number.
+    await expect(
+      db.exec(
+        `insert into auth.users (id, email, encrypted_password)
+         values ('99999999-9999-9999-9999-999999999999', null, null);`,
+      ),
+    ).resolves.not.toThrow()
   })
 
   it('engagement_type only accepts the two the wizard offers', async () => {
