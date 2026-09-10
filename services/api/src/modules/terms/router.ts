@@ -42,24 +42,7 @@ export const termsRouter = new Hono<AppEnv>()
   // query per project.
   .get('/documents', requireAction('projects', 'view'), async (c) => {
     const rows = await attempt(c, 'terms.documents', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => sql`
-        select distinct on (d.project_id)
-               d.id, d.project_id, p.name as project_name,
-               cl.name as client_name, cl.phone as client_phone,
-               d.acknowledged_at, d.acknowledged_by_name, d.created_at,
-               (t.id is not null and t.used_at is null and (t.expires_at is null or t.expires_at > now())) as has_active_link,
-               t.expires_at as link_expires_at
-          from project_terms_documents d
-          left join projects p on p.id = d.project_id
-          left join clients cl on cl.id = p.client_id
-          left join lateral (
-            select id, expires_at, used_at from access_tokens
-             where purpose = 'terms_ack' and subject_id = d.id
-             order by created_at desc limit 1
-          ) t on true
-         where d.company_id = ${c.get('auth').companyId}
-         order by d.project_id, d.created_at desc`,
-      ),
+      withUser(c.env, c.get('auth').userId, (sql) => sql`select * from list_project_terms_documents()`),
     )
     if (!rows) fail(400, 'We could not load project documents.')
     return c.json(termsDocumentList.parse(rows))

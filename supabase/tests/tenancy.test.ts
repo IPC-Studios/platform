@@ -131,6 +131,7 @@ async function freshDb() {
   await db.exec(mig('0090_team_payout_settlements.sql'))
   await db.exec(mig('0091_auth_users_email_optional.sql'))
   await db.exec(mig('0092_gst_analysis_state_name.sql'))
+  await db.exec(mig('0093_terms_documents_list_fn.sql'))
   return db
 }
 
@@ -1301,6 +1302,21 @@ describe('terms acknowledgement via public link (Phase 15)', () => {
       `select acknowledge_terms('${token}', 'Someone Else');`,
     )
     expect(again.rows[0]!.acknowledge_terms).toBe(false)
+  })
+
+  it('a freshly issued link shows as active, not "expired" (0093)', async () => {
+    // access_tokens deliberately has no select policy for `authenticated` --
+    // the studio-facing list must read it through a SECURITY DEFINER
+    // function, not a plain query, or has_active_link is always false.
+    const issued = await db.query<{ document_id: string }>(
+      `select * from issue_terms_document(null, 'Fresh terms.', null, 336);`,
+    )
+    const list = await db.query<{ id: string; has_active_link: boolean; link_expires_at: string | null }>(
+      `select * from list_project_terms_documents();`,
+    )
+    const row = list.rows.find((r) => r.id === issued.rows[0]!.document_id)
+    expect(row?.has_active_link).toBe(true)
+    expect(row?.link_expires_at).not.toBeNull()
   })
 })
 
