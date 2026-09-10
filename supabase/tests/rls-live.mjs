@@ -119,6 +119,25 @@ check(
   eqPage2.status === 200 && eqIds2.size === 1 && !overlap && !eqPage2.json.next_cursor,
 )
 
+// Referral campaigns: create, then list -- the list handler's own summary
+// query once referenced `status` with no FROM clause reaching the table it
+// meant to aggregate, so this 400ed on every call, for every studio, the
+// moment a campaign existed to summarize.
+const campaign = await api('/referrals/campaigns', {
+  token: a.token,
+  method: 'POST',
+  body: { name: `Referral ${rand()}`, reward_type: 'fixed', reward_value: 500 },
+})
+check('referrals: can create a campaign', campaign.status === 201 && !!campaign.json.id)
+const campaignList = await api('/referrals/campaigns', { token: a.token })
+check(
+  'referrals: list loads and includes the new campaign',
+  campaignList.status === 200 &&
+    Array.isArray(campaignList.json.campaigns) &&
+    campaignList.json.campaigns.some((c) => c.id === campaign.json.id) &&
+    campaignList.json.summary.total_campaigns >= 1,
+)
+
 // Numeric query params must survive driver serialization (regression: custom
 // pg serializers once returned numbers unchanged and every LIMIT query died
 // with ERR_INVALID_ARG_TYPE in production while string-only routes stayed up).

@@ -41,7 +41,9 @@ export const referralsRouter = new Hono<AppEnv>()
                  count(*) filter (where status = 'active')::int as active_campaigns,
                  (select count(*)::int from referral_submissions where company_id = ${c.get('auth').companyId}) as total_submissions,
                  (select count(*)::int from referral_submissions where company_id = ${c.get('auth').companyId} and status = 'converted') as converted_submissions,
-                 (select coalesce(sum(reward_amount), 0) from referral_submissions where company_id = ${c.get('auth').companyId} and reward_granted = true) as total_rewards`
+                 (select coalesce(sum(reward_amount), 0) from referral_submissions where company_id = ${c.get('auth').companyId} and reward_granted = true) as total_rewards
+            from referral_campaigns
+           where company_id = ${c.get('auth').companyId}`
         return { campaigns, summary: summary[0] }
       }),
     )
