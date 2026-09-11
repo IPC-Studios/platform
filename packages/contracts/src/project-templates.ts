@@ -6,15 +6,19 @@ export const projectTemplate = z.object({
   company_id: uuid,
   name: z.string(),
   description: z.string().nullable(),
+  // The create request leaves description/duration_hours out entirely when
+  // omitted (they're `.nullish()` there, not defaulted to null before
+  // storage), so a stored item can genuinely lack the key -- `.default(null)`
+  // here tolerates that instead of 500ing the whole list the moment one does.
   deliverables_json: z.array(z.object({
     name: z.string(),
-    description: z.string().nullable(),
+    description: z.string().nullable().default(null),
     quantity: z.number().int().positive(),
   })).default([]),
   shoots_json: z.array(z.object({
     name: z.string(),
-    kind: z.string().nullable(),
-    duration_hours: z.number().positive().nullable(),
+    kind: z.string().nullable().default(null),
+    duration_hours: z.number().positive().nullable().default(null),
   })).default([]),
   tasks_json: z.array(z.object({
     title: z.string(),

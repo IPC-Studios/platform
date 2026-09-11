@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import {
@@ -460,76 +461,108 @@ function Tick({
  */
 function RowMenu({ project }: { project: ProjectListItem }) {
   const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const issue = useIssueQuotation()
 
+  // Portaled to <body> with viewport coordinates: the row lives inside
+  // .table-wrap, a bounded `overflow: auto` scroll box (so a sticky header
+  // has something to stick to). Rendered as a plain descendant, the menu's
+  // `top-full` popout got clipped by that box on every row whose "..." sat
+  // near its bottom edge -- the click registered (state flipped) but nothing
+  // ever appeared. Escaping to a portal sidesteps the clipping entirely.
   useEffect(() => {
     if (!open) return
     const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
     }
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
     }
+    // Any ancestor's scroll (the table-wrap included -- scroll doesn't
+    // bubble, hence capture) invalidates the fixed position, so close rather
+    // than let it drift away from the button.
+    const onScrollOrResize = () => setOpen(false)
     document.addEventListener('pointerdown', onDown)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
     return () => {
       document.removeEventListener('pointerdown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
     }
   }, [open])
 
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    }
+    setOpen((v) => !v)
+  }
+
   return (
-    <div ref={root} className="relative flex justify-end">
+    <div className="relative flex justify-end">
       <button
+        ref={btnRef}
         type="button"
         aria-label={`More for ${project.name}`}
         aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((v) => !v)
+          toggle()
         }}
         className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <MoreHorizontal className="size-4" />
       </button>
-      {open && (
-        <div
-          role="menu"
-          className="ipc-menu absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
-        >
-          <Link
-            to="/projects/$id"
-            params={{ id: project.id }}
-            role="menuitem"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', top: pos.top, right: pos.right }}
+            className="ipc-menu z-40 w-52 overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-lg"
           >
-            <ExternalLink className="size-4 shrink-0" aria-hidden />
-            Open project
-          </Link>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={issue.isPending}
-            onClick={() =>
-              issue.mutate(
-                { project_id: project.id, notes: null },
-                {
-                  onSuccess: (r) => {
-                    void navigator.clipboard?.writeText(r.link)
-                    toast.success('Quotation link copied')
-                    setOpen(false)
+            <Link
+              to="/projects/$id"
+              params={{ id: project.id }}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+            >
+              <ExternalLink className="size-4 shrink-0" aria-hidden />
+              Open project
+            </Link>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={issue.isPending}
+              onClick={() =>
+                issue.mutate(
+                  { project_id: project.id, notes: null },
+                  {
+                    onSuccess: (r) => {
+                      void navigator.clipboard?.writeText(r.link)
+                      toast.success('Quotation link copied')
+                      setOpen(false)
+                    },
                   },
-                },
-              )
-            }
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:opacity-60"
-          >
-            <FileText className="size-4 shrink-0" aria-hidden />
-            {issue.isPending ? 'Preparing…' : 'Copy quotation link'}
-          </button>
-        </div>
-      )}
+                )
+              }
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              <FileText className="size-4 shrink-0" aria-hidden />
+              {issue.isPending ? 'Preparing…' : 'Copy quotation link'}
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
