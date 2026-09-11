@@ -275,7 +275,7 @@ function ContactDrawer({ contact, onClose }: { contact: CrmContact; onClose: () 
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
               disabled={!canEdit}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             {canEdit && (
               <div className="flex justify-end">
@@ -502,7 +502,7 @@ function NewContactDialog({ onAdded }: { onAdded: (id: string) => void }) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
               placeholder="What they are after, how they found you."
             />
           </Field>

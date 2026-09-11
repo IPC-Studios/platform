@@ -133,6 +133,8 @@ async function freshDb() {
   await db.exec(mig('0092_gst_analysis_state_name.sql'))
   await db.exec(mig('0093_terms_documents_list_fn.sql'))
   await db.exec(mig('0094_team_payment_type_and_status.sql'))
+  await db.exec(mig('0095_enquiry_status_lookup.sql'))
+  await db.exec(mig('0096_theme_custom_colors.sql'))
   return db
 }
 
@@ -4230,11 +4232,20 @@ describe('enquiries (0043)', () => {
     expect(row.rows[0]).toMatchObject({ enquiry_status: 'new', converted_lead_id: null })
   })
 
-  it('refuses a status nobody renders', async () => {
+  it('accepts a studio-added status but refuses a blank one', async () => {
+    // enquiry_status is a studio-editable picklist now (0095), same as
+    // lead_source/expense_category -- the column itself only refuses empty.
+    const id = await addEnquiry('Custom status', '9876500009')
+    await db.exec(`update enquiries set enquiry_status = 'maybe' where id = '${id}';`)
+    const row = await db.query<{ enquiry_status: string }>(
+      `select enquiry_status from enquiries where id = '${id}';`,
+    )
+    expect(row.rows[0]!.enquiry_status).toBe('maybe')
+
     await expect(
       db.query(
         `insert into enquiries (company_id, name, enquiry_status)
-         values ('${company}', 'Bad', 'maybe');`,
+         values ('${company}', 'Bad', '   ');`,
       ),
     ).rejects.toThrow()
   })
@@ -5614,6 +5625,7 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
       'payment_type',
       'enquiry_source',
       'invoice_line_preset',
+      'enquiry_status',
     ].sort())
 
     const paymentTypes = await db.query<{ value: string }>(
@@ -5625,6 +5637,17 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
       `select count(*)::text as n from custom_lookups where company_id = '${companyId}' and category = 'invoice_line_preset';`,
     )
     expect(presetCount.rows[0]!.n).toBe('14')
+
+    const enquiryStatuses = await db.query<{ value: string }>(
+      `select value from custom_lookups where company_id = '${companyId}' and category = 'enquiry_status' order by sort_order;`,
+    )
+    expect(enquiryStatuses.rows.map((r) => r.value)).toEqual([
+      'new',
+      'reviewed',
+      'contacted',
+      'converted',
+      'closed',
+    ])
   })
 
   it('a pending invitation\'s name and role can be corrected before it is accepted', async () => {

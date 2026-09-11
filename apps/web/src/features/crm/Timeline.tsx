@@ -317,7 +317,7 @@ function RowEditor({
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={2}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
           />
         </div>
       </div>
@@ -429,7 +429,7 @@ function QuickForm({ lead, type, onDone }: { lead: CrmLead; type: 'note' | 'emai
       </div>
       <div className="flex flex-col gap-1 sm:col-span-4">
         <Label htmlFor="act-body">Details</Label>
-        <textarea id="act-body" value={body} onChange={(e) => setBody(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="Optional" />
+        <textarea id="act-body" value={body} onChange={(e) => setBody(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm" placeholder="Optional" />
       </div>
       <div className="sm:col-span-4">
         <Button

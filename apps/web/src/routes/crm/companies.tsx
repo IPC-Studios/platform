@@ -205,7 +205,7 @@ function CompanyDrawer({ company, onClose }: { company: CrmCompany; onClose: () 
                 defaultValue={company.notes ?? ''}
                 disabled={!canEdit}
                 rows={2}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
                 onBlur={(e) => {
                   const v = e.target.value.trim() || null
                   if (v !== company.notes) patch({ notes: v })
@@ -343,7 +343,7 @@ function NewCompanyDialog({ onAdded }: { onAdded: (id: string) => void }) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
             />
           </Field>
           <div className="flex justify-end gap-2">

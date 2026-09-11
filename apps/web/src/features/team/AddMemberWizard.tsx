@@ -600,7 +600,7 @@ function DetailsStep({
             value={draft.address}
             onChange={(e) => set('address', e.target.value)}
             placeholder="City or full address"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm"
           />
         </Field>
 

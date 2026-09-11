@@ -228,7 +228,7 @@ function TemplatesContent() {
                   onChange={(e) => setForm({ ...form, layout_json: { ...form.layout_json, bank_details: e.target.value || null } })}
                   rows={2}
                   placeholder={'Account name, number, IFSC…'}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+                  className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm"
                 />
               </div>
             )}
@@ -239,7 +239,7 @@ function TemplatesContent() {
                 value={form.layout_json.terms_and_conditions ?? ''}
                 onChange={(e) => setForm({ ...form, layout_json: { ...form.layout_json, terms_and_conditions: e.target.value || null } })}
                 rows={2}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm"
               />
             </div>
 

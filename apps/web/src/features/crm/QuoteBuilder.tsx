@@ -206,11 +206,11 @@ export function QuoteBuilder({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
               <Label htmlFor="q-notes">Note to the client</Label>
-              <textarea id="q-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+              <textarea id="q-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm" />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="q-terms">Terms</Label>
-              <textarea id="q-terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+              <textarea id="q-terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={2} className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm" />
             </div>
           </div>
 

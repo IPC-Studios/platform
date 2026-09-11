@@ -97,7 +97,7 @@ function CsvImport() {
           rows={6}
           aria-label="CSV text"
           placeholder={SAMPLE}
-          className="w-full rounded-md border border-input bg-background p-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full rounded-md border border-input bg-card p-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={doPreview} disabled={!csv.trim() || previewIt.isPending}>

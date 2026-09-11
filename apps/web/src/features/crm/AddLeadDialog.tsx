@@ -220,7 +220,7 @@ export function AddLeadDialog({
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
               placeholder="What are they asking for? Dates, budget, how they found you."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 

@@ -530,7 +530,7 @@ function NewTaskDialog() {
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="What does done look like?"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <AssigneePicker selected={assignees} onChange={setAssignees} />
@@ -640,7 +640,7 @@ function EditTaskDialog({ task, trigger }: { task: TaskListItem; trigger: ReactN
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <AssigneePicker selected={assignees} onChange={setAssignees} />
@@ -847,7 +847,7 @@ function BundlesDialog({ trigger }: { trigger?: ReactNode }) {
                 onChange={(e) => setItemText(e.target.value)}
                 rows={5}
                 placeholder={'Cull and select\nColour grade\nAlbum layout\nClient review'}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
                 {items.length} {items.length === 1 ? 'task' : 'tasks'} · they keep this order.

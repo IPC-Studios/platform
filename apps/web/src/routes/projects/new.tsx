@@ -612,7 +612,7 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
               }}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                mode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                mode === m ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {m === 'existing' ? <Search className="size-3.5" /> : <UserPlus className="size-3.5" />}
@@ -2573,7 +2573,7 @@ function AddDeliverableDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What does the team need to know?"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 

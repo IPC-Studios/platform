@@ -2,24 +2,72 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Sparkles, Type, Palette, Ruler } from 'lucide-react'
 import { toast } from 'sonner'
-import { companyTheme, type ThemeFontKey } from '@ipc/contracts'
+import { companyTheme, type CompanyTheme, type ThemeFontKey } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useTheme } from '@/shared/theme/ThemeProvider'
-import { DEFAULT_PRESET_KEY, THEME_PRESETS, presetFor, type ThemePreset } from '@/shared/theme/presets'
+import {
+  DEFAULT_PRESET_KEY,
+  EMPTY_CUSTOM_COLORS,
+  THEME_PRESETS,
+  foregroundForHex,
+  presetFor,
+  type CustomThemeColors,
+  type ThemePreset,
+} from '@/shared/theme/presets'
 import { FONT_OPTIONS, FONT_KEYS, fontOr, fontStack, loadFont } from '@/shared/theme/fonts'
 import { Button } from '@/shared/ui/button'
 import { TiltCard } from '@/shared/ui/tilt-card'
 import { SkeletonCards } from '@/shared/ui/skeleton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
-import { Input } from '@/shared/ui/input'
+import { Input, Label } from '@/shared/ui/input'
+import { Switch } from '@/shared/ui/switch'
 
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { cn } from '@/shared/ui/cn'
+
+const RADIUS_OPTIONS = [
+  { value: '0', label: 'None' },
+  { value: '0.25', label: 'Small' },
+  { value: '0.5', label: 'Default' },
+  { value: '0.75', label: 'Large' },
+  { value: '1', label: 'Full' },
+]
+
+const COLOR_FIELDS: Array<{ key: keyof CustomThemeColors; label: string; hint: string }> = [
+  { key: 'primary', label: 'Primary', hint: 'Main buttons and links' },
+  { key: 'secondary', label: 'Secondary', hint: 'Highlights and nav hovers' },
+  { key: 'accent', label: 'Accent', hint: 'Quiet fills and hover states' },
+  { key: 'background', label: 'Background', hint: 'The page itself' },
+  { key: 'surface', label: 'Surface / Card', hint: 'Cards, panels, dialogs' },
+  { key: 'text', label: 'Text', hint: 'Body copy' },
+  { key: 'muted_text', label: 'Muted text', hint: 'Secondary, less important copy' },
+  { key: 'border', label: 'Border', hint: 'Dividers and input outlines' },
+]
+
+const CUSTOM_COLUMN_BY_FIELD: Record<keyof CustomThemeColors, keyof CompanyTheme> = {
+  primary: 'primary_color',
+  secondary: 'secondary_color',
+  accent: 'accent_color',
+  background: 'background_color',
+  surface: 'surface_color',
+  text: 'text_color',
+  muted_text: 'muted_text_color',
+  border: 'border_color',
+}
+
+function colorsFromTheme(data: CompanyTheme): CustomThemeColors {
+  const out = { ...EMPTY_CUSTOM_COLORS }
+  for (const field of COLOR_FIELDS) {
+    const value = data[CUSTOM_COLUMN_BY_FIELD[field.key]]
+    out[field.key] = typeof value === 'string' ? value : null
+  }
+  return out
+}
 
 const PANGRAM = 'The quick brown fox jumps over the lazy dog.'
 
@@ -34,7 +82,7 @@ export function AppearancePage() {
 function Appearance() {
   const qc = useQueryClient()
   const { session } = useAuth()
-  const { applyTheme, scheme } = useTheme()
+  const { applyTheme, applyCustom, scheme } = useTheme()
   const isOwner = session?.is_owner ?? false
 
   const { data, isLoading } = useQuery({
@@ -43,7 +91,7 @@ function Appearance() {
   })
 
   const save = useMutation({
-    mutationFn: (body: { preset_key: string; font_key: string | null; custom_color?: string | null; border_radius?: string }) =>
+    mutationFn: (body: Partial<Omit<CompanyTheme, 'font_key'>> & { preset_key: string; font_key?: string | null }) =>
       callApi('/settings/theme', {
         method: 'PATCH',
         body: { ...body, color_scheme: data?.color_scheme ?? 'light' },
@@ -51,8 +99,13 @@ function Appearance() {
       }),
     onSuccess: (saved) => {
       applyTheme(saved.preset_key, saved.font_key)
+      applyCustom(
+        saved.is_custom_theme
+          ? { enabled: true, colors: colorsFromTheme(saved), radius: saved.border_radius ?? null }
+          : null,
+      )
       setPreview(null)
-      toast.success(`${presetFor(saved.preset_key).label} applied`)
+      toast.success(saved.is_custom_theme ? 'Custom theme saved' : `${presetFor(saved.preset_key).label} applied`)
       void qc.invalidateQueries({ queryKey: ['settings', 'theme'] })
     },
     onError: (e: Error) => toast.error(e.message),
@@ -64,6 +117,19 @@ function Appearance() {
 
   const savedPreset = data ? presetFor(data.preset_key).key : DEFAULT_PRESET_KEY
   const savedFont = data?.font_key ?? null
+  const isCustomOn = data?.is_custom_theme ?? false
+
+  /** The 8 fields being edited — seeded from the server once, then locally owned. */
+  const [colorDraft, setColorDraft] = useState<CustomThemeColors>(EMPTY_CUSTOM_COLORS)
+  const [radiusDraft, setRadiusDraft] = useState('0.5')
+  const [customSeeded, setCustomSeeded] = useState(false)
+
+  useEffect(() => {
+    if (!data || customSeeded) return
+    setColorDraft(colorsFromTheme(data))
+    setRadiusDraft(data.border_radius ?? '0.5')
+    setCustomSeeded(true)
+  }, [data, customSeeded])
 
   // Every sample renders in its own face, so the gallery loads them all up
   // front — a card whose sample is still in the fallback stack is telling the
@@ -77,7 +143,12 @@ function Appearance() {
   useEffect(() => {
     if (!data || preview) return
     applyTheme(data.preset_key, data.font_key)
-  }, [data, preview, applyTheme])
+    applyCustom(
+      data.is_custom_theme
+        ? { enabled: true, colors: colorsFromTheme(data), radius: data.border_radius ?? null }
+        : null,
+    )
+  }, [data, preview, applyTheme, applyCustom])
 
   function startPreview(preset: ThemePreset, font: string | null = null) {
     setPreview({ preset: preset.key, font })
@@ -87,6 +158,30 @@ function Appearance() {
   function cancelPreview() {
     setPreview(null)
     applyTheme(savedPreset, savedFont)
+  }
+
+  function toggleCustomTheme(next: boolean) {
+    save.mutate({
+      preset_key: savedPreset,
+      font_key: savedFont,
+      is_custom_theme: next,
+      ...Object.fromEntries(
+        COLOR_FIELDS.map((f) => [CUSTOM_COLUMN_BY_FIELD[f.key], colorDraft[f.key]]),
+      ),
+      border_radius: radiusDraft,
+    })
+  }
+
+  function saveCustomColors() {
+    save.mutate({
+      preset_key: savedPreset,
+      font_key: savedFont,
+      is_custom_theme: true,
+      ...Object.fromEntries(
+        COLOR_FIELDS.map((f) => [CUSTOM_COLUMN_BY_FIELD[f.key], colorDraft[f.key]]),
+      ),
+      border_radius: radiusDraft,
+    })
   }
 
   if (isLoading) {
@@ -135,137 +230,51 @@ function Appearance() {
         </div>
       )}
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {Object.values(THEME_PRESETS).map((p) => (
-          <ThemeCard
-            key={p.key}
-            preset={p}
-            scheme={scheme}
-            applied={p.key === savedPreset}
-            appliedFont={p.key === savedPreset ? savedFont : null}
-            canEdit={isOwner}
-            busy={save.isPending}
-            previewing={preview?.preset === p.key}
-            onPreview={() => startPreview(p)}
-            onApply={() => save.mutate({ preset_key: p.key, font_key: null })}
-            onCustomizeFont={() => setFontFor(p)}
+      <Card className="mt-6">
+        <CardContent className="p-5 sm:p-6">
+          <Switch
+            checked={isCustomOn}
+            onChange={toggleCustomTheme}
+            disabled={!isOwner || save.isPending}
+            label="Enable custom theme"
+            description={
+              isCustomOn
+                ? 'Your studio is using the custom palette below instead of a preset.'
+                : 'When off, your workspace uses the preset picked below.'
+            }
           />
-        ))}
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* Custom Color & Border Radius */}
-      <div className="mt-8 grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Palette className="h-4 w-4" /> Custom Accent Color
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Override the theme's accent color with your brand color.
-            </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={data?.custom_color ?? '#6366f1'}
-                onChange={(e) => {
-                  // Live preview of custom color
-                  document.documentElement.style.setProperty('--custom-accent', e.target.value)
-                }}
-                onBlur={(e) => {
-                  if (isOwner) {
-                    save.mutate({
-                      preset_key: savedPreset,
-                      font_key: savedFont,
-                      custom_color: e.target.value,
-                    })
-                  }
-                }}
-                className="h-10 w-10 cursor-pointer rounded border border-border"
-              />
-              <Input
-                value={data?.custom_color ?? ''}
-                onChange={(e) => {
-                  if (isOwner) {
-                    save.mutate({
-                      preset_key: savedPreset,
-                      font_key: savedFont,
-                      custom_color: e.target.value || null,
-                    })
-                  }
-                }}
-                placeholder="#6366f1"
-                className="flex-1"
-              />
-              {data?.custom_color && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    save.mutate({
-                      preset_key: savedPreset,
-                      font_key: savedFont,
-                      custom_color: null,
-                    })
-                  }}
-                >
-                  Reset
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Ruler className="h-4 w-4" /> Border Radius
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Adjust the roundness of cards, buttons, and inputs.
-            </p>
-            <div className="grid grid-cols-5 gap-2">
-              {[
-                { value: '0', label: 'None' },
-                { value: '0.25', label: 'Small' },
-                { value: '0.5', label: 'Default' },
-                { value: '0.75', label: 'Large' },
-                { value: '1', label: 'Full' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    if (isOwner) {
-                      document.documentElement.style.setProperty('--radius', `${opt.value}rem`)
-                      save.mutate({
-                        preset_key: savedPreset,
-                        font_key: savedFont,
-                        border_radius: opt.value,
-                      })
-                    }
-                  }}
-                  className={cn(
-                    'flex flex-col items-center gap-1 rounded-lg border p-2 text-xs transition-colors',
-                    data?.border_radius === opt.value
-                      ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
-                      : 'border-border hover:bg-accent',
-                  )}
-                >
-                  <div
-                    className="h-6 w-6 border-2 border-primary"
-                    style={{ borderRadius: `${opt.value}rem` }}
-                  />
-                  <span>{opt.label}</span>
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {isCustomOn ? (
+        <CustomizePanel
+          colors={colorDraft}
+          radius={radiusDraft}
+          onColorsChange={setColorDraft}
+          onRadiusChange={setRadiusDraft}
+          onSave={saveCustomColors}
+          canEdit={isOwner}
+          busy={save.isPending}
+        />
+      ) : (
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Object.values(THEME_PRESETS).map((p) => (
+            <ThemeCard
+              key={p.key}
+              preset={p}
+              scheme={scheme}
+              applied={p.key === savedPreset}
+              appliedFont={p.key === savedPreset ? savedFont : null}
+              canEdit={isOwner}
+              busy={save.isPending}
+              previewing={preview?.preset === p.key}
+              onPreview={() => startPreview(p)}
+              onApply={() => save.mutate({ preset_key: p.key, font_key: null })}
+              onCustomizeFont={() => setFontFor(p)}
+            />
+          ))}
+        </div>
+      )}
 
       {fontFor && (
         <FontDialog
@@ -401,6 +410,171 @@ function Swatches({ tokens }: { tokens: Record<string, string> }) {
           style={{ backgroundColor: value }}
         />
       ))}
+    </div>
+  )
+}
+
+/**
+ * The 8-field colour editor plus corner radius, with a live preview that only
+ * reads inline CSS variables scoped to itself — so a half-typed hex never
+ * repaints the whole settings page while you're still picking it.
+ */
+function CustomizePanel({
+  colors,
+  radius,
+  onColorsChange,
+  onRadiusChange,
+  onSave,
+  canEdit,
+  busy,
+}: {
+  colors: CustomThemeColors
+  radius: string
+  onColorsChange: (next: CustomThemeColors) => void
+  onRadiusChange: (next: string) => void
+  onSave: () => void
+  canEdit: boolean
+  busy: boolean
+}) {
+  const preview: Record<string, string> = {
+    '--preview-primary': colors.primary || 'var(--primary)',
+    '--preview-primary-foreground': colors.primary ? foregroundForHex(colors.primary) : 'var(--primary-foreground)',
+    '--preview-background': colors.background || 'var(--background)',
+    '--preview-surface': colors.surface || 'var(--card)',
+    '--preview-text': colors.text || 'var(--foreground)',
+    '--preview-muted-text': colors.muted_text || 'var(--muted-foreground)',
+    '--preview-border': colors.border || 'var(--border)',
+    '--preview-radius': `${radius}rem`,
+  }
+
+  return (
+    <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+      <Card>
+        <CardContent className="flex flex-col gap-6 p-5 sm:p-6">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+              <Palette className="h-4 w-4" /> Colours
+            </h3>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Fine-tune your colours if you already know your brand palette. Leave a field blank to keep
+              the default theme's value.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {COLOR_FIELDS.map((f) => (
+              <div key={f.key} className="flex flex-col gap-1.5">
+                <Label>{f.label}</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={colors[f.key] ?? '#ffffff'}
+                    onChange={(e) => onColorsChange({ ...colors, [f.key]: e.target.value })}
+                    disabled={!canEdit}
+                    className="h-9 w-9 shrink-0 cursor-pointer rounded border border-border disabled:cursor-not-allowed"
+                  />
+                  <Input
+                    value={colors[f.key] ?? ''}
+                    onChange={(e) => onColorsChange({ ...colors, [f.key]: e.target.value || null })}
+                    placeholder={f.hint}
+                    disabled={!canEdit}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+              <Ruler className="h-4 w-4" /> Shape
+            </h3>
+            <p className="mt-0.5 mb-3 text-sm text-muted-foreground">
+              Adjust the roundness of cards, buttons, and inputs.
+            </p>
+            <div className="grid grid-cols-5 gap-2">
+              {RADIUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => onRadiusChange(opt.value)}
+                  className={cn(
+                    'flex flex-col items-center gap-1 rounded-lg border p-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+                    radius === opt.value
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                      : 'border-border hover:bg-accent',
+                  )}
+                >
+                  <div className="h-6 w-6 border-2 border-primary" style={{ borderRadius: `${opt.value}rem` }} />
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={onSave} disabled={!canEdit || busy}>
+              {busy ? 'Saving…' : 'Save custom theme'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="lg:sticky lg:top-4 lg:self-start">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          Live preview
+        </p>
+        <div
+          style={{
+            ...preview,
+            backgroundColor: 'var(--preview-background)',
+            color: 'var(--preview-text)',
+            borderRadius: 'var(--preview-radius)',
+          }}
+          className="border p-4"
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--preview-surface)',
+              borderColor: 'var(--preview-border)',
+              borderRadius: 'var(--preview-radius)',
+            }}
+            className="flex flex-col gap-3 border p-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold">Sample card</span>
+              <StatusBadge tone="success">Active</StatusBadge>
+            </div>
+            <p style={{ color: 'var(--preview-muted-text)' }} className="text-sm">
+              Live preview of your workspace theme.
+            </p>
+            <div className="flex gap-2">
+              <span
+                style={{
+                  backgroundColor: 'var(--preview-primary)',
+                  color: 'var(--preview-primary-foreground)',
+                  borderRadius: 'var(--preview-radius)',
+                }}
+                className="px-3 py-1.5 text-sm font-medium"
+              >
+                Primary action
+              </span>
+              <span
+                style={{ borderColor: 'var(--preview-border)', borderRadius: 'var(--preview-radius)' }}
+                className="border px-3 py-1.5 text-sm font-medium"
+              >
+                Secondary
+              </span>
+            </div>
+            <input
+              readOnly
+              value="Sample input"
+              style={{ borderColor: 'var(--preview-border)', borderRadius: 'var(--preview-radius)' }}
+              className="border bg-transparent px-2 py-1 text-sm"
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -28,7 +28,7 @@ export function FilterTabs<T extends string>({
           className={cn(
             'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
             value === t.value
-              ? 'bg-background text-foreground shadow-sm'
+              ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >

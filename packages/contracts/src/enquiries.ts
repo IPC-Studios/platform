@@ -8,6 +8,10 @@ import { uuid, isoDateTime } from './shared/primitives'
  * leads — a lead list nobody trusts is a lead list nobody opens. Converting
  * moves one across and records which lead it became.
  */
+/** The five system statuses every studio starts with. A studio can add its own
+ * alongside them (via the `enquiry_status` custom-lookups category), so the
+ * column itself is free text -- this enum is only for code that means one of
+ * these five specifically (the summary buckets, the open/closed split). */
 export const enquiryStatus = z.enum(['new', 'reviewed', 'contacted', 'converted', 'closed'])
 export type EnquiryStatus = z.infer<typeof enquiryStatus>
 
@@ -21,7 +25,7 @@ export const enquiry = z.object({
   email: z.string().nullable(),
   message: z.string().nullable(),
   source: z.string().nullable(),
-  enquiry_status: enquiryStatus,
+  enquiry_status: z.string(),
   assigned_to: uuid.nullable(),
   assigned_to_name: z.string().nullable(),
   converted_lead_id: uuid.nullable(),
@@ -54,7 +58,7 @@ export const saveEnquiryRequest = z.object({
   email: z.string().trim().max(200).nullish(),
   message: z.string().trim().max(2000).nullish(),
   source: z.string().trim().max(60).nullish(),
-  enquiry_status: enquiryStatus.default('new'),
+  enquiry_status: z.string().trim().min(1).max(60).default('new'),
   assigned_to: uuid.nullish(),
 })
 export type SaveEnquiryRequest = z.infer<typeof saveEnquiryRequest>

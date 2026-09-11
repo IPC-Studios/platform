@@ -27,7 +27,7 @@ import {
   useSaveEnquiry,
 } from '@/features/enquiries/api'
 
-const TONE: Record<EnquiryStatus, 'neutral' | 'info' | 'success' | 'warning'> = {
+const TONE: Partial<Record<string, 'neutral' | 'info' | 'success' | 'warning'>> = {
   new: 'info',
   reviewed: 'neutral',
   contacted: 'warning',
@@ -96,6 +96,72 @@ function EnquirySourcePicker({ value, onChange }: { value: string; onChange: (v:
           </option>
         ))}
         {session?.is_owner && <option value="__add__">+ Add new source…</option>}
+      </Select>
+    </div>
+  )
+}
+
+/** Pick a status — the 5 system ones plus whatever the studio has added, or add one inline (owner only). */
+function EnquiryStatusPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { session } = useAuth()
+  const { data: extra } = useActiveLookups('enquiry_status')
+  const createLookup = useCreateCustomLookup()
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+
+  const systemValues = new Set(TABS.filter((t) => t.value !== 'all').map((t) => t.value))
+  const custom = (extra ?? []).filter((s) => !systemValues.has(s.value as EnquiryStatus))
+
+  async function onAdd() {
+    if (!name.trim()) return
+    await createLookup.mutateAsync({ category: 'enquiry_status', value: name.trim() })
+    onChange(name.trim())
+    setAdding(false)
+    setName('')
+  }
+
+  if (adding) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>New status</Label>
+        <div className="flex gap-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Quoted" autoFocus />
+          <Button type="button" size="sm" onClick={() => void onAdd()} disabled={!name.trim() || createLookup.isPending}>
+            Add
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>Status</Label>
+      <Select
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === '__add__') setAdding(true)
+          else onChange(e.target.value)
+        }}
+      >
+        {TABS.filter((t) => t.value !== 'all').map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+        {/* A status logged before it was renamed or removed still shows its own text, unselected from the list. */}
+        {value && !systemValues.has(value as EnquiryStatus) && !custom.some((s) => s.value === value) && (
+          <option value={value}>{humanize(value)}</option>
+        )}
+        {custom.map((s) => (
+          <option key={s.id} value={s.value}>
+            {humanize(s.value)}
+          </option>
+        ))}
+        {session?.is_owner && <option value="__add__">+ Add new status…</option>}
       </Select>
     </div>
   )
@@ -230,7 +296,7 @@ function EnquiryRow({ enquiry, canEdit }: { enquiry: Enquiry; canEdit: boolean }
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium">{enquiry.name}</p>
-            <StatusBadge tone={TONE[enquiry.enquiry_status]}>
+            <StatusBadge tone={TONE[enquiry.enquiry_status] ?? 'neutral'}>
               {humanize(enquiry.enquiry_status)}
             </StatusBadge>
             {enquiry.source && <StatusBadge>{humanize(enquiry.source)}</StatusBadge>}
@@ -362,21 +428,10 @@ function EnquiryDialog({ enquiry }: { enquiry?: Enquiry }) {
               value={draft.source ?? ''}
               onChange={(v) => setDraft((d) => ({ ...d, source: v || null }))}
             />
-            <div className="flex flex-col gap-1.5">
-              <Label>Status</Label>
-              <Select
-                value={draft.enquiry_status}
-                onChange={(e) =>
-                  setDraft((d) => ({ ...d, enquiry_status: e.target.value as EnquiryStatus }))
-                }
-              >
-                {TABS.filter((t) => t.value !== 'all').map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <EnquiryStatusPicker
+              value={draft.enquiry_status}
+              onChange={(v) => setDraft((d) => ({ ...d, enquiry_status: v }))}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -401,7 +456,7 @@ function EnquiryDialog({ enquiry }: { enquiry?: Enquiry }) {
               onChange={(e) => setDraft((d) => ({ ...d, message: e.target.value }))}
               rows={3}
               placeholder="Wedding in December, looking for candid plus film."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 

@@ -308,7 +308,7 @@ function Help({ children }: { children: ReactNode }) {
 
 function Snippet({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md border border-border bg-background p-3 font-mono text-xs">
+    <pre className="overflow-x-auto rounded-md border border-border bg-card p-3 font-mono text-xs">
       {children}
     </pre>
   )

@@ -158,7 +158,7 @@ export function CompensationFields({
             {PAY_COMPONENTS.map((c) => (
               <label
                 key={c.key}
-                className="flex min-h-10 cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-2.5"
+                className="flex min-h-10 cursor-pointer items-start gap-3 rounded-md border border-border bg-card p-2.5"
               >
                 <input
                   type="checkbox"
@@ -265,7 +265,7 @@ export function CompensationFields({
           value={value.compensation_notes}
           onChange={(e) => onChange('compensation_notes', e.target.value)}
           placeholder="Optional context about this compensation"
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+          className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm"
         />
       </div>
 

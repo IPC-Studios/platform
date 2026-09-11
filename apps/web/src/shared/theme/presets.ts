@@ -230,3 +230,83 @@ export const THEME_TOKENS = [
   '--accent',
   '--accent-foreground',
 ] as const
+
+/**
+ * A fully custom theme's 8 independently-picked colours — the studio types a
+ * hex for each rather than choosing a named preset. Unset fields fall back to
+ * the current preset's own value, so turning "Enable custom theme" on with
+ * nothing filled in yet doesn't blank the interface.
+ */
+export interface CustomThemeColors {
+  primary: string | null
+  secondary: string | null
+  accent: string | null
+  background: string | null
+  surface: string | null
+  text: string | null
+  muted_text: string | null
+  border: string | null
+}
+
+export const EMPTY_CUSTOM_COLORS: CustomThemeColors = {
+  primary: null,
+  secondary: null,
+  accent: null,
+  background: null,
+  surface: null,
+  text: null,
+  muted_text: null,
+  border: null,
+}
+
+/** Readable near-black or near-white text for an arbitrary hex fill, by perceived brightness. */
+export function foregroundForHex(hex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return 'oklch(0.98 0 0)'
+  const n = parseInt(m[1]!, 16)
+  const r = (n >> 16) & 0xff
+  const g = (n >> 8) & 0xff
+  const b = n & 0xff
+  // Perceived brightness (ITU-R BT.601) — matches the industry-standard threshold
+  // for picking black-vs-white text on an arbitrary background.
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000
+  return brightness > 150 ? 'oklch(0.2 0.02 0)' : 'oklch(0.98 0 0)'
+}
+
+/**
+ * The token set a custom theme writes onto :root — every token a preset can
+ * set, plus the neutral surface tokens presets never touch. `base` is the
+ * current preset's own tokens for the active scheme, used as the fallback for
+ * any of the 8 fields the studio hasn't filled in yet.
+ */
+export function customThemeTokens(
+  colors: CustomThemeColors,
+  base: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = { ...base }
+  if (colors.primary) {
+    out['--primary'] = colors.primary
+    out['--ring'] = colors.primary
+    out['--primary-foreground'] = foregroundForHex(colors.primary)
+  }
+  if (colors.secondary) {
+    out['--brand'] = colors.secondary
+    out['--brand-foreground'] = foregroundForHex(colors.secondary)
+  }
+  if (colors.accent) {
+    out['--accent'] = colors.accent
+    out['--accent-foreground'] = foregroundForHex(colors.accent)
+  }
+  if (colors.background) out['--background'] = colors.background
+  if (colors.surface) out['--card'] = colors.surface
+  if (colors.text) {
+    out['--foreground'] = colors.text
+    out['--card-foreground'] = colors.text
+  }
+  if (colors.muted_text) out['--muted-foreground'] = colors.muted_text
+  if (colors.border) {
+    out['--border'] = colors.border
+    out['--input'] = colors.border
+  }
+  return out
+}

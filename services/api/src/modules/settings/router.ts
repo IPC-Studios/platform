@@ -111,13 +111,17 @@ export const settingsRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'settings.theme', () =>
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
-          select preset_key, font_key, color_scheme, custom_color, border_radius
+          select preset_key, font_key, color_scheme, custom_color, border_radius,
+                 is_custom_theme, primary_color, secondary_color, accent_color,
+                 background_color, surface_color, text_color, muted_text_color, border_color
           from company_theme_settings where company_id = ${auth.companyId}`
         return rows[0] ?? null
       }),
     )
     return c.json(
-      companyTheme.parse(row ?? { preset_key: 'ipc_classic', font_key: null, color_scheme: 'light', custom_color: null, border_radius: '0.5' }),
+      companyTheme.parse(
+        row ?? { preset_key: 'ipc_classic', font_key: null, color_scheme: 'light', custom_color: null, border_radius: '0.5' },
+      ),
     )
   })
 
@@ -135,14 +139,34 @@ export const settingsRouter = new Hono<AppEnv>()
             color_scheme: parsed.data.color_scheme,
             custom_color: parsed.data.custom_color ?? null,
             border_radius: parsed.data.border_radius ?? '0.5',
+            is_custom_theme: parsed.data.is_custom_theme ?? false,
+            primary_color: parsed.data.primary_color ?? null,
+            secondary_color: parsed.data.secondary_color ?? null,
+            accent_color: parsed.data.accent_color ?? null,
+            background_color: parsed.data.background_color ?? null,
+            surface_color: parsed.data.surface_color ?? null,
+            text_color: parsed.data.text_color ?? null,
+            muted_text_color: parsed.data.muted_text_color ?? null,
+            border_color: parsed.data.border_color ?? null,
           })}
           on conflict (company_id) do update
-            set preset_key    = excluded.preset_key,
-                font_key      = excluded.font_key,
-                color_scheme  = excluded.color_scheme,
-                custom_color  = excluded.custom_color,
-                border_radius = excluded.border_radius
-          returning preset_key, font_key, color_scheme, custom_color, border_radius`
+            set preset_key        = excluded.preset_key,
+                font_key          = excluded.font_key,
+                color_scheme      = excluded.color_scheme,
+                custom_color      = excluded.custom_color,
+                border_radius     = excluded.border_radius,
+                is_custom_theme   = excluded.is_custom_theme,
+                primary_color     = excluded.primary_color,
+                secondary_color   = excluded.secondary_color,
+                accent_color      = excluded.accent_color,
+                background_color  = excluded.background_color,
+                surface_color     = excluded.surface_color,
+                text_color        = excluded.text_color,
+                muted_text_color  = excluded.muted_text_color,
+                border_color      = excluded.border_color
+          returning preset_key, font_key, color_scheme, custom_color, border_radius,
+                    is_custom_theme, primary_color, secondary_color, accent_color,
+                    background_color, surface_color, text_color, muted_text_color, border_color`
         return rows[0] ?? null
       }),
     )

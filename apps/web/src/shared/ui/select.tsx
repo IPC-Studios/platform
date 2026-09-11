@@ -325,7 +325,7 @@ export function Select({ className, children, disabled, ...props }: ComponentPro
         aria-invalid={props['aria-invalid']}
         aria-label={props['aria-label']}
         className={cn(
-          'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background py-1 pl-3 pr-2.5 text-left text-sm shadow-sm transition-colors',
+          'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card py-1 pl-3 pr-2.5 text-left text-sm shadow-sm transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           'disabled:cursor-not-allowed disabled:opacity-50',
           'aria-invalid:border-destructive aria-invalid:focus-visible:ring-destructive',

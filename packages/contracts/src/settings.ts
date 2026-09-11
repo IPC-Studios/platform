@@ -96,6 +96,25 @@ export const themeFontKey = z.enum([
 ])
 export type ThemeFontKey = z.infer<typeof themeFontKey>
 
+const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+
+/**
+ * A fully custom palette: 8 independently-picked colours instead of a named
+ * preset. Every field is optional on both read and write — an unfilled one
+ * just falls back to whatever the studio's current preset ships with, so
+ * turning "Enable custom theme" on doesn't blank the interface.
+ */
+export const customThemeColorFields = [
+  'primary_color',
+  'secondary_color',
+  'accent_color',
+  'background_color',
+  'surface_color',
+  'text_color',
+  'muted_text_color',
+  'border_color',
+] as const
+
 export const companyTheme = z.object({
   // Tolerant on READ: a row written before a preset was renamed or retired must
   // still load — the UI falls back to the default rather than erroring the page.
@@ -104,6 +123,15 @@ export const companyTheme = z.object({
   color_scheme: z.enum(['light', 'dark', 'system']),
   custom_color: z.string().nullable().optional(),
   border_radius: z.string().nullable().optional(),
+  is_custom_theme: z.boolean().default(false),
+  primary_color: z.string().nullable().default(null),
+  secondary_color: z.string().nullable().default(null),
+  accent_color: z.string().nullable().default(null),
+  background_color: z.string().nullable().default(null),
+  surface_color: z.string().nullable().default(null),
+  text_color: z.string().nullable().default(null),
+  muted_text_color: z.string().nullable().default(null),
+  border_color: z.string().nullable().default(null),
 })
 export type CompanyTheme = z.infer<typeof companyTheme>
 
@@ -114,7 +142,16 @@ export const updateThemeRequest = z.object({
   // cards send; the font picker sends an explicit key.
   font_key: themeFontKey.nullish(),
   color_scheme: z.enum(['light', 'dark', 'system']).default('light'),
-  custom_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).nullish(),
+  custom_color: hexColor.nullish(),
   border_radius: z.enum(['0', '0.25', '0.5', '0.75', '1']).nullish(),
+  is_custom_theme: z.boolean().optional(),
+  primary_color: hexColor.nullish(),
+  secondary_color: hexColor.nullish(),
+  accent_color: hexColor.nullish(),
+  background_color: hexColor.nullish(),
+  surface_color: hexColor.nullish(),
+  text_color: hexColor.nullish(),
+  muted_text_color: hexColor.nullish(),
+  border_color: hexColor.nullish(),
 })
 export type UpdateThemeRequest = z.infer<typeof updateThemeRequest>

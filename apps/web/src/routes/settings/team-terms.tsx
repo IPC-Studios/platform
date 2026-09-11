@@ -351,7 +351,7 @@ function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
               onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
               rows={12}
               placeholder="The Team Member agrees to…"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <p className="text-xs text-muted-foreground">
               {used.length
