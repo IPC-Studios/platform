@@ -5,17 +5,9 @@ import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
-import { formatINR } from '@/shared/ui/format'
 import { useUpdateMember, useAssignRoles, useEmployeeRoles } from './api'
+import { CompensationFields, type CompensationDraft } from './CompensationFields'
 import { byStage } from './role-stages'
-
-const PAYOUT_LABEL: Record<string, string> = {
-  salary: 'Salary',
-  per_shoot: 'Per shoot',
-  per_day: 'Per day',
-  per_project: 'Per project',
-  custom: 'Custom',
-}
 
 /**
  * Everything about a team member the create wizard could set, editable
@@ -39,18 +31,24 @@ export function EditMemberDialog({ member }: { member: DirectoryMember }) {
   )
   const [roleIds, setRoleIds] = useState<string[]>(member.role_ids)
 
-  const [showPay, setShowPay] = useState(false)
-  const [salary, setSalary] = useState(member.salary != null ? String(member.salary) : '')
-  const [payoutType, setPayoutType] = useState(member.payout_type ?? '')
-  const [commissionPct, setCommissionPct] = useState(member.commission_pct != null ? String(member.commission_pct) : '')
-  const [commissionBasis, setCommissionBasis] = useState(member.commission_basis ?? '')
-  const [stipendAmount, setStipendAmount] = useState(member.stipend_amount != null ? String(member.stipend_amount) : '')
-  const [payFrom, setPayFrom] = useState(member.pay_effective_from ?? '')
-  const [payTo, setPayTo] = useState(member.pay_effective_to ?? '')
-  const [compNotes, setCompNotes] = useState(member.compensation_notes ?? '')
+  const [comp, setComp] = useState<CompensationDraft>({
+    payment_type: member.payment_type ?? '',
+    pay_components: member.pay_components,
+    payment_status: member.payment_status,
+    salary: member.salary != null ? String(member.salary) : '',
+    payout_type: member.payout_type ?? '',
+    commission_pct: member.commission_pct != null ? String(member.commission_pct) : '',
+    commission_basis: member.commission_basis ?? '',
+    stipend_amount: member.stipend_amount != null ? String(member.stipend_amount) : '',
+    pay_effective_from: member.pay_effective_from ?? '',
+    pay_effective_to: member.pay_effective_to ?? '',
+    compensation_notes: member.compensation_notes ?? '',
+  })
+  function setCompField<K extends keyof CompensationDraft>(key: K, value: CompensationDraft[K]) {
+    setComp((prev) => ({ ...prev, [key]: value }))
+  }
 
   const [error, setError] = useState<string | null>(null)
-  const freelance = engagementType === 'freelancer'
 
   function toggleRole(id: string) {
     setRoleIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]))
@@ -68,14 +66,19 @@ export function EditMemberDialog({ member }: { member: DirectoryMember }) {
           address: address.trim() || null,
           ...(role === 'super_admin' ? {} : { role }),
           engagement_type: engagementType,
-          salary: salary.trim() === '' ? null : Number(salary),
-          payout_type: payoutType ? (payoutType as NonNullable<typeof member.payout_type>) : null,
-          commission_pct: commissionPct.trim() === '' ? null : Number(commissionPct),
-          commission_basis: commissionBasis ? (commissionBasis as NonNullable<typeof member.commission_basis>) : null,
-          stipend_amount: stipendAmount.trim() === '' ? null : Number(stipendAmount),
-          pay_effective_from: payFrom || null,
-          pay_effective_to: payTo || null,
-          compensation_notes: compNotes.trim() || null,
+          salary: comp.salary.trim() === '' ? null : Number(comp.salary),
+          payout_type: comp.payout_type ? (comp.payout_type as NonNullable<typeof member.payout_type>) : null,
+          commission_pct: comp.commission_pct.trim() === '' ? null : Number(comp.commission_pct),
+          commission_basis: comp.commission_basis
+            ? (comp.commission_basis as NonNullable<typeof member.commission_basis>)
+            : null,
+          stipend_amount: comp.stipend_amount.trim() === '' ? null : Number(comp.stipend_amount),
+          pay_effective_from: comp.pay_effective_from || null,
+          pay_effective_to: comp.pay_effective_to || null,
+          compensation_notes: comp.compensation_notes.trim() || null,
+          payment_type: comp.payment_type.trim() || null,
+          pay_components: comp.pay_components,
+          payment_status: comp.payment_status,
         },
       })
       const currentIds = new Set(member.role_ids)
@@ -157,66 +160,9 @@ export function EditMemberDialog({ member }: { member: DirectoryMember }) {
             )}
           </div>
 
-          {!showPay ? (
-            <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setShowPay(true)}>
-              Edit pay ({salary ? formatINR(Number(salary)) : 'not set'}
-              {payoutType ? ` · ${PAYOUT_LABEL[payoutType]}` : ''})
-            </Button>
-          ) : (
-            <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <Label>{freelance ? 'Standard rate (₹)' : 'Monthly salary (₹)'}</Label>
-                  <Input inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="0" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Payout type</Label>
-                  <Select value={payoutType} onChange={(e) => setPayoutType(e.target.value)}>
-                    <option value="">Same as above</option>
-                    <option value="salary">Salary</option>
-                    <option value="per_shoot">Per shoot</option>
-                    <option value="per_day">Per day</option>
-                    <option value="per_project">Per project</option>
-                    <option value="custom">Custom</option>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Commission %</Label>
-                  <Input inputMode="numeric" value={commissionPct} onChange={(e) => setCommissionPct(e.target.value)} placeholder="0" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Commission basis</Label>
-                  <Select value={commissionBasis} onChange={(e) => setCommissionBasis(e.target.value)}>
-                    <option value="">—</option>
-                    <option value="revenue">On project revenue</option>
-                    <option value="payment">On payment received</option>
-                    <option value="profit">On profit</option>
-                    <option value="manual">Manual</option>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Stipend (₹)</Label>
-                  <Input inputMode="numeric" value={stipendAmount} onChange={(e) => setStipendAmount(e.target.value)} placeholder="0" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Effective from</Label>
-                  <Input type="date" value={payFrom} onChange={(e) => setPayFrom(e.target.value)} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Effective to</Label>
-                  <Input type="date" value={payTo} onChange={(e) => setPayTo(e.target.value)} />
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Pay notes</Label>
-                <Input value={compNotes} onChange={(e) => setCompNotes(e.target.value)} placeholder="e.g. Second-shooter rate for weddings" />
-              </div>
-            </div>
-          )}
+          <hr className="border-border" />
+
+          <CompensationFields value={comp} onChange={setCompField} effectiveFromRequired={false} />
 
           <Card>
             <CardContent className="p-3 text-xs text-muted-foreground">

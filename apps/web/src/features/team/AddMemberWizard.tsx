@@ -9,6 +9,7 @@ import type { ProductionStage } from '@ipc/contracts'
 import type { FieldErrors } from '@/shared/forms/field-errors'
 import { scrollIntoView } from '@/shared/ui/motion'
 import { useAddMember, useCreateRole, useEmployeeRoles, useRoleLibrary } from './api'
+import { BUILT_IN_TYPES, CompensationFields, PAY_COMPONENTS } from './CompensationFields'
 import { STAGE_LABEL, STAGE_ORDER, stageOf } from './role-stages'
 import {
   EMPTY_DRAFT,
@@ -586,94 +587,33 @@ function DetailsStep({
   set: Setter
   errors: FieldErrors<keyof MemberDraft>
 }) {
-  const freelance = draft.engagement_type === 'freelancer'
-  const [showPayStructure, setShowPayStructure] = useState(
-    () => !!(draft.payout_type || draft.commission_pct || draft.stipend_amount),
-  )
   return (
     <>
       <StepHeader
         title="Anything else on record?"
-        description="Both are optional — you can fill them in later from the directory."
+        description="Both sections are optional — you can fill them in later from the directory."
       />
-      <div className="flex flex-col gap-4">
-        <Field
-          label={freelance ? 'Standard rate (₹)' : 'Monthly salary (₹)'}
-          error={errors.salary}
-          hint={
-            freelance
-              ? 'What you usually pay them per shoot. Only owners can see this.'
-              : 'Only owners can see this.'
-          }
-        >
-          <Input
-            inputMode="numeric"
-            value={draft.salary}
-            onChange={(e) => set('salary', e.target.value)}
-            placeholder="0"
-            aria-invalid={!!errors.salary}
-          />
-        </Field>
+      <div className="flex flex-col gap-5">
         <Field label="Address" error={errors.address}>
-          <Input
+          <textarea
+            rows={2}
             value={draft.address}
             onChange={(e) => set('address', e.target.value)}
             placeholder="City or full address"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
           />
         </Field>
 
-        {!showPayStructure ? (
-          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setShowPayStructure(true)}>
-            + Add a pay structure (commission, per-shoot rate, stipend)
-          </Button>
-        ) : (
-          <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
-            <p className="text-xs text-muted-foreground">
-              For crew paid per shoot with a commission on top, or a fixed stipend — the figure above stays their
-              base rate.
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Payout type" hint="How this person is actually paid.">
-                <Select value={draft.payout_type} onChange={(e) => set('payout_type', e.target.value as MemberDraft['payout_type'])}>
-                  <option value="">Same as above</option>
-                  <option value="salary">Salary</option>
-                  <option value="per_shoot">Per shoot</option>
-                  <option value="per_day">Per day</option>
-                  <option value="per_project">Per project</option>
-                  <option value="custom">Custom</option>
-                </Select>
-              </Field>
-              <Field label="Stipend (₹)" hint="A fixed amount on top, if any.">
-                <Input inputMode="numeric" value={draft.stipend_amount} onChange={(e) => set('stipend_amount', e.target.value)} placeholder="0" />
-              </Field>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Commission %" error={errors.commission_pct}>
-                <Input inputMode="numeric" value={draft.commission_pct} onChange={(e) => set('commission_pct', e.target.value)} placeholder="0" />
-              </Field>
-              <Field label="Commission basis">
-                <Select value={draft.commission_basis} onChange={(e) => set('commission_basis', e.target.value as MemberDraft['commission_basis'])}>
-                  <option value="">—</option>
-                  <option value="revenue">On project revenue</option>
-                  <option value="payment">On payment received</option>
-                  <option value="profit">On profit</option>
-                  <option value="manual">Manual</option>
-                </Select>
-              </Field>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Effective from">
-                <Input type="date" value={draft.pay_effective_from} onChange={(e) => set('pay_effective_from', e.target.value)} />
-              </Field>
-              <Field label="Effective to" hint="Leave blank if ongoing.">
-                <Input type="date" value={draft.pay_effective_to} onChange={(e) => set('pay_effective_to', e.target.value)} />
-              </Field>
-            </div>
-            <Field label="Notes">
-              <Input value={draft.compensation_notes} onChange={(e) => set('compensation_notes', e.target.value)} placeholder="e.g. Second-shooter rate for weddings" />
-            </Field>
-          </div>
-        )}
+        <hr className="border-border" />
+
+        <CompensationFields
+          value={draft}
+          onChange={(key, value) => set(key as keyof MemberDraft, value as never)}
+          errors={{
+            ...(errors.payment_type ? { payment_type: errors.payment_type } : {}),
+            ...(errors.pay_effective_from ? { pay_effective_from: errors.pay_effective_from } : {}),
+          }}
+        />
       </div>
     </>
   )
@@ -690,6 +630,12 @@ function ReviewStep({
   const jobRoles = (roles ?? []).filter((r) => draft.role_ids.includes(r.id)).map((r) => r.type_name)
   const problems = Object.values(errors).filter(Boolean)
 
+  const paymentTypeLabel =
+    BUILT_IN_TYPES.find((t) => t.value === draft.payment_type)?.label || draft.payment_type || '—'
+  const componentLabels = draft.pay_components
+    .map((c) => PAY_COMPONENTS.find((p) => p.key === c)?.label ?? c)
+    .join(', ')
+
   const rows: Array<[string, string]> = [
     ['Name', draft.name],
     ['Engagement', draft.engagement_type === 'freelancer' ? 'Freelancer / Vendor' : 'In-house staff'],
@@ -698,11 +644,16 @@ function ReviewStep({
     ['Login', draft.create_login ? 'Yes — password set' : 'No — directory only'],
     ['Access level', humanize(draft.role)],
     ['Job roles', jobRoles.length ? jobRoles.join(', ') : '—'],
-    [
-      draft.engagement_type === 'freelancer' ? 'Standard rate' : 'Monthly salary',
-      draft.salary.trim() ? formatINR(Number(draft.salary)) : '—',
-    ],
     ['Address', draft.address || '—'],
+    ['Payment type', draft.payment_type ? paymentTypeLabel : '—'],
+    ...(draft.payment_type
+      ? ([
+          ['Pay components', componentLabels || '—'],
+          ['Payment status', humanize(draft.payment_status)],
+          ['Amount', draft.salary.trim() ? formatINR(Number(draft.salary)) : '—'],
+          ['Effective from', draft.pay_effective_from || '—'],
+        ] as Array<[string, string]>)
+      : []),
   ]
 
   return (

@@ -78,6 +78,8 @@ describe('toPayload', () => {
       phone: '9876543210',
       role: 'employee',
       role_ids: [],
+      pay_components: [],
+      payment_status: 'active',
     })
   })
 

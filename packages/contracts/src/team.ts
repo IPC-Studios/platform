@@ -10,6 +10,14 @@ export type EngagementType = z.infer<typeof engagementType>
 
 export const memberStatus = z.enum(['active', 'inactive', 'pending'])
 
+/** One financial component of a person's pay — freely combined (salary + commission, say). */
+export const payComponent = z.enum(['monthly_salary', 'freelancer_rate', 'commission', 'stipend'])
+export type PayComponent = z.infer<typeof payComponent>
+
+/** Lifecycle of THIS pay arrangement — separate from the person's own account status. */
+export const paymentStatus = z.enum(['active', 'paused', 'ended'])
+export type PaymentStatus = z.infer<typeof paymentStatus>
+
 /** The app-role ladder an owner may hand out. Owner (super_admin) is not one. */
 export const assignableRole = z.enum(['admin', 'manager', 'employee'])
 export type AssignableRole = z.infer<typeof assignableRole>
@@ -88,6 +96,10 @@ export const directoryMember = z.object({
   pay_effective_from: isoDate.nullable(),
   pay_effective_to: isoDate.nullable(),
   compensation_notes: z.string().nullable(),
+  /** Top-level pay classification: a built-in key or a studio-defined lookup value. */
+  payment_type: z.string().nullable(),
+  pay_components: z.array(payComponent).default([]),
+  payment_status: paymentStatus,
   created_at: isoDateTime,
   role_names: z.array(z.string()),
   role_ids: z.array(uuid),
@@ -122,18 +134,27 @@ export const addMemberRequest = z
     pay_effective_from: isoDate.optional(),
     pay_effective_to: isoDate.optional(),
     compensation_notes: z.string().trim().max(2000).optional(),
+    payment_type: z.string().trim().min(1).max(60).optional(),
+    pay_components: z.array(payComponent).max(4).default([]),
+    payment_status: paymentStatus.default('active'),
   })
   .superRefine((v, ctx) => {
-    if (!v.create_login) return
-    if (!v.email) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['email'], message: 'email is required for a login' })
+    if (v.create_login) {
+      if (!v.email) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['email'], message: 'email is required for a login' })
+      }
+      if (!v.password) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['password'],
+          message: 'password is required for a login',
+        })
+      }
     }
-    if (!v.password) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['password'],
-        message: 'password is required for a login',
-      })
+    // A pay arrangement needs a start date once one is set up at all -- the
+    // date the studio agreed to pay this, not an afterthought.
+    if (v.payment_type && !v.pay_effective_from) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pay_effective_from'], message: 'effective from is required' })
     }
   })
 export type AddMemberRequest = z.infer<typeof addMemberRequest>
@@ -164,6 +185,9 @@ export const updateMemberRequest = z.object({
   pay_effective_from: isoDate.nullable().optional(),
   pay_effective_to: isoDate.nullable().optional(),
   compensation_notes: z.string().trim().max(2000).nullable().optional(),
+  payment_type: z.string().trim().min(1).max(60).nullable().optional(),
+  pay_components: z.array(payComponent).max(4).optional(),
+  payment_status: paymentStatus.optional(),
 })
 export type UpdateMemberRequest = z.infer<typeof updateMemberRequest>
 

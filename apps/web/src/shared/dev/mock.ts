@@ -74,6 +74,9 @@ function member(
     pay_effective_from: string | null
     pay_effective_to: string | null
     compensation_notes: string | null
+    payment_type: string | null
+    pay_components: ('monthly_salary' | 'freelancer_rate' | 'commission' | 'stipend')[]
+    payment_status: 'active' | 'paused' | 'ended'
   }> = {},
 ) {
   return {
@@ -98,6 +101,9 @@ function member(
     pay_effective_from: null,
     pay_effective_to: null,
     compensation_notes: null,
+    payment_type: null,
+    pay_components: [],
+    payment_status: 'active' as const,
     ...over,
   }
 }
@@ -300,6 +306,9 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
       token_type: 'bearer',
       expires_in: 1800,
     }
+  if (method === 'GET' && path.startsWith('/settings/lookups/active')) return []
+  if (method === 'GET' && path.startsWith('/settings/lookups')) return []
+  if (method === 'POST' && path === '/settings/lookups') return { id: uid(0xdc) }
   if (method === 'GET' && path === '/settings/profile') return profileFx
   if (method === 'PATCH' && path === '/settings/profile') {
     Object.assign(profileFx, body as Record<string, unknown>)
@@ -1485,6 +1494,10 @@ const directory = [
     role_ids: [ROLE.photographer],
     role_names: ['Photographer'],
     created_at: '2026-05-14T10:00:00Z',
+    payment_type: 'salaried',
+    pay_components: ['monthly_salary'],
+    payment_status: 'active',
+    pay_effective_from: '2026-05-14',
   }),
   member(uid(0xe2), 'Anita Desai', 'anita@demostudio.in', 'employee', {
     engagement_type: 'freelancer',
@@ -1492,6 +1505,12 @@ const directory = [
     role_ids: [ROLE.photographer, ROLE.drone],
     role_names: ['Drone Operator', 'Photographer'],
     created_at: '2026-06-02T10:00:00Z',
+    payment_type: 'freelancer',
+    pay_components: ['freelancer_rate', 'commission'],
+    commission_pct: 5,
+    commission_basis: 'revenue',
+    payment_status: 'active',
+    pay_effective_from: '2026-06-02',
   }),
   member(uid(0xe3), 'Sana Khan', 'sana@demostudio.in', 'manager', {
     phone: '9833333333',
@@ -1501,6 +1520,10 @@ const directory = [
     role_ids: [ROLE.editor],
     role_names: ['Editor'],
     created_at: '2026-06-20T10:00:00Z',
+    payment_type: 'salaried',
+    pay_components: ['monthly_salary'],
+    payment_status: 'active',
+    pay_effective_from: '2026-06-20',
   }),
   member(uid(0xe4), 'Imran Qureshi', null, 'employee', {
     phone: '9844444444',

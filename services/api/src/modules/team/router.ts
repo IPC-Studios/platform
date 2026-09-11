@@ -80,6 +80,7 @@ export const teamRouter = new Hono<AppEnv>()
             u.engagement_type, u.login_enabled, u.salary, u.address, u.created_at,
             u.payout_type, u.commission_pct, u.commission_basis, u.stipend_amount,
             u.pay_effective_from, u.pay_effective_to, u.compensation_notes,
+            u.payment_type, u.pay_components, u.payment_status,
             coalesce(
               array_agg(er.type_name order by er.type_name) filter (where er.id is not null),
               '{}'::text[]
@@ -276,6 +277,9 @@ export const teamRouter = new Hono<AppEnv>()
       pay_effective_from,
       pay_effective_to,
       compensation_notes,
+      payment_type,
+      pay_components,
+      payment_status,
     } = parsed.data
 
     const pwHash = create_login && password ? await hashPassword(password) : null
@@ -318,6 +322,12 @@ export const teamRouter = new Hono<AppEnv>()
               pay_effective_to: pay_effective_to ?? null,
               compensation_notes: compensation_notes ?? null,
               login_enabled: create_login,
+              payment_type: payment_type ?? null,
+              // Explicit oid (1009 = _text): an empty array has no element to
+              // infer a type from and postgres.js falls back to "unspecified",
+              // which a plain text[] column has no reason to accept.
+              pay_components: sql.array(pay_components, 1009),
+              payment_status,
             })}`
           for (const roleId of role_ids) {
             await sql`
@@ -348,8 +358,8 @@ export const teamRouter = new Hono<AppEnv>()
     const id = uuidParam(c)
     const parsed = updateMemberRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the details.')
-    const patch = parsed.data
-    if (Object.keys(patch).length === 0) return c.json({ ok: true })
+    const { pay_components, ...patch } = parsed.data
+    if (Object.keys(parsed.data).length === 0) return c.json({ ok: true })
 
     const rows = await attempt(c, 'team.member_update', () =>
       withUser(
@@ -359,6 +369,9 @@ export const teamRouter = new Hono<AppEnv>()
           update users set ${sql({
             ...patch,
             ...(patch.role ? { employee_type: patch.role === 'employee' ? 1 : 2 } : {}),
+            // Same empty-array oid caveat as the create path -- special-cased
+            // rather than left to the generic spread's type inference.
+            ...(pay_components !== undefined ? { pay_components: sql.array(pay_components, 1009) } : {}),
           })}
           where user_id = ${id} and deleted_at is null
           returning user_id`,
@@ -377,7 +390,8 @@ export const teamRouter = new Hono<AppEnv>()
         ...(salary !== undefined ||
         commission_pct !== undefined ||
         stipend_amount !== undefined ||
-        compensation_notes !== undefined
+        compensation_notes !== undefined ||
+        pay_components !== undefined
           ? { compensation_changed: true }
           : {}),
       },

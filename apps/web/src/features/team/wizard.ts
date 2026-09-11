@@ -1,4 +1,4 @@
-import { addMemberRequest, type AddMemberRequest } from '@ipc/contracts'
+import { addMemberRequest, type AddMemberRequest, type PayComponent, type PaymentStatus } from '@ipc/contracts'
 import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 
 /**
@@ -43,6 +43,9 @@ export interface MemberDraft {
   pay_effective_from: string
   pay_effective_to: string
   compensation_notes: string
+  payment_type: string
+  pay_components: PayComponent[]
+  payment_status: PaymentStatus
 }
 
 export const EMPTY_DRAFT: MemberDraft = {
@@ -65,6 +68,9 @@ export const EMPTY_DRAFT: MemberDraft = {
   pay_effective_from: '',
   pay_effective_to: '',
   compensation_notes: '',
+  payment_type: '',
+  pay_components: [],
+  payment_status: 'active',
 }
 
 type DraftField = keyof MemberDraft
@@ -89,6 +95,9 @@ const LABELS: Record<string, string> = {
   pay_effective_from: 'Effective from',
   pay_effective_to: 'Effective to',
   compensation_notes: 'Pay notes',
+  payment_type: 'Payment type',
+  pay_components: 'Pay components',
+  payment_status: 'Payment status',
 }
 
 /** Which answers a step is responsible for — used to scope its messages. */
@@ -107,6 +116,9 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
     'pay_effective_from',
     'pay_effective_to',
     'compensation_notes',
+    'payment_type',
+    'pay_components',
+    'payment_status',
   ],
   review: [
     'name',
@@ -120,6 +132,8 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
     'payout_type',
     'commission_pct',
     'stipend_amount',
+    'payment_type',
+    'pay_effective_from',
   ],
 }
 
@@ -145,6 +159,9 @@ export function toPayload(d: MemberDraft): Record<string, unknown> {
     ...(d.pay_effective_from ? { pay_effective_from: d.pay_effective_from } : {}),
     ...(d.pay_effective_to ? { pay_effective_to: d.pay_effective_to } : {}),
     ...(d.compensation_notes.trim() ? { compensation_notes: d.compensation_notes.trim() } : {}),
+    ...(d.payment_type.trim() ? { payment_type: d.payment_type.trim() } : {}),
+    pay_components: d.pay_components,
+    payment_status: d.payment_status,
   }
 }
 

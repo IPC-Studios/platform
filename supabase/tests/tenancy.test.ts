@@ -132,6 +132,7 @@ async function freshDb() {
   await db.exec(mig('0091_auth_users_email_optional.sql'))
   await db.exec(mig('0092_gst_analysis_state_name.sql'))
   await db.exec(mig('0093_terms_documents_list_fn.sql'))
+  await db.exec(mig('0094_team_payment_type_and_status.sql'))
   return db
 }
 
