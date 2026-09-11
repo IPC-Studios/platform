@@ -533,7 +533,7 @@ function AddDeliverableDialog({ id }: { id: string }) {
       title: title.trim(),
       list_key: 'primary',
       is_additional_charge: charge,
-      additional_charge_amount: Number(amount) || 0,
+      additional_charge_amount: charge ? Number(amount) || 0 : 0,
       visibility_scope: 'client',
       show_on_quotation: true,
       start_rule: 'whole_project',
@@ -619,7 +619,7 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
       patch: {
         title: title.trim(),
         is_additional_charge: charge,
-        additional_charge_amount: Number(amount) || 0,
+        additional_charge_amount: charge ? Number(amount) || 0 : 0,
         show_on_quotation: showOnQuotation,
         work_type: workType.trim() || null,
         internal_notes: internalNotes.trim() || null,
