@@ -3,6 +3,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { humanize } from '@/shared/ui/format'
 import { ErrorState } from '@/shared/ui/states'
 import { useGopoSummary } from '@/features/gopo/api'
 import {
@@ -230,7 +231,7 @@ function GopoContent() {
                   <tr key={p.project_id} className="border-b last:border-0">
                     <td className="py-2">
                       <span className="font-medium">{p.project_name}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{p.status}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{humanize(p.status)}</span>
                     </td>
                     <td className="py-2 text-right">₹{p.revenue.toLocaleString()}</td>
                     <td className="py-2 text-right">₹{p.received.toLocaleString()}</td>

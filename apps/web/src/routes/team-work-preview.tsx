@@ -7,6 +7,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState } from '@/shared/ui/states'
+import { humanize } from '@/shared/ui/format'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { callApi } from '@/shared/api/client'
@@ -95,7 +96,7 @@ function TeamWorkPreview() {
                   <li key={t.id} className="rounded-lg border border-border p-3 text-sm">
                     <p className="font-medium">{t.title}</p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <StatusBadge tone={t.status === 'completed' ? 'success' : 'neutral'}>{t.status}</StatusBadge>
+                      <StatusBadge tone={t.status === 'completed' ? 'success' : 'neutral'}>{humanize(t.status)}</StatusBadge>
                       {t.project_name && <span>{t.project_name}</span>}
                     </div>
                   </li>

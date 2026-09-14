@@ -48,6 +48,13 @@ export const updateDeliverableRequest = z.object({
 })
 export type UpdateDeliverableRequest = z.infer<typeof updateDeliverableRequest>
 
+/** One shoot a deliverable is waiting on data from (`start_rule: 'specific_shoots'`). */
+export const deliverableSourceShoot = z.object({ id: uuid, name: z.string() })
+export type DeliverableSourceShoot = z.infer<typeof deliverableSourceShoot>
+
+export const setDeliverableSourcesRequest = z.object({ shoot_ids: z.array(uuid).max(50) })
+export type SetDeliverableSourcesRequest = z.infer<typeof setDeliverableSourcesRequest>
+
 export const paymentInput = z.object({
   amount: money,
   paid_on: isoDate.optional(),
@@ -112,6 +119,8 @@ export const deliverable = z.object({
   // Tolerant on read: a row could in principle carry a status value from
   // before this enum was tightened, and this must not 500 the whole list.
   status: z.string(),
+  /** Shoots this is waiting on data from — only meaningful when start_rule is 'specific_shoots'. */
+  source_shoots: z.array(deliverableSourceShoot),
 })
 export type Deliverable = z.infer<typeof deliverable>
 

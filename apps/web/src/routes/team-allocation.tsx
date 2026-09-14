@@ -252,7 +252,7 @@ function TeamBooking() {
           onOpenCalendar={() => setTab('calendar')}
         />
       )}
-      {tab === 'conflicts' && <Conflicts slots={booked} />}
+      {tab === 'conflicts' && <Conflicts slots={slots.data ?? []} shoots={shoots.data ?? []} />}
 
       {/* Every per-shoot Assign press opens this one, keyed so it starts fresh. */}
       {assignTo && (
@@ -740,7 +740,7 @@ function Figure({
 }: {
   label: string
   value: string
-  tone?: 'success' | 'warning' | undefined
+  tone?: 'success' | 'warning' | 'danger' | undefined
 }) {
   return (
     <Card>
@@ -751,6 +751,7 @@ function Figure({
             'mt-0.5 text-xl font-semibold tabular-nums',
             tone === 'success' && 'text-success',
             tone === 'warning' && 'text-warning',
+            tone === 'danger' && 'text-destructive',
           )}
         >
           {value}
@@ -773,40 +774,199 @@ function findClashes(slots: readonly TeamSlot[]): [TeamSlot, TeamSlot][] {
   return clashes
 }
 
-/**
- * Anyone booked in two places at once.
- *
- * The database refuses overlapping slots for one member, so this ought to stay
- * empty — it is here because "ought to" is not "does", and finding out on the
- * screen beats finding out on the day.
- */
-function Conflicts({ slots }: { slots: readonly TeamSlot[] }) {
-  const clashes = findClashes(slots)
+type ConflictSeverity = 'critical' | 'warning' | 'info'
+type ConflictType = 'double_booking' | 'invalid_time_range' | 'missing_shoot' | 'missing_service' | 'past_active'
 
-  if (clashes.length === 0) {
-    return (
-      <div className="mt-4">
-        <EmptyState title="No conflicts" description="Nobody is booked in two places at once." />
-      </div>
-    )
+interface ConflictItem {
+  key: string
+  type: ConflictType
+  severity: ConflictSeverity
+  slot: TeamSlot
+  pairSlot?: TeamSlot
+  message: string
+}
+
+const CONFLICT_TYPE_LABEL: Record<ConflictType, string> = {
+  double_booking: 'Double booking',
+  invalid_time_range: 'Invalid time range',
+  missing_shoot: 'Missing shoot',
+  missing_service: 'Missing service',
+  past_active: 'Past active',
+}
+
+const SEVERITY_TONE: Record<ConflictSeverity, 'danger' | 'warning' | 'info'> = {
+  critical: 'danger',
+  warning: 'warning',
+  info: 'info',
+}
+
+/**
+ * Every data-quality issue across booked slots, not just double-bookings — a
+ * slot can also be missing its shoot/service link, have a corrupt time range,
+ * or still say "booked" for a shoot day that has already passed.
+ */
+function findConflictItems(slots: readonly TeamSlot[]): ConflictItem[] {
+  const booked = slots.filter((s) => s.status === 'booked')
+  const items: ConflictItem[] = []
+  const now = Date.now()
+
+  for (const [a, b] of findClashes(booked)) {
+    items.push({
+      key: `double-${a.id}-${b.id}`,
+      type: 'double_booking',
+      severity: 'critical',
+      slot: a,
+      pairSlot: b,
+      message: `${a.user_name ?? 'Someone'} is booked twice`,
+    })
   }
+  for (const s of booked) {
+    if (new Date(s.end_at).getTime() <= new Date(s.start_at).getTime()) {
+      items.push({ key: `range-${s.id}`, type: 'invalid_time_range', severity: 'critical', slot: s, message: 'Ends before (or at) its own start' })
+    }
+    if (!s.shoot_id) {
+      items.push({ key: `shoot-${s.id}`, type: 'missing_shoot', severity: 'warning', slot: s, message: 'Not linked to a shoot' })
+    }
+    if (!s.service_name) {
+      items.push({ key: `service-${s.id}`, type: 'missing_service', severity: 'warning', slot: s, message: 'No role or service set' })
+    }
+    if (new Date(s.end_at).getTime() < now) {
+      items.push({ key: `past-${s.id}`, type: 'past_active', severity: 'info', slot: s, message: 'Still booked after its time has passed' })
+    }
+  }
+  return items
+}
+
+const toDateInput = (d: Date) => d.toISOString().slice(0, 10)
+
+/**
+ * A data-quality report across every booked slot: double-bookings the GiST
+ * constraint ought to have refused, plus corrupt or incomplete rows that
+ * would otherwise quietly throw off the Dashboard tab's counts.
+ */
+function Conflicts({ slots, shoots }: { slots: readonly TeamSlot[]; shoots: readonly ShootListItem[] }) {
+  const shootById = useMemo(() => new Map(shoots.map((s) => [s.id, s])), [shoots])
+  const [severity, setSeverity] = useState<'all' | ConflictSeverity>('all')
+  const [type, setType] = useState<'all' | ConflictType>('all')
+  const [from, setFrom] = useState(() => toDateInput(new Date()))
+  const [to, setTo] = useState(() => toDateInput(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)))
+  const [search, setSearch] = useState('')
+
+  const all = useMemo(() => findConflictItems(slots), [slots])
+
+  const counts = useMemo(
+    () => ({
+      total: all.length,
+      critical: all.filter((i) => i.severity === 'critical').length,
+      warning: all.filter((i) => i.severity === 'warning').length,
+      doubleBooking: all.filter((i) => i.type === 'double_booking').length,
+      pastActive: all.filter((i) => i.type === 'past_active').length,
+    }),
+    [all],
+  )
+
+  const filtered = useMemo(() => {
+    const start = new Date(from).getTime()
+    const end = new Date(to).getTime() + 24 * 60 * 60 * 1000 - 1
+    return all
+      .filter((i) => severity === 'all' || i.severity === severity)
+      .filter((i) => type === 'all' || i.type === type)
+      .filter((i) => {
+        const t = new Date(i.slot.start_at).getTime()
+        return t >= start && t <= end
+      })
+      .filter((i) => {
+        if (!search.trim()) return true
+        const q = search.trim().toLowerCase()
+        const shoot = i.slot.shoot_id ? shootById.get(i.slot.shoot_id) : undefined
+        return (
+          (i.slot.user_name ?? '').toLowerCase().includes(q) ||
+          (i.slot.service_name ?? '').toLowerCase().includes(q) ||
+          (shoot?.name ?? '').toLowerCase().includes(q) ||
+          (shoot?.project_name ?? '').toLowerCase().includes(q)
+        )
+      })
+      .sort((a, b) => a.slot.start_at.localeCompare(b.slot.start_at))
+  }, [all, severity, type, from, to, search, shootById])
 
   return (
-    <div className="mt-4 flex flex-col gap-3">
-      {clashes.map(([a, b]) => (
-        <Card key={`${a.id}-${b.id}`} className="border-destructive/40">
-          <CardContent className="p-4">
-            <p className="font-medium text-destructive">
-              {a.user_name ?? 'Someone'} is booked twice
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {shortDay.format(new Date(a.start_at))} · {timeOf(a.start_at)}–{timeOf(a.end_at)}{' '}
-              {a.service_name ?? 'Crew'} <span className="mx-1">vs</span>
-              {timeOf(b.start_at)}–{timeOf(b.end_at)} {b.service_name ?? 'Crew'}
-            </p>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="mt-4 flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Figure label="Total" value={String(counts.total)} tone={counts.total > 0 ? 'warning' : undefined} />
+        <Figure label="Critical" value={String(counts.critical)} tone={counts.critical > 0 ? 'danger' : undefined} />
+        <Figure label="Warnings" value={String(counts.warning)} tone={counts.warning > 0 ? 'warning' : undefined} />
+        <Figure label="Double bookings" value={String(counts.doubleBooking)} tone={counts.doubleBooking > 0 ? 'danger' : undefined} />
+        <Figure label="Past active" value={String(counts.pastActive)} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={severity} onChange={(e) => setSeverity(e.target.value as typeof severity)} className="w-36" aria-label="Filter by severity">
+          <option value="all">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </Select>
+        <Select value={type} onChange={(e) => setType(e.target.value as typeof type)} className="w-44" aria-label="Filter by type">
+          <option value="all">All types</option>
+          {(Object.keys(CONFLICT_TYPE_LABEL) as ConflictType[]).map((t) => (
+            <option key={t} value={t}>
+              {CONFLICT_TYPE_LABEL[t]}
+            </option>
+          ))}
+        </Select>
+        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" aria-label="From date" />
+        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" aria-label="To date" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Member, service, shoot, project…"
+          className="w-56"
+          aria-label="Search conflicts"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No allocation conflicts found for this date range."
+          description="Adjust filters or expand the date window to review more slots."
+        />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {filtered.map((i) => {
+            const shoot = i.slot.shoot_id ? shootById.get(i.slot.shoot_id) : undefined
+            return (
+              <Card
+                key={i.key}
+                className={cn(
+                  i.severity === 'critical' && 'border-destructive/40',
+                  i.severity === 'warning' && 'border-warning/40',
+                )}
+              >
+                <CardContent className="flex flex-wrap items-start gap-3 p-4">
+                  <StatusBadge tone={SEVERITY_TONE[i.severity]} className="mt-0.5">
+                    {CONFLICT_TYPE_LABEL[i.type]}
+                  </StatusBadge>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{i.message}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {i.slot.user_name ?? 'Someone'} · {shortDay.format(new Date(i.slot.start_at))} ·{' '}
+                      {timeOf(i.slot.start_at)}–{timeOf(i.slot.end_at)}
+                      {i.slot.service_name ? ` · ${i.slot.service_name}` : ''}
+                      {shoot ? ` · ${shoot.name}${shoot.project_name ? ` (${shoot.project_name})` : ''}` : ''}
+                    </p>
+                    {i.pairSlot && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Clashes with {timeOf(i.pairSlot.start_at)}–{timeOf(i.pairSlot.end_at)}
+                        {i.pairSlot.service_name ? ` · ${i.pairSlot.service_name}` : ''}
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

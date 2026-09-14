@@ -135,7 +135,7 @@ const projectDetail: ProjectDetail = {
   created_at: '2026-06-01T10:00:00Z',
   deliverables: [
     delv(uid(0xd1), 'Wedding album (40 sheets)', 'client', true, 30000),
-    delv(uid(0xd2), 'Highlight film', 'client', true, 12000),
+    delv(uid(0xd2), 'Highlight film', 'client', true, 12000, [{ id: uid(0x61), name: 'Engagement shoot' }]),
     delv(uid(0xd3), 'Raw footage archive', 'internal', false, 0),
   ],
   payments: [
@@ -230,6 +230,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/projects') return { id: PROJ.p1 }
   if (method === 'PATCH' && path.startsWith('/projects/')) return {}
   if (method === 'DELETE' && path.startsWith('/projects/')) return {}
+  if (method === 'PUT' && /^\/projects\/[^/]+\/deliverables\/[^/]+\/shoots$/.test(path)) return {}
   if (method === 'POST' && /^\/projects\/[^/]+\/(deliverables|payments)$/.test(path)) return {}
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
@@ -1826,6 +1827,7 @@ function delv(
   visibility_scope: 'client' | 'internal',
   is_additional_charge: boolean,
   amount: number,
+  sourceShoots: { id: string; name: string }[] = [],
 ) {
   return {
     id,
@@ -1836,8 +1838,9 @@ function delv(
     additional_charge_amount: amount,
     visibility_scope,
     show_on_quotation: visibility_scope === 'client',
-    start_rule: 'whole_project' as const,
+    start_rule: sourceShoots.length > 0 ? ('specific_shoots' as const) : ('whole_project' as const),
     status: 'in_progress',
+    source_shoots: sourceShoots,
   }
 }
 

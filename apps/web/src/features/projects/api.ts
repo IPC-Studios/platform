@@ -12,6 +12,7 @@ import {
   type IssueQuotationRequest,
   type PaymentInput,
   type SaveDeliverableSetRequest,
+  type SetDeliverableSourcesRequest,
   type UpdateDeliverableRequest,
   type UpdateProjectRequest,
 } from '@ipc/contracts'
@@ -91,6 +92,18 @@ export function useUpdateDeliverable(id: string) {
     mutationFn: ({ deliverableId, patch }: { deliverableId: string; patch: UpdateDeliverableRequest }) =>
       callApi(`/projects/${id}/deliverables/${deliverableId}`, { method: 'PATCH', body: patch, responseSchema: anySchema }),
     onSuccess: useProjectMutation(id, 'Deliverable updated'),
+  })
+}
+
+export function useSetDeliverableSources(id: string) {
+  return useMutation({
+    mutationFn: ({ deliverableId, shoot_ids }: { deliverableId: string } & SetDeliverableSourcesRequest) =>
+      callApi(`/projects/${id}/deliverables/${deliverableId}/shoots`, {
+        method: 'PUT',
+        body: { shoot_ids },
+        responseSchema: anySchema,
+      }),
+    onSuccess: useProjectMutation(id, 'Linked shoots updated'),
   })
 }
 

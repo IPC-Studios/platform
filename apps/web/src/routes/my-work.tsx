@@ -13,6 +13,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { humanize } from '@/shared/ui/format'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useMyTasks } from '@/features/tasks/api'
 
@@ -113,7 +114,7 @@ function MyWork() {
                       }
                     />
                   )}
-                  <StatusBadge tone={TONE[s.status]}>{s.status}</StatusBadge>
+                  <StatusBadge tone={TONE[s.status]}>{humanize(s.status)}</StatusBadge>
                 </div>
               </CardContent>
             </Card>

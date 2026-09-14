@@ -10,6 +10,7 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { humanize } from '@/shared/ui/format'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
@@ -221,13 +222,13 @@ function DataBoard() {
                         {r.size_gb} GB · {r.card_count} card(s)
                       </td>
                       <td className="px-4 py-2">
-                        <StatusBadge tone={TONE[r.primary_status]}>{r.primary_status}</StatusBadge>
+                        <StatusBadge tone={TONE[r.primary_status]}>{humanize(r.primary_status)}</StatusBadge>
                         {r.primary_location_name && (
                           <span className="ml-1.5 text-xs text-muted-foreground">{r.primary_location_name}</span>
                         )}
                       </td>
                       <td className="px-4 py-2">
-                        <StatusBadge tone={TONE[r.backup_status]}>{r.backup_status}</StatusBadge>
+                        <StatusBadge tone={TONE[r.backup_status]}>{humanize(r.backup_status)}</StatusBadge>
                         {r.backup_location_name && (
                           <span className="ml-1.5 text-xs text-muted-foreground">{r.backup_location_name}</span>
                         )}

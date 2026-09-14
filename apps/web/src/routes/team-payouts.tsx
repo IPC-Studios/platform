@@ -20,7 +20,7 @@ import {
 import { useSlots } from '@/features/allocation/api'
 import { useDirectory } from '@/features/team/api'
 import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
-import { formatINR } from '@/shared/ui/format'
+import { formatINR, humanize } from '@/shared/ui/format'
 import { type CreateTeamPayoutRequest, type PayoutEntryType, type TeamPayout, type TeamSlot } from '@ipc/contracts'
 import { Plus, Trash2, Pencil, DollarSign, Clock, CheckCircle, History, Wallet } from 'lucide-react'
 
@@ -146,7 +146,7 @@ function TeamPayoutsContent() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium">₹{payout.amount.toLocaleString()}</span>
-                <StatusBadge tone={statusTone[payout.status] ?? 'neutral'}>{payout.status}</StatusBadge>
+                <StatusBadge tone={statusTone[payout.status] ?? 'neutral'}>{humanize(payout.status)}</StatusBadge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {payout.user_name ?? 'Unknown'} · {payout.period_start} to {payout.period_end}

@@ -5,6 +5,7 @@ import { StatCard } from '@/shared/ui/stat-card'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { humanize } from '@/shared/ui/format'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
@@ -179,7 +180,7 @@ function ReferralsContent() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{sub.client_name}</span>
-                    <StatusBadge tone={statusTone[sub.status] ?? 'neutral'}>{sub.status}</StatusBadge>
+                    <StatusBadge tone={statusTone[sub.status] ?? 'neutral'}>{humanize(sub.status)}</StatusBadge>
                     {sub.reward_granted && <StatusBadge tone="success">Rewarded</StatusBadge>}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
   Briefcase,
@@ -13,6 +14,7 @@ import {
   Gift,
   IndianRupee,
   LayoutGrid,
+  Link2,
   Package,
   PauseCircle,
   Pencil,
@@ -25,14 +27,8 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import type {
-  Deliverable,
-  DeliverableInput,
-  DeliverableStatus,
-  PaymentInput,
-  ProjectStatus,
-  UpdateProjectRequest,
-} from '@ipc/contracts'
+import { shootListItem, type Deliverable, type DeliverableInput, type DeliverableStatus, type PaymentInput, type ProjectStatus, type UpdateProjectRequest } from '@ipc/contracts'
+import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { QuotationLinkDialog } from '@/features/projects/QuotationLinkDialog'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
@@ -52,6 +48,7 @@ import {
   useUpdateProject,
   useAddDeliverable,
   useUpdateDeliverable,
+  useSetDeliverableSources,
   useDeleteDeliverable,
   useAddPayment,
   useDeleteProject,
@@ -126,6 +123,7 @@ function ProjectDetail() {
   const canEditTasks = access.hasAction('tasks', 'edit')
   const del = useDeleteDeliverable(id)
   const updateDeliverable = useUpdateDeliverable(id)
+  const setDeliverableSources = useSetDeliverableSources(id)
   const update = useUpdateProject(id)
   const removeProject = useDeleteProject()
   const confirm = useConfirm()
@@ -335,6 +333,7 @@ function ProjectDetail() {
           items={data.deliverables.filter((d) => d.visibility_scope === 'client')}
           canEdit={canEdit}
           updateDeliverable={updateDeliverable}
+          setDeliverableSources={setDeliverableSources}
           onRemove={removeDeliverable}
         />
         <DeliverableGroup
@@ -345,6 +344,7 @@ function ProjectDetail() {
           items={data.deliverables.filter((d) => d.visibility_scope === 'internal')}
           canEdit={canEdit}
           updateDeliverable={updateDeliverable}
+          setDeliverableSources={setDeliverableSources}
           onRemove={removeDeliverable}
         />
       </div>
@@ -546,6 +546,7 @@ function DeliverableGroup({
   items,
   canEdit,
   updateDeliverable,
+  setDeliverableSources,
   onRemove,
 }: {
   projectId: string
@@ -555,6 +556,7 @@ function DeliverableGroup({
   items: Deliverable[]
   canEdit: boolean
   updateDeliverable: ReturnType<typeof useUpdateDeliverable>
+  setDeliverableSources: ReturnType<typeof useSetDeliverableSources>
   onRemove: (deliverableId: string, title: string) => void
 }) {
   return (
@@ -604,6 +606,16 @@ function DeliverableGroup({
                     <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>
                   )}
                 </div>
+                {d.source_shoots.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="font-medium uppercase tracking-wide">Sources:</span>
+                    {d.source_shoots.map((s) => (
+                      <StatusBadge key={s.id} tone="neutral">
+                        {s.name}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Input
                     type="date"
@@ -651,6 +663,13 @@ function DeliverableGroup({
                   )}
                   {canEdit && <EditDeliverableDialog id={projectId} deliverable={d} />}
                   {canEdit && (
+                    <LinkedShootsDialog
+                      projectId={projectId}
+                      deliverable={d}
+                      setDeliverableSources={setDeliverableSources}
+                    />
+                  )}
+                  {canEdit && (
                     <Button variant="ghost" size="icon" onClick={() => onRemove(d.id, d.title)}>
                       <Trash2 />
                     </Button>
@@ -662,6 +681,96 @@ function DeliverableGroup({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+const shootsList = shootListItem.array()
+
+/** Pick which of this project's shoots a deliverable is waiting on data from. */
+function LinkedShootsDialog({
+  projectId,
+  deliverable,
+  setDeliverableSources,
+}: {
+  projectId: string
+  deliverable: Deliverable
+  setDeliverableSources: ReturnType<typeof useSetDeliverableSources>
+}) {
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set(deliverable.source_shoots.map((s) => s.id)))
+  const shoots = useQuery({
+    queryKey: ['shoots', 'project', projectId],
+    queryFn: () => callApi(`/shoots?project_id=${projectId}`, { responseSchema: shootsList }),
+    enabled: open,
+  })
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function onSave() {
+    await setDeliverableSources.mutateAsync({ deliverableId: deliverable.id, shoot_ids: [...selected] })
+    setOpen(false)
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setSelected(new Set(deliverable.source_shoots.map((s) => s.id)))
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <Link2 /> Linked shoots
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title="Linked shoots"
+        description={`Which shoots is "${deliverable.title}" waiting on data from?`}
+      >
+        <div className="flex flex-col gap-3">
+          {shoots.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading shoots…</p>
+          ) : !shoots.data || shoots.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">This project has no shoots yet.</p>
+          ) : (
+            <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+              {shoots.data.map((s) => (
+                <li key={s.id}>
+                  <label className="flex items-center gap-2 rounded-md p-2 hover:bg-muted/50">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.id)}
+                      onChange={() => toggle(s.id)}
+                      className="size-4"
+                    />
+                    <span className="text-sm">
+                      {s.name}
+                      {s.shoot_date && <span className="ml-1.5 text-xs text-muted-foreground">{s.shoot_date}</span>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-2 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button onClick={() => void onSave()} disabled={setDeliverableSources.isPending}>
+              {setDeliverableSources.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

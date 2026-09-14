@@ -5,7 +5,7 @@ import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
-import { Badge } from '@/shared/ui/badge'
+import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState } from '@/shared/ui/states'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { callApi } from '@/shared/api/client'
@@ -132,10 +132,10 @@ function TemplatesContent() {
                 </CardTitle>
                 <div className="flex items-center gap-1">
                   {t.is_default && (
-                    <Badge variant="success">
+                    <StatusBadge tone="success" className="gap-1">
                       <Star className="h-3 w-3" />
                       Default
-                    </Badge>
+                    </StatusBadge>
                   )}
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(t)}>
                     <Pencil className="h-4 w-4" />

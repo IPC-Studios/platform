@@ -3,6 +3,7 @@ import {
   createProjectRequest,
   deliverableInput,
   updateDeliverableRequest,
+  setDeliverableSourcesRequest,
   deliverableSet,
   paymentInput,
   projectDetail,
@@ -312,7 +313,17 @@ export const projectsRouter = new Hono<AppEnv>()
                  p.additional_deliverables_cost, p.total_cost, p.show_quotation, p.created_at,
                  cl.name as client_name, cl.phone as client_phone,
                  coalesce((
-                   select jsonb_agg(to_jsonb(d) order by d.created_at)
+                   select jsonb_agg(
+                     to_jsonb(d) || jsonb_build_object(
+                       'source_shoots', coalesce((
+                         select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name) order by s.name)
+                         from deliverable_shoot_links dsl
+                         join shoots s on s.id = dsl.shoot_id
+                         where dsl.deliverable_id = d.id
+                       ), '[]'::jsonb)
+                     )
+                     order by d.created_at
+                   )
                    from deliverables d where d.project_id = p.id
                  ), '[]'::jsonb) as deliverables,
                  coalesce((
@@ -439,6 +450,35 @@ export const projectsRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not remove the deliverable.')
     if (!rows.length) fail(404, 'That deliverable was not found.')
     await audit(c, { action: 'deliverable.remove', entityType: 'project', entityId: projectId, before: { deliverable_id: did } })
+    return c.body(null, 204)
+  })
+
+  // Replace the full set of shoots a "specific_shoots" deliverable is waiting on.
+  .put('/:id/deliverables/:did/shoots', requireAction('projects', 'edit'), async (c) => {
+    const parsed = setDeliverableSourcesRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the linked shoots.')
+    const projectId = uuidParam(c)
+    const did = uuidParam(c, 'did')
+    const auth = c.get('auth')
+    const ok = await attempt(c, 'projects.deliverable_sources.set', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const owns = await sql<{ id: string }[]>`
+          select id from deliverables where id = ${did} and project_id = ${projectId}`
+        if (!owns.length) return null
+        await sql`delete from deliverable_shoot_links where deliverable_id = ${did}`
+        if (parsed.data.shoot_ids.length > 0) {
+          await sql`
+            insert into deliverable_shoot_links (company_id, deliverable_id, shoot_id)
+            select ${auth.companyId}, ${did}, s.id
+            from shoots s
+            where s.id = any(${sql.array(parsed.data.shoot_ids)}::uuid[]) and s.project_id = ${projectId}`
+        }
+        return true
+      }),
+    )
+    if (ok === null) fail(404, 'That deliverable was not found.')
+    if (!ok) fail(400, 'We could not update the linked shoots.')
+    await audit(c, { action: 'deliverable.set_sources', entityType: 'project', entityId: projectId, after: { deliverable_id: did, ...parsed.data } })
     return c.body(null, 204)
   })
 

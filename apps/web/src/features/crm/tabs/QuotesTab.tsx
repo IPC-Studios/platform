@@ -9,7 +9,7 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
-import { formatINR } from '@/shared/ui/format'
+import { formatINR, humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useDeleteQuote, useQuotes, useSendQuote, useSetQuoteOutcome } from '../api'
@@ -162,7 +162,7 @@ export function QuoteRow({
         </p>
       </div>
       <span className="tabular-nums">{formatINR(q.total)}</span>
-      <StatusBadge tone={QUOTE_TONE[q.status]}>{q.status}</StatusBadge>
+      <StatusBadge tone={QUOTE_TONE[q.status]}>{humanize(q.status)}</StatusBadge>
       {canEdit && (q.status === 'draft' || q.status === 'sent') && (
         <span className="flex gap-1">
           {q.status === 'draft' && onEdit && (
