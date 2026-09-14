@@ -4,7 +4,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { Badge } from '@/shared/ui/badge'
+import { StatusBadge } from '@/shared/ui/status-badge'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
@@ -74,11 +74,11 @@ function ReferralsContent() {
     )
   }
 
-  const statusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    converted: 'bg-blue-100 text-blue-800',
-    rewarded: 'bg-green-100 text-green-800',
-    rejected: 'bg-red-100 text-red-800',
+  const statusTone: Record<string, 'warning' | 'info' | 'success' | 'danger'> = {
+    pending: 'warning',
+    converted: 'info',
+    rewarded: 'success',
+    rejected: 'danger',
   }
 
   return (
@@ -179,8 +179,8 @@ function ReferralsContent() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{sub.client_name}</span>
-                    <Badge className={statusColors[sub.status]}>{sub.status}</Badge>
-                    {sub.reward_granted && <Badge variant="outline">Rewarded</Badge>}
+                    <StatusBadge tone={statusTone[sub.status] ?? 'neutral'}>{sub.status}</StatusBadge>
+                    {sub.reward_granted && <StatusBadge tone="success">Rewarded</StatusBadge>}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Campaign: {sub.campaign_name}

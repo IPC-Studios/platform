@@ -29,6 +29,18 @@ export function useExpenses() {
   })
 }
 
+/** One project's own expenses — its detail page's Expenses tab. */
+export function useProjectExpenses(projectId: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['expenses', 'project', projectId],
+    queryFn: () => callApi(`/financials/expenses?project_id=${projectId}`, { responseSchema: expenses }),
+    enabled: !!session && access.hasModule('company_expenses') && !!projectId,
+    staleTime: 15_000,
+  })
+}
+
 export function useCreateExpense() {
   const qc = useQueryClient()
   return useMutation({

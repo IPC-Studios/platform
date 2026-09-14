@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { Check, Plus, Search, Trash2 } from 'lucide-react'
 import { computeInvoice, type GstSlab } from '@ipc/domain'
 import type { Client, CreateInvoiceRequest, GstState, InvoiceLineInput } from '@ipc/contracts'
@@ -460,6 +461,13 @@ export function InvoiceFormFields({
               </option>
             ))}
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Bank details and terms & conditions come from the layout — set them once in{' '}
+            <Link to="/billing/templates" className="underline underline-offset-2 hover:text-foreground">
+              Invoice Templates
+            </Link>{' '}
+            instead of retyping them on every invoice.
+          </p>
         </div>
       )}
 

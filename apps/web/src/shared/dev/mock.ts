@@ -203,7 +203,8 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'GET' && path.startsWith('/projects/')) return projectDetail
   if (method === 'GET' && (path === '/tasks/board' || path.startsWith('/tasks/board')))
     return atStage(boardTasks, 'full')
-  if (method === 'GET' && (path === '/tasks' || path === '/tasks/my')) return atStage(boardTasks, 'full')
+  if (method === 'GET' && (path === '/tasks' || path.startsWith('/tasks?') || path === '/tasks/my'))
+    return atStage(boardTasks, 'full')
   if (method === 'GET' && path === '/tasks/bundles') return atStage(bundlesFx, 'partial')
   if (method === 'POST' && path === '/tasks/bundles') return { id: uid(0xd8) }
   if (method === 'DELETE' && path.startsWith('/tasks/bundles/')) return {}
@@ -257,6 +258,9 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PATCH' && path.startsWith('/team-terms/templates/')) return { ok: true }
   if (method === 'POST' && /\/team-terms\/templates\/[^/]+\/archive/.test(path)) return { ok: true }
   if (method === 'GET' && path.startsWith('/team-terms/sends')) return atStage(teamTermsSendsFx, 'full')
+  if (method === 'GET' && path === '/terms/documents') return atStage(termsDocumentsFx, 'partial')
+  if (method === 'POST' && path === '/terms/issue')
+    return { document_id: uid(0xbc), token: 'demo-project-terms-token' }
   if (method === 'POST' && path === '/team-terms/sends')
     return {
       send_id: uid(0xba),
@@ -323,11 +327,58 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   }
   if (method === 'GET' && path === '/allocation') return atStage(slots, 'full')
   if (method === 'POST' && path === '/allocation') return { id: uid(0x5a) }
+  if (method === 'GET' && path === '/data/locations') return storageLocationsFx
+  if (method === 'POST' && path === '/data/locations') {
+    const created = { id: uid(0x77 + storageLocationsFx.length), name: 'New location', kind: 'drive', ...(body as object) }
+    storageLocationsFx.push(created)
+    return created
+  }
+  if (method === 'PATCH' && path.startsWith('/data/locations/')) {
+    const id = path.split('/').pop()
+    const loc = storageLocationsFx.find((l) => l.id === id)
+    if (loc) Object.assign(loc, body as object)
+    return loc ?? { id, name: 'Location', kind: 'drive' }
+  }
+  if (method === 'DELETE' && path.startsWith('/data/locations/')) return {}
   if (method === 'GET' && (path === '/data' || path.startsWith('/data?')))
     return atStage(dataRecords, 'full')
   if (method === 'POST' && path.includes('/verify')) return {}
-  if (method === 'POST' && path === '/data') return dataRecords[0]
-  if (method === 'GET' && path === '/work/submissions') return workSubs
+  if (method === 'POST' && path === '/data') {
+    const created = {
+      data_type: null,
+      project_id: null,
+      project_name: null,
+      shoot_id: null,
+      primary_status: 'pending',
+      backup_status: 'pending',
+      primary_location_id: null,
+      primary_location_name: null,
+      backup_location_id: null,
+      backup_location_name: null,
+      card_count: 0,
+      size_gb: 0,
+      verified_at: null,
+      created_at: new Date().toISOString(),
+      ...(body as object),
+      id: uid(0x78 + dataRecords.length),
+    } as unknown as (typeof dataRecords)[number]
+    created.primary_location_name = storageLocationsFx.find((l) => l.id === created.primary_location_id)?.name ?? null
+    created.backup_location_name = storageLocationsFx.find((l) => l.id === created.backup_location_id)?.name ?? null
+    dataRecords.push(created)
+    return created
+  }
+  if (method === 'PATCH' && /^\/data\/[^/]+$/.test(path)) {
+    const id = path.split('/').pop()
+    const rec = dataRecords.find((r) => r.id === id)
+    if (rec) {
+      Object.assign(rec, body as object)
+      rec.primary_location_name = storageLocationsFx.find((l) => l.id === rec.primary_location_id)?.name ?? null
+      rec.backup_location_name = storageLocationsFx.find((l) => l.id === rec.backup_location_id)?.name ?? null
+    }
+    return rec ?? null
+  }
+  if (method === 'DELETE' && /^\/data\/[^/]+$/.test(path)) return {}
+  if (method === 'GET' && (path === '/work/submissions' || path.startsWith('/work/submissions?'))) return workSubs
   if (method === 'POST' && path === '/work/submissions') return { id: uid(0x8a) }
   if (method === 'GET' && path === '/billing/states') return states
   if (method === 'GET' && path === '/billing/invoices') return atStage(invoices2, 'full')
@@ -335,7 +386,8 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && path === '/billing/invoices')
     return { id: uid(0x9a), invoice_number: 'INV-0004' }
   if (method === 'POST' && path.includes('/payments')) return {}
-  if (method === 'GET' && path === '/financials/expenses') return expensesFx
+  if (method === 'GET' && (path === '/financials/expenses' || path.startsWith('/financials/expenses?')))
+    return expensesFx
   if (method === 'POST' && path === '/financials/expenses') return expensesFx[0]
   if (method === 'GET' && path === '/financials/projects') return projectFin
   if (method === 'GET' && path === '/financials/gopo') return gopoFx
@@ -541,6 +593,12 @@ const platformUsageFx = {
   revenue_last_30d: 17700,
 }
 
+const storageLocationsFx = [
+  { id: uid(0x74), name: 'Studio NAS', kind: 'nas' },
+  { id: uid(0x75), name: 'Drive B', kind: 'drive' },
+  { id: uid(0x76), name: 'Google Drive', kind: 'cloud' },
+]
+
 const dataRecords = [
   {
     id: uid(0x71),
@@ -551,9 +609,14 @@ const dataRecords = [
     shoot_id: uid(0x61),
     primary_status: 'verified',
     backup_status: 'verified',
+    primary_location_id: storageLocationsFx[0]!.id,
+    primary_location_name: storageLocationsFx[0]!.name,
+    backup_location_id: storageLocationsFx[2]!.id,
+    backup_location_name: storageLocationsFx[2]!.name,
     card_count: 2,
     size_gb: 64.5,
     verified_at: '2026-07-02T09:00:00Z',
+    created_at: '2026-07-01T09:00:00Z',
   },
   {
     id: uid(0x72),
@@ -564,9 +627,14 @@ const dataRecords = [
     shoot_id: uid(0x61),
     primary_status: 'copied',
     backup_status: 'pending',
+    primary_location_id: storageLocationsFx[1]!.id,
+    primary_location_name: storageLocationsFx[1]!.name,
+    backup_location_id: null,
+    backup_location_name: null,
     card_count: 1,
     size_gb: 32,
     verified_at: null,
+    created_at: '2026-07-01T09:05:00Z',
   },
   {
     id: uid(0x73),
@@ -577,9 +645,14 @@ const dataRecords = [
     shoot_id: uid(0x62),
     primary_status: 'copied',
     backup_status: 'copied',
+    primary_location_id: null,
+    primary_location_name: null,
+    backup_location_id: null,
+    backup_location_name: null,
     card_count: 4,
     size_gb: 512,
     verified_at: null,
+    created_at: '2026-07-05T09:00:00Z',
   },
 ]
 
@@ -832,31 +905,40 @@ const expensesFx = [
   {
     id: uid(0xa1),
     project_id: PROJ.p1,
+    party_id: null,
+    party_name: null,
     category: 'Travel',
     description: 'Outstation shoot',
     amount: 15000,
     expense_date: '2026-06-20',
     gst_treatment: 'non_gst',
+    gst_rate: null,
     is_fixed_overhead: false,
   },
   {
     id: uid(0xa2),
     project_id: null,
+    party_id: null,
+    party_name: null,
     category: 'Rent',
     description: 'Studio rent',
     amount: 40000,
     expense_date: '2026-06-01',
     gst_treatment: 'gst_applicable',
+    gst_rate: 18,
     is_fixed_overhead: true,
   },
   {
     id: uid(0xa3),
     project_id: PROJ.p3,
+    party_id: null,
+    party_name: null,
     category: 'Props',
     description: 'Product staging',
     amount: 8000,
     expense_date: '2026-06-28',
     gst_treatment: 'non_gst',
+    gst_rate: null,
     is_fixed_overhead: false,
   },
 ]
@@ -1108,6 +1190,7 @@ const workSubs = [
     project_id: PROJ.p1,
     task_id: null,
     submission_link: 'https://drive.google.com/album-v1',
+    location_note: null,
     notes: 'First album cut',
     status: 'submitted',
     review_notes: null,
@@ -1118,6 +1201,7 @@ const workSubs = [
     project_id: PROJ.p1,
     task_id: null,
     submission_link: 'https://drive.google.com/film-v2',
+    location_note: null,
     notes: 'Highlight film',
     status: 'approved',
     review_notes: 'Great work',
@@ -1128,6 +1212,7 @@ const workSubs = [
     project_id: PROJ.p2,
     task_id: null,
     submission_link: 'https://drive.google.com/teaser',
+    location_note: null,
     notes: null,
     status: 'rejected',
     review_notes: 'Re-grade the outdoor shots',
@@ -1314,6 +1399,21 @@ const teamTermsFx = [
     archived_at: null,
     role_ids: [],
     send_count: 0,
+  },
+]
+
+const termsDocumentsFx = [
+  {
+    id: uid(0xbb),
+    project_id: PROJ.p1,
+    project_name: 'Sharma Wedding',
+    client_name: 'Sharma Family',
+    client_phone: '9876543210',
+    acknowledged_at: '2026-06-05T10:00:00Z',
+    acknowledged_by_name: 'Sharma Family',
+    has_active_link: false,
+    link_expires_at: null,
+    created_at: '2026-06-01T10:00:00Z',
   },
 ]
 

@@ -12,7 +12,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction, requireOwner } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam } from '../../lib/params'
+import { uuidParam, uuidQuery } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
@@ -31,6 +31,7 @@ export const workRouter = new Hono<AppEnv>()
     const userId = c.req.query('user_id')
     const uc = userId ? z.string().uuid().safeParse(userId) : null
     if (userId && !uc?.success) fail(422, 'Invalid user id.')
+    const project = uuidQuery(c, 'project_id')
     const rows = await attempt(c, 'work.list', () =>
       withUser(
         c.env,
@@ -39,6 +40,7 @@ export const workRouter = new Hono<AppEnv>()
           sql`select id, project_id, task_id, submission_link, location_note, notes, status, review_notes, created_at
               from team_work_submissions
               where ${userId ? sql`submitted_by = ${userId}` : sql`true`}
+                and ${project ? sql`project_id = ${project}` : sql`true`}
               order by created_at desc`,
       ),
     )

@@ -15,7 +15,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam } from '../../lib/params'
+import { uuidParam, uuidQuery } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { rpcJson } from '../../lib/rpc'
@@ -38,6 +38,7 @@ export const financialsRouter = new Hono<AppEnv>()
 
   // ── Expenses (company_expenses module) ──────────────────────
   .get('/expenses', requireModule('company_expenses'), async (c) => {
+    const project = uuidQuery(c, 'project_id')
     const rows = await attempt(c, 'financials.expenses', () =>
       withUser(
         c.env,
@@ -47,6 +48,7 @@ export const financialsRouter = new Hono<AppEnv>()
                  e.amount, e.expense_date, e.gst_treatment, e.gst_rate, e.is_fixed_overhead
           from expenses e
           left join parties p on p.id = e.party_id
+          where ${project ? sql`e.project_id = ${project}` : sql`true`}
           order by e.expense_date desc`,
       ),
     )

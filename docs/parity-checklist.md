@@ -42,6 +42,12 @@ Matching the *screens* is the goal. Matching the *architecture* would undo the r
 
 ## Missing — the actual backlog
 
+**This table was last true on 2026-09-07.** A live side-by-side browse of both apps on 2026-09-11
+(logged into each, not read from source) found rows 4–12 below all already shipped since — see
+[[old-vs-new-live-audit-2026-09-11]] in memory for the walkthrough. Row 13 was always a deliberate
+non-issue. Treat this whole table as historical; the current backlog is the "Still open" list
+underneath it.
+
 Ordered roughly by how much a studio would miss it. Sizes are rough: S = a screen, M = a screen
 plus endpoints, L = schema + endpoints + several screens.
 
@@ -50,16 +56,30 @@ plus endpoints, L = schema + endpoints + several screens.
 | ~~1~~ | ~~Quotation flow~~ | done | | Snapshot, public page, accept/decline with evidence. |
 | ~~2~~ | ~~Payment receipt~~ | done | | Public page, prints. |
 | ~~3~~ | ~~Client delivery page~~ | done | | Public page behind the approved-work token. |
-| 4 | Enquiries | 2 routes, 10 components | L | Distinct from CRM leads in the original. |
-| 5 | Reminders | 1 route, 12 components | M | Cron writes notifications already. |
-| 6 | Personal expenses | 4 routes, 13 components | L | Company expenses exist; per-person ones do not. |
-| 7 | Team payouts | 1 route, 2 components | L | Payroll/settlement. |
-| 8 | Project documents | 1 route | M | File storage — needs a bucket decision first. |
-| 9 | Referrals / refer-a-friend | 3 routes | M | |
-| 10 | Facebook lead ads screens | 2 routes, 8 components | M | Meta webhook exists in the API since CRM v2. |
-| 11 | Settings: services, lookups, task bundles, project templates, work submissions, attendance location, customisation, advanced | 13 routes | L | We have 6 settings tabs; they have 13. |
-| 12 | Team hub sub-pages | 10 routes | M | Ours are folded into fewer screens. |
+| ~~4~~ | ~~Enquiries~~ | done | | Own page, distinct from CRM leads, now with a studio-editable status picklist too. |
+| ~~5~~ | ~~Reminders~~ | done | | Own page, manual + cron-generated. |
+| ~~6~~ | ~~Personal expenses~~ | done | | Own page alongside company expenses. |
+| ~~7~~ | ~~Team payouts~~ | done | | Own page, shoot-derived tracker + settlement ledger. |
+| ~~8~~ | ~~Project documents~~ | done | | Own page under Projects. |
+| ~~9~~ | ~~Referrals / refer-a-friend~~ | done | | Own page. |
+| ~~10~~ | ~~Facebook lead ads screens~~ | done | | Real webhook integration (signed posts, Graph API fetch) — ahead of the original, which has this paused on its own account. |
+| ~~11~~ | ~~Settings: services, lookups, task bundles, project templates, work submissions, attendance location, customisation, advanced~~ | done | | Everything is present, just consolidated into fewer tabs/relocated to the owning feature page instead of 13 separate ones — confirmed nothing was actually dropped, only reorganized. |
+| 12 | Team hub sub-pages | 10 routes | M | Ours are folded into fewer screens. Deliberate, not revisited. |
 | 13 | Detail/edit route splits | ~30 routes | M | They split `index`/`edit`/`$id`; ours combine. Cosmetic unless deep-linking matters. |
+
+## Still open (as of 2026-09-14)
+
+| Area | Notes |
+|---|---|
+| Team Booking → Conflicts | Original breaks conflicts down by severity (Critical/Warning) with type/date/search filters; here it's a plain list. Small, cosmetic. |
+
+## Done since 2026-09-11 (not yet folded into the table above)
+
+| Area | Notes |
+|---|---|
+| Data Management | Rebuilt: 5 stat tiles (Missing/Primary pending/Backup pending/Ready/At risk), status/project/type/search filters, CSV export, and a Storage Locations manage dialog. The backend table (`storage_locations` + the FK columns) already existed since migration 0009 — it just needed the API and UI wired up, no migration required. |
+| Team Booking → Dashboard | Was 4 bare tiles; now the full 11 (Shoots/Roles needed/filled/Pending/Unassigned shoots/Conflicts/Active members/Booked/Available/Released/Cancelled) plus Booked cost, Status/Role/Search filters, a Book-slot action, and an Open-calendar link. |
+| Project detail page | Was 3 tabs (Overview/Deliverables/Billing); now 9 (added Shoots, Completed Work, Terms, Expenses, Tasks, Data — all genuinely project-filtered, not link-outs). Deliverables tab also gained the colorful live-status system (pending/in_progress/completed/cancelled) the original has. |
 
 ## How to work through it
 

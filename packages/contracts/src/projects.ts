@@ -5,6 +5,8 @@ export const projectStatus = z.enum(['active', 'completed', 'cancelled', 'on_hol
 export type ProjectStatus = z.infer<typeof projectStatus>
 
 export const deliverableVisibility = z.enum(['client', 'internal'])
+export const deliverableStatus = z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
+export type DeliverableStatus = z.infer<typeof deliverableStatus>
 export const deliverableStartRule = z.enum([
   'this_shoot',
   'whole_project',
@@ -42,6 +44,7 @@ export const updateDeliverableRequest = z.object({
   delivery_days_after_start: z.number().int().min(0).nullable().optional(),
   work_type: z.string().max(80).nullable().optional(),
   internal_notes: z.string().max(2000).nullable().optional(),
+  status: deliverableStatus.optional(),
 })
 export type UpdateDeliverableRequest = z.infer<typeof updateDeliverableRequest>
 
@@ -106,6 +109,8 @@ export const deliverable = z.object({
   delivery_days_after_start: z.number().int().nullish(),
   work_type: z.string().nullish(),
   internal_notes: z.string().nullish(),
+  // Tolerant on read: a row could in principle carry a status value from
+  // before this enum was tightened, and this must not 500 the whole list.
   status: z.string(),
 })
 export type Deliverable = z.infer<typeof deliverable>

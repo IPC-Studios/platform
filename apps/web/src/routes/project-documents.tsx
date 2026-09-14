@@ -97,7 +97,7 @@ function ProjectDocuments() {
   )
 }
 
-function IssueTermsDialog({ projectId, trigger }: { projectId?: string | null; trigger?: React.ReactNode }) {
+export function IssueTermsDialog({ projectId, trigger }: { projectId?: string | null; trigger?: React.ReactNode }) {
   const { data: projects } = useProjects()
   const issue = useIssueTerms()
   const [open, setOpen] = useState(false)

@@ -5,7 +5,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { Badge } from '@/shared/ui/badge'
+import { StatusBadge } from '@/shared/ui/status-badge'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import {
@@ -150,11 +150,11 @@ function RemindersContent() {
     )
   }
 
-  const priorityColors = {
-    low: 'bg-gray-100 text-gray-800',
-    medium: 'bg-blue-100 text-blue-800',
-    high: 'bg-orange-100 text-orange-800',
-    urgent: 'bg-red-100 text-red-800',
+  const priorityTone: Record<string, 'neutral' | 'info' | 'warning' | 'danger'> = {
+    low: 'neutral',
+    medium: 'info',
+    high: 'warning',
+    urgent: 'danger',
   }
 
   const priorityIcons = {
@@ -193,13 +193,13 @@ function RemindersContent() {
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <Badge className={priorityColors[reminder.priority]}>
+                <StatusBadge tone={priorityTone[reminder.priority] ?? 'neutral'} className="gap-1">
                   {priorityIcons[reminder.priority]}
                   {reminder.priority}
-                </Badge>
+                </StatusBadge>
                 <span className="font-medium">{reminder.title}</span>
                 {reminder.user_id !== session?.user_id && (
-                  <Badge className="bg-purple-100 text-purple-800">for {memberName(reminder.user_id) ?? 'someone else'}</Badge>
+                  <StatusBadge tone="info">for {memberName(reminder.user_id) ?? 'someone else'}</StatusBadge>
                 )}
               </div>
               {reminder.description && (

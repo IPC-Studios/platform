@@ -4,9 +4,13 @@ import {
   ArrowRight,
   Briefcase,
   Camera,
+  CheckSquare,
   CircleCheck,
   Clock,
+  Database,
+  FileSignature,
   FileText,
+  Gift,
   IndianRupee,
   LayoutGrid,
   Package,
@@ -14,6 +18,8 @@ import {
   Pencil,
   Phone,
   Plus,
+  Receipt,
+  FileCheck,
   Trash2,
   Users,
   Wallet,
@@ -22,6 +28,7 @@ import {
 import type {
   Deliverable,
   DeliverableInput,
+  DeliverableStatus,
   PaymentInput,
   ProjectStatus,
   UpdateProjectRequest,
@@ -49,12 +56,24 @@ import {
   useAddPayment,
   useDeleteProject,
 } from '@/features/projects/api'
+import { ShootsTab } from '@/features/projects/tabs/ShootsTab'
+import { CompletedWorkTab } from '@/features/projects/tabs/CompletedWorkTab'
+import { TermsTab } from '@/features/projects/tabs/TermsTab'
+import { ExpensesTab } from '@/features/projects/tabs/ExpensesTab'
+import { TasksTab } from '@/features/projects/tabs/TasksTab'
+import { DataTab } from '@/features/projects/tabs/DataTab'
 
 /** The tabs across a project. Each one is a view of the same project. */
 const TABS = [
   { value: 'overview', label: 'Overview', icon: LayoutGrid },
+  { value: 'shoots', label: 'Shoots', icon: Camera },
   { value: 'deliverables', label: 'Deliverables', icon: Package },
+  { value: 'completed_work', label: 'Completed Work', icon: FileCheck },
+  { value: 'terms', label: 'Terms', icon: FileSignature },
   { value: 'billing', label: 'Billing', icon: Wallet },
+  { value: 'expenses', label: 'Expenses', icon: Receipt },
+  { value: 'tasks', label: 'Tasks', icon: CheckSquare },
+  { value: 'data', label: 'Data', icon: Database },
 ] as const
 type Tab = (typeof TABS)[number]['value']
 
@@ -79,6 +98,13 @@ const dayFormat = new Intl.DateTimeFormat('en-IN', {
 })
 const prettyDate = (iso: string) => dayFormat.format(new Date(iso))
 
+const DELIVERABLE_STATUS_TONE: Record<string, 'neutral' | 'info' | 'success' | 'warning' | 'danger'> = {
+  pending: 'warning',
+  in_progress: 'info',
+  completed: 'success',
+  cancelled: 'danger',
+}
+
 export function ProjectDetailPage() {
   return (
     <AuthedPage module="projects">
@@ -93,7 +119,13 @@ function ProjectDetail() {
   const { data, isLoading, isError, refetch } = useProject(id)
   const access = useAccess()
   const canEdit = access.hasAction('projects', 'edit')
+  // The review endpoint is gated on team_work_preview, not projects — a project
+  // editor without that permission would see the buttons but get a 403.
+  const canReviewWork = access.hasAction('team_work_preview', 'edit')
+  // Task status updates are gated on tasks:edit, not projects:edit.
+  const canEditTasks = access.hasAction('tasks', 'edit')
   const del = useDeleteDeliverable(id)
+  const updateDeliverable = useUpdateDeliverable(id)
   const update = useUpdateProject(id)
   const removeProject = useDeleteProject()
   const confirm = useConfirm()
@@ -220,8 +252,8 @@ function ProjectDetail() {
             </Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>
-            <Link to="/shoots">
-              <Camera /> Shoots
+            <Link to="/referrals">
+              <Gift /> Refer &amp; Earn
             </Link>
           </Button>
         </div>
@@ -294,46 +326,27 @@ function ProjectDetail() {
       )}
 
       {tab === 'deliverables' && (
-      <div className="mt-4">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Deliverables</CardTitle>
-            {canEdit && <AddDeliverableDialog id={id} />}
-          </CardHeader>
-          <CardContent>
-            {data.deliverables.length === 0 ? (
-              <EmptyState
-                title="No deliverables yet"
-                description="List what the client receives — the album, the film, the reel. Chargeable ones add to the project total."
-              />
-            ) : (
-              <ul className="divide-y divide-border">
-                {data.deliverables.map((d) => (
-                  <li key={d.id} className="flex items-center justify-between py-2">
-                    <div>
-                      <p className="font-medium">{d.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {d.visibility_scope} · {d.list_key}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {d.is_additional_charge && (
-                        <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>
-                      )}
-                      {canEdit && <EditDeliverableDialog id={id} deliverable={d} />}
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" onClick={() => void removeDeliverable(d.id, d.title)}>
-                          <Trash2 />
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-
+      <div className="mt-4 flex flex-col gap-4">
+        <DeliverableGroup
+          projectId={id}
+          title="Client Deliverables"
+          description="Shown on quotation and promised to the client."
+          scope="client"
+          items={data.deliverables.filter((d) => d.visibility_scope === 'client')}
+          canEdit={canEdit}
+          updateDeliverable={updateDeliverable}
+          onRemove={removeDeliverable}
+        />
+        <DeliverableGroup
+          projectId={id}
+          title="Internal Work"
+          description="Your team's own work items — never shown to the client."
+          scope="internal"
+          items={data.deliverables.filter((d) => d.visibility_scope === 'internal')}
+          canEdit={canEdit}
+          updateDeliverable={updateDeliverable}
+          onRemove={removeDeliverable}
+        />
       </div>
       )}
 
@@ -366,6 +379,13 @@ function ProjectDetail() {
         </Card>
       </div>
       )}
+
+      {tab === 'shoots' && <ShootsTab projectId={id} />}
+      {tab === 'completed_work' && <CompletedWorkTab projectId={id} canReview={canReviewWork} />}
+      {tab === 'terms' && <TermsTab projectId={id} canEdit={canEdit} />}
+      {tab === 'expenses' && <ExpensesTab projectId={id} />}
+      {tab === 'tasks' && <TasksTab projectId={id} canEdit={canEditTasks} />}
+      {tab === 'data' && <DataTab projectId={id} canEdit={canEdit} />}
     </>
   )
 }
@@ -518,7 +538,142 @@ function EditProjectDialog({
   )
 }
 
-function AddDeliverableDialog({ id }: { id: string }) {
+function DeliverableGroup({
+  projectId,
+  title,
+  description,
+  scope,
+  items,
+  canEdit,
+  updateDeliverable,
+  onRemove,
+}: {
+  projectId: string
+  title: string
+  description: string
+  scope: 'client' | 'internal'
+  items: Deliverable[]
+  canEdit: boolean
+  updateDeliverable: ReturnType<typeof useUpdateDeliverable>
+  onRemove: (deliverableId: string, title: string) => void
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            {title}
+            <StatusBadge tone="neutral">{items.length}</StatusBadge>
+          </CardTitle>
+          <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+        </div>
+        {canEdit && (
+          <AddDeliverableDialog
+            id={projectId}
+            defaultVisibility={scope}
+            label={scope === 'client' ? 'Add client deliverable' : 'Add internal work'}
+          />
+        )}
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <EmptyState
+            title={scope === 'client' ? 'No client deliverables yet' : 'No internal work yet'}
+            description={
+              scope === 'client'
+                ? 'List what the client receives — the album, the film, the reel. Chargeable ones add to the project total.'
+                : "Track your team's own work items here — they never reach the client."
+            }
+          />
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {items.map((d) => (
+              <li key={d.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{d.title}</p>
+                  <StatusBadge tone={DELIVERABLE_STATUS_TONE[d.status] ?? 'neutral'}>
+                    {humanize(d.status)}
+                  </StatusBadge>
+                  <StatusBadge tone={d.visibility_scope === 'client' ? 'info' : 'neutral'}>
+                    {d.visibility_scope === 'client' ? 'Client deliverable' : 'Internal work'}
+                  </StatusBadge>
+                  <StatusBadge tone={d.show_on_quotation ? 'success' : 'neutral'}>
+                    {d.show_on_quotation ? 'Shown on quotation' : 'Internal only'}
+                  </StatusBadge>
+                  {d.is_additional_charge && (
+                    <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    value={d.estimated_date ?? ''}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      updateDeliverable.mutate({
+                        deliverableId: d.id,
+                        patch: { estimated_date: e.target.value || null },
+                      })
+                    }
+                    className="w-40"
+                    aria-label={`Estimated delivery for ${d.title}`}
+                  />
+                  <Select
+                    value={d.status}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      updateDeliverable.mutate({
+                        deliverableId: d.id,
+                        patch: { status: e.target.value as DeliverableStatus },
+                      })
+                    }
+                    className="w-36"
+                    aria-label={`Status for ${d.title}`}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </Select>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        updateDeliverable.mutate({
+                          deliverableId: d.id,
+                          patch: { visibility_scope: scope === 'client' ? 'internal' : 'client' },
+                        })
+                      }
+                    >
+                      {scope === 'client' ? 'To internal' : 'To client'}
+                    </Button>
+                  )}
+                  {canEdit && <EditDeliverableDialog id={projectId} deliverable={d} />}
+                  {canEdit && (
+                    <Button variant="ghost" size="icon" onClick={() => onRemove(d.id, d.title)}>
+                      <Trash2 />
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function AddDeliverableDialog({
+  id,
+  defaultVisibility = 'client',
+  label = 'Add',
+}: {
+  id: string
+  defaultVisibility?: 'client' | 'internal'
+  label?: string
+}) {
   const add = useAddDeliverable(id)
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -534,8 +689,9 @@ function AddDeliverableDialog({ id }: { id: string }) {
       list_key: 'primary',
       is_additional_charge: charge,
       additional_charge_amount: charge ? Number(amount) || 0 : 0,
-      visibility_scope: 'client',
-      show_on_quotation: true,
+      visibility_scope: defaultVisibility,
+      // Internal work is never shown on the client's quotation by definition.
+      show_on_quotation: defaultVisibility === 'client',
       start_rule: 'whole_project',
       ...(workType.trim() ? { work_type: workType.trim() } : {}),
       ...(internalNotes.trim() ? { internal_notes: internalNotes.trim() } : {}),
@@ -553,10 +709,10 @@ function AddDeliverableDialog({ id }: { id: string }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          <Plus /> Add
+          <Plus /> {label}
         </Button>
       </DialogTrigger>
-      <DialogContent title="Add deliverable">
+      <DialogContent title={defaultVisibility === 'client' ? 'Add client deliverable' : 'Add internal work'}>
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label>Title</Label>

@@ -349,6 +349,21 @@ describe('the shoot card', () => {
     expect(internalWorkSuggestions('  ')).toEqual(['Edited Photos', 'Reel', 'Data Sorting'])
   })
 
+  it('gives a wedding shoot the fuller suggestion set, case-insensitively', () => {
+    expect(internalWorkSuggestions('Wedding Day')).toEqual([
+      'Wedding Day Raw Photos',
+      'Wedding Day Edited Photos',
+      'Wedding Day Highlight Film',
+      'Full Wedding Film',
+      'Wedding Day Reel',
+      'Wedding Day Teaser',
+      'Full Ceremony Video',
+      'Data Sorting',
+      'Quality Check',
+    ])
+    expect(internalWorkSuggestions('WEDDING')).toHaveLength(9)
+  })
+
   it('makes internal work that stays off the quotation and follows its shoot', () => {
     const item = newInternalWork(2, 'Data Sorting')
     expect(item).toMatchObject({

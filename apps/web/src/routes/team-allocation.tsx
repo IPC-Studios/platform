@@ -89,6 +89,15 @@ function TeamBooking() {
 
   const from = new Date(year, month, 1)
   const to = new Date(year, month + 1, 0)
+  /** Every slot of any status that starts within the selected month — what the Dashboard tab counts against. */
+  const slotsInMonth = useMemo(() => {
+    const start = from.getTime()
+    const end = to.getTime() + 24 * 60 * 60 * 1000 - 1
+    return (slots.data ?? []).filter((s) => {
+      const t = new Date(s.start_at).getTime()
+      return t >= start && t <= end
+    })
+  }, [slots.data, year, month])
   const inMonth = useMemo(() => {
     const mm = String(month + 1).padStart(2, '0')
     const start = `${year}-${mm}-01`
@@ -236,7 +245,13 @@ function TeamBooking() {
         </>
       )}
 
-      {tab === 'dashboard' && <BookingDashboard slots={booked} shoots={inMonth} />}
+      {tab === 'dashboard' && (
+        <BookingDashboard
+          slots={slotsInMonth}
+          shoots={inMonth}
+          onOpenCalendar={() => setTab('calendar')}
+        />
+      )}
       {tab === 'conflicts' && <Conflicts slots={booked} />}
 
       {/* Every per-shoot Assign press opens this one, keyed so it starts fresh. */}
@@ -579,40 +594,140 @@ function MemberView({ slots, from, to }: { slots: readonly TeamSlot[]; from: Dat
 function BookingDashboard({
   slots,
   shoots,
+  onOpenCalendar,
 }: {
+  /** Every slot of any status starting this month — not pre-filtered to "booked". */
   slots: readonly TeamSlot[]
   shoots: readonly ShootListItem[]
+  onOpenCalendar: () => void
 }) {
+  const members = useMembers()
+  const [status, setStatus] = useState('')
+  const [role, setRole] = useState('')
+  const [search, setSearch] = useState('')
+
+  const booked = slots.filter((s) => s.status === 'booked')
+  const released = slots.filter((s) => s.status === 'released')
+  const cancelled = slots.filter((s) => s.status === 'cancelled')
+
   const needed = shoots.reduce((n, s) => n + s.requirements.reduce((m, r) => m + r.quantity, 0), 0)
-  const filled = shoots.reduce(
-    (n, s) =>
-      n +
-      s.requirements.reduce((m, r) => {
-        const have = slots.filter((x) => x.shoot_id === s.id && same(x.service_name, r.name)).length
-        return m + Math.min(r.quantity, have)
-      }, 0),
-    0,
-  )
-  const cost = slots.reduce((n, s) => n + (s.estimated_cost ?? 0), 0)
+  const filledForShoot = (s: ShootListItem) =>
+    s.requirements.reduce((m, r) => {
+      const have = booked.filter((x) => x.shoot_id === s.id && same(x.service_name, r.name)).length
+      return m + Math.min(r.quantity, have)
+    }, 0)
+  const filled = shoots.reduce((n, s) => n + filledForShoot(s), 0)
+  const pending = Math.max(0, needed - filled)
   const unstaffed = shoots.filter((s) => s.requirements.length === 0).length
+  const unassignedShoots = shoots.filter(
+    (s) => s.requirements.length > 0 && filledForShoot(s) < s.requirements.reduce((m, r) => m + r.quantity, 0),
+  ).length
+  // Only booked slots can clash for real — a released or cancelled slot freed up
+  // its time, so counting it here would flag a false double-booking.
+  const conflicts = findClashes(booked).length
+  const cost = booked.reduce((n, s) => n + (s.estimated_cost ?? 0), 0)
+  const activeMemberIds = new Set(booked.map((s) => s.user_id))
+  const available = Math.max(0, (members.data?.length ?? 0) - activeMemberIds.size)
+
+  const roles = [...new Set(slots.map((s) => s.service_name).filter((v): v is string => !!v))].sort()
+
+  const filteredSlots = slots
+    .filter((s) => !status || s.status === status)
+    .filter((s) => !role || s.service_name === role)
+    .filter((s) => {
+      if (!search.trim()) return true
+      const q = search.trim().toLowerCase()
+      return (s.user_name ?? '').toLowerCase().includes(q) || (s.service_name ?? '').toLowerCase().includes(q)
+    })
+    .sort((a, b) => a.start_at.localeCompare(b.start_at))
 
   return (
-    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Figure label="Shoots this month" value={String(shoots.length)} />
-      <Figure label="Roles needed" value={String(needed)} />
-      <Figure
-        label="Roles filled"
-        value={`${filled} of ${needed}`}
-        tone={needed === 0 ? undefined : filled >= needed ? 'success' : 'warning'}
-      />
-      <Figure label="Booked cost" value={formatINR(cost)} />
+    <div className="mt-4 flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure label="Shoots this month" value={String(shoots.length)} />
+        <Figure label="Roles needed" value={String(needed)} />
+        <Figure
+          label="Roles filled"
+          value={`${filled} of ${needed}`}
+          tone={needed === 0 ? undefined : filled >= needed ? 'success' : 'warning'}
+        />
+        <Figure label="Pending" value={String(pending)} tone={pending > 0 ? 'warning' : undefined} />
+        <Figure
+          label="Unassigned shoots"
+          value={String(unassignedShoots)}
+          tone={unassignedShoots > 0 ? 'warning' : undefined}
+        />
+        <Figure label="Conflicts" value={String(conflicts)} tone={conflicts > 0 ? 'warning' : undefined} />
+        <Figure label="Active members" value={String(activeMemberIds.size)} />
+        <Figure label="Booked" value={String(booked.length)} />
+        <Figure label="Available" value={String(available)} />
+        <Figure label="Released" value={String(released.length)} />
+        <Figure label="Cancelled" value={String(cancelled.length)} />
+        <Figure label="Booked cost" value={formatINR(cost)} />
+      </div>
+
       {unstaffed > 0 && (
-        <Card className="sm:col-span-2 lg:col-span-4">
+        <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
             {unstaffed} shoot{unstaffed === 1 ? ' has' : 's have'} no roles listed yet, so nothing
             can be booked against {unstaffed === 1 ? 'it' : 'them'}.
           </CardContent>
         </Card>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-36" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="booked">Booked</option>
+          <option value="released">Released</option>
+          <option value="cancelled">Cancelled</option>
+        </Select>
+        <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-40" aria-label="Filter by role">
+          <option value="">All roles</option>
+          {roles.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </Select>
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by person or role…"
+          className="w-56"
+          aria-label="Search bookings"
+        />
+        <BookDialog shoots={shoots} trigger={<Button size="sm"><UserPlus /> Book slot</Button>} />
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={onOpenCalendar}>
+          Open calendar →
+        </Button>
+      </div>
+
+      {filteredSlots.length === 0 ? (
+        <EmptyState
+          title="No bookings match"
+          description="Try a different filter, or book someone for this month."
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {filteredSlots.map((s) => (
+            <Card key={s.id}>
+              <CardContent className="flex flex-wrap items-center gap-3 p-3 text-sm">
+                <span className="font-medium">{s.user_name ?? 'Unknown'}</span>
+                <span className="text-muted-foreground">{s.service_name ?? 'Crew'}</span>
+                <span className="text-muted-foreground">
+                  {shortDay.format(new Date(s.start_at))} · {timeOf(s.start_at)}–{timeOf(s.end_at)}
+                </span>
+                <StatusBadge
+                  tone={s.status === 'booked' ? 'info' : s.status === 'released' ? 'neutral' : 'danger'}
+                  className="ml-auto"
+                >
+                  {s.status}
+                </StatusBadge>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -645,14 +760,8 @@ function Figure({
   )
 }
 
-/**
- * Anyone booked in two places at once.
- *
- * The database refuses overlapping slots for one member, so this ought to stay
- * empty — it is here because "ought to" is not "does", and finding out on the
- * screen beats finding out on the day.
- */
-function Conflicts({ slots }: { slots: readonly TeamSlot[] }) {
+/** Every pair of slots that book the same person over the same time. */
+function findClashes(slots: readonly TeamSlot[]): [TeamSlot, TeamSlot][] {
   const clashes: [TeamSlot, TeamSlot][] = []
   for (let i = 0; i < slots.length; i++) {
     for (let j = i + 1; j < slots.length; j++) {
@@ -661,6 +770,18 @@ function Conflicts({ slots }: { slots: readonly TeamSlot[] }) {
       if (a.user_id === b.user_id && overlaps(a, b)) clashes.push([a, b])
     }
   }
+  return clashes
+}
+
+/**
+ * Anyone booked in two places at once.
+ *
+ * The database refuses overlapping slots for one member, so this ought to stay
+ * empty — it is here because "ought to" is not "does", and finding out on the
+ * screen beats finding out on the day.
+ */
+function Conflicts({ slots }: { slots: readonly TeamSlot[] }) {
+  const clashes = findClashes(slots)
 
   if (clashes.length === 0) {
     return (

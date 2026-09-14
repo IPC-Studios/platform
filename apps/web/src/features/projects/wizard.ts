@@ -423,13 +423,29 @@ export function shootIssues(shoot: ShootDraft): string[] {
  *
  * Derived from the shoot's own name rather than a lookup table, so a studio
  * that types "Roka Night" gets "Roka Night Edited Photos" without anyone
- * having listed that ceremony anywhere.
+ * having listed that ceremony anywhere. The one exception is "wedding" itself
+ * — common enough, and specific enough in what a studio actually delivers for
+ * it (a highlight film is not the same line item as a same-day teaser), that
+ * a richer fixed list earns its keep without giving up on the generic
+ * fallback for every other ceremony name.
  */
 export function internalWorkSuggestions(shootName: string): string[] {
   const name = shootName.trim()
-  return name
-    ? [`${name} Edited Photos`, `${name} Reel`, 'Data Sorting']
-    : ['Edited Photos', 'Reel', 'Data Sorting']
+  if (!name) return ['Edited Photos', 'Reel', 'Data Sorting']
+  if (/wedding/i.test(name)) {
+    return [
+      `${name} Raw Photos`,
+      `${name} Edited Photos`,
+      `${name} Highlight Film`,
+      'Full Wedding Film',
+      `${name} Reel`,
+      `${name} Teaser`,
+      'Full Ceremony Video',
+      'Data Sorting',
+      'Quality Check',
+    ]
+  }
+  return [`${name} Edited Photos`, `${name} Reel`, 'Data Sorting']
 }
 
 /**

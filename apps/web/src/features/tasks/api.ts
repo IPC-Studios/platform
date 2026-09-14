@@ -45,6 +45,18 @@ export function useTasks() {
   })
 }
 
+/** One project's own tasks — its detail page's Tasks tab. */
+export function useProjectTasks(projectId: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['tasks', 'project', projectId],
+    queryFn: () => callApi(`/tasks?project_id=${projectId}`, { responseSchema: tasksList }),
+    enabled: !!session && access.hasModule('tasks') && !!projectId,
+    staleTime: 15_000,
+  })
+}
+
 /** The production board's own view — same rows, lane order applied. */
 export function useBoard() {
   const { session } = useAuth()

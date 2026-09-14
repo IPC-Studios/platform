@@ -19,7 +19,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam } from '../../lib/params'
+import { uuidParam, uuidQuery } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
@@ -49,8 +49,9 @@ function toItems(rows: RawTask[], order: Map<string, number>) {
 
 // Flat select with the project name joined in (was PostgREST `projects(name)`).
 // `assignee` narrows to tasks assigned to one person, for an admin previewing
-// what a specific team member's board looks like.
-const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
+// what a specific team member's board looks like. `project` narrows to one
+// project, for its detail page's own Tasks tab.
+const selectTasks = (sql: TransactionSql, assignee?: string, project?: string) => sql<RawTask[]>`
   select t.id, t.title, t.description, t.status, t.priority, t.due_date, t.project_id,
          p.name as project_name,
          cp.code as custom_priority_code, cp.label as custom_priority_label, cp.tone as custom_priority_tone,
@@ -68,6 +69,7 @@ const selectTasks = (sql: TransactionSql, assignee?: string) => sql<RawTask[]>`
   left join users u on u.user_id = a.user_id
   left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
   where ${assignee ? sql`exists (select 1 from task_assignees a2 where a2.task_id = t.id and a2.user_id = ${assignee})` : sql`true`}
+    and ${project ? sql`t.project_id = ${project}` : sql`true`}
   group by t.id, p.name, cp.code, cp.label, cp.tone
   order by t.created_at desc`
 
@@ -204,7 +206,8 @@ export const tasksRouter = new Hono<AppEnv>()
     const assignee = c.req.query('assignee')
     const ac = assignee ? z.string().uuid().safeParse(assignee) : null
     if (assignee && !ac?.success) fail(422, 'Invalid assignee id.')
-    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, (sql) => selectTasks(sql, assignee)))
+    const project = uuidQuery(c, 'project_id') ?? undefined
+    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, (sql) => selectTasks(sql, assignee, project)))
     if (!rows) fail(400, 'We could not load tasks.')
     return c.json(list.parse(toItems(rows, new Map())))
   })

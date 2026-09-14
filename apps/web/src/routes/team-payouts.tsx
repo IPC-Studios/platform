@@ -4,7 +4,6 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Button } from '@/shared/ui/button'
 import { Input, Label } from '@/shared/ui/input'
-import { Badge } from '@/shared/ui/badge'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
@@ -87,11 +86,11 @@ function TeamPayoutsContent() {
     }
   }
 
-  const statusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
+  const statusTone: Record<string, 'warning' | 'info' | 'success' | 'danger'> = {
+    pending: 'warning',
+    processing: 'info',
+    completed: 'success',
+    failed: 'danger',
   }
 
   return (
@@ -147,7 +146,7 @@ function TeamPayoutsContent() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium">₹{payout.amount.toLocaleString()}</span>
-                <Badge className={statusColors[payout.status]}>{payout.status}</Badge>
+                <StatusBadge tone={statusTone[payout.status] ?? 'neutral'}>{payout.status}</StatusBadge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {payout.user_name ?? 'Unknown'} · {payout.period_start} to {payout.period_end}

@@ -2,7 +2,7 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
-import { Badge } from '@/shared/ui/badge'
+import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState } from '@/shared/ui/states'
 import { useGopoSummary } from '@/features/gopo/api'
 import {
@@ -49,12 +49,12 @@ function GopoContent() {
 
   const { score_card, expense_breakdown, project_performance, attention_items, recent_activity } = data
 
-  const healthColors = {
-    excellent: 'bg-green-100 text-green-800',
-    good: 'bg-blue-100 text-blue-800',
-    fair: 'bg-yellow-100 text-yellow-800',
-    poor: 'bg-orange-100 text-orange-800',
-    critical: 'bg-red-100 text-red-800',
+  const healthTone: Record<string, 'success' | 'info' | 'warning' | 'danger'> = {
+    excellent: 'success',
+    good: 'info',
+    fair: 'warning',
+    poor: 'warning',
+    critical: 'danger',
   }
 
   const severityColors = {
@@ -72,9 +72,9 @@ function GopoContent() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Studio Health</CardTitle>
-            <Badge className={healthColors[score_card.health_label]}>
+            <StatusBadge tone={healthTone[score_card.health_label] ?? 'neutral'}>
               {score_card.health_label.toUpperCase()}
-            </Badge>
+            </StatusBadge>
           </div>
         </CardHeader>
         <CardContent>

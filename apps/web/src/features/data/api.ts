@@ -1,13 +1,69 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from '@ipc/contracts'
-import { dataRecord, type CreateDataRecordRequest, type UpdateDataRecordRequest } from '@ipc/contracts'
+import {
+  dataRecord,
+  storageLocation,
+  type CreateDataRecordRequest,
+  type UpdateDataRecordRequest,
+  type CreateStorageLocationRequest,
+  type UpdateStorageLocationRequest,
+} from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
 
 const list = dataRecord.array()
+const locationList = storageLocation.array()
 const anySchema = z.any()
+
+export function useStorageLocations() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['data', 'locations'],
+    queryFn: () => callApi('/data/locations', { responseSchema: locationList }),
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateStorageLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateStorageLocationRequest) =>
+      callApi('/data/locations', { method: 'POST', body: input, responseSchema: storageLocation }),
+    onSuccess: () => {
+      toast.success('Location added')
+      void qc.invalidateQueries({ queryKey: ['data', 'locations'] })
+    },
+  })
+}
+
+export function useUpdateStorageLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateStorageLocationRequest }) =>
+      callApi(`/data/locations/${id}`, { method: 'PATCH', body: patch, responseSchema: storageLocation }),
+    onSuccess: () => {
+      toast.success('Location updated')
+      void qc.invalidateQueries({ queryKey: ['data', 'locations'] })
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
+  })
+}
+
+export function useDeleteStorageLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/data/locations/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Location removed')
+      void qc.invalidateQueries({ queryKey: ['data', 'locations'] })
+      void qc.invalidateQueries({ queryKey: ['data'] })
+    },
+  })
+}
 
 export function useDataRecords() {
   const { session } = useAuth()
@@ -16,6 +72,18 @@ export function useDataRecords() {
     queryKey: ['data'],
     queryFn: () => callApi('/data', { responseSchema: list }),
     enabled: !!session && access.hasModule('projects'),
+    staleTime: 15_000,
+  })
+}
+
+/** One project's own data records — its detail page's Data tab. */
+export function useProjectDataRecords(projectId: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['data', 'project', projectId],
+    queryFn: () => callApi(`/data?project_id=${projectId}`, { responseSchema: list }),
+    enabled: !!session && access.hasModule('projects') && !!projectId,
     staleTime: 15_000,
   })
 }
