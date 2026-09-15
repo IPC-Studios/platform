@@ -88,6 +88,28 @@ work**:
 
 **At parity or better:** `/my-work`, `/settings/lookups`, `/settings/task-bundles`, `/platform/usage`
 
+## Dialog pass: the add/edit forms
+
+The level below tabs. Opening each app's primary "add" modal and comparing the
+fields, which no earlier pass had done — every sweep until now only saw the
+button that opens them.
+
+| Dialog | Old | Ours | Outcome |
+|---|---:|---:|---|
+| Company expense | 3 fields | 11 | ours ahead |
+| Personal expense | 6 | 10 | ours ahead |
+| Reminder | — | 6 | ours ahead |
+| Add lead | 18 | 12 | **closed** — added Assign to, Follow up at, Stage, Group/segment |
+| Payment, data record | — | — | capture artifact; our buttons are named differently |
+
+The lead form was the one real gap, and all four fields were already in
+`createLeadRequest` — the dialog just never asked, so leads arrived unowned,
+undated and untagged.
+
+Not adopted from their lead form: **Quality** (hot/warm/cold) and **Contacted
+status**. We use a continuous score and per-attempt activity history; carrying
+both models would leave two sources of truth for one question.
+
 ## Inside-screen pass: the project tabs
 
 Route-level sweeping runs out once the routes match. The next depth is the tabs
