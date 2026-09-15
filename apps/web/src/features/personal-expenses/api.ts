@@ -108,7 +108,7 @@ const attachmentSchema = z.object({
   created_at: z.string().nullable().optional(),
 })
 
-/** Lovable parity: expense detail + attachments stub (list/add/remove). */
+/** Expense detail + its attachments (list/add/remove). */
 export function usePersonalExpenseDetail(id: string | null) {
   const { session } = useAuth()
   const access = useAccess()

@@ -333,7 +333,7 @@ function PersonalExpensesContent() {
 
       <ExpenseDialog open={dialogOpen} onOpenChange={setDialogOpen} initial={editing} />
 
-      {/* Detail dialog with AttachmentsPanel stub */}
+      {/* Detail dialog, with the bills attached to this expense */}
       <Dialog open={!!detail} onOpenChange={(v) => { if (!v) setDetail(null) }}>
         <DialogContent title="Expense detail" description={detail ? `₹${detail.amount.toLocaleString()} · ${detail.expense_date}` : undefined}>
           {detail && (
@@ -478,7 +478,7 @@ function PartyManager({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
   )
 }
 
-/** Attachments stub: list + link-based add/remove (storage upload stays out of scope). */
+/** The bills attached to one expense: upload, list, remove. */
 function AttachmentsPanel({ expenseId }: { expenseId: string }) {
   const { data, isLoading } = usePersonalExpenseAttachments(expenseId)
   const add = useAddPersonalExpenseAttachment()

@@ -33,6 +33,8 @@ const TERMS = '77777777-7777-7777-7777-777777777777'
 const LEAD = '88888888-8888-8888-8888-888888888888'
 const CRM_QUOTE = '99999999-9999-9999-9999-999999999999'
 const SUBMISSION = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+const SEND = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+const CAMPAIGN = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
 
 let db: PGlite
 
@@ -88,6 +90,12 @@ beforeAll(async () => {
     -- rejected, so get_delivery_for_token's 'sent' branch can never match.
     values ('${SUBMISSION}', '${COMPANY}', '${PROJECT}', 'approved', 'Final films',
             'https://example.test/gallery', 'link', 'Open your gallery', now());
+    insert into crm_webhook_sources (company_id, source_key, label, kind)
+    values ('${COMPANY}', 'src-key', 'Website', 'webform');
+    insert into referral_campaigns (id, company_id, name, slug)
+    values ('${CAMPAIGN}', '${COMPANY}', 'Refer', 'refer-x');
+    insert into team_terms_sends (id, company_id, user_id, rendered_body, recipient_name)
+    values ('${SEND}', '${COMPANY}', '${OWNER}', 'Crew terms', 'Crew Member');
   `)
 
   const mint = (purpose: string, subject: string, raw: string) =>
@@ -99,6 +107,7 @@ beforeAll(async () => {
   await mint('terms_ack', TERMS, 'ttok')
   await mint('quote_accept', CRM_QUOTE, 'qatok')
   await mint('work_delivery', SUBMISSION, 'dtok')
+  await mint('team_terms', SEND, 'tttok')
 }, 120_000)
 
 const one = async (sql: string): Promise<Record<string, unknown>> => {
@@ -184,6 +193,51 @@ describe('client-facing document readers', () => {
     expect(q['quote_number']).toBe('Q-1')
     expect(q['studio']).toBe('Studio')
     expect(q['client_name']).toBe('A Lead')
+  })
+
+  /**
+   * The other half of the public surface. A document that renders but an action
+   * that throws means the client can read the quote and not accept it — or a
+   * website form posts leads into a void.
+   */
+  describe('sessionless actions', () => {
+    it('a client can accept and decline', async () => {
+      await db.query(`select respond_to_quotation('qtok', true, 'Client Name', '1.2.3.4', 'UA')`)
+      await db.query(`select accept_quote('qatok', 'Client Name', 'c@example.test', '1.2.3.4', 'UA')`)
+      await db.query(`select decline_quote('qatok', 'changed mind')`)
+      const row = await one(`select accepted_by_name from project_quotations where id = '${QUOTE}'`)
+      expect(row['accepted_by_name']).toBe('Client Name')
+    })
+
+    it('a client can agree to terms', async () => {
+      await db.query(`select acknowledge_terms('ttok', 'Client Name', 'c@example.test', '1.2.3.4', 'UA')`)
+      const row = await one(`select acknowledged_by_name from project_terms_documents where id = '${TERMS}'`)
+      expect(row['acknowledged_by_name']).toBe('Client Name')
+    })
+
+    it('a website form can post a lead', async () => {
+      // Every web form and Meta lead ad arrives through capture_lead.
+      await db.query(`select capture_lead('src-key', 'Web Lead', '9876543210', 'w@example.test', '{}'::jsonb)`)
+      const row = await one(`select count(*)::int as n from crm_leads where name = 'Web Lead'`)
+      expect(Number(row['n'])).toBe(1)
+    })
+
+    it('a referral page loads and accepts a submission', async () => {
+      const camp = await one(`select get_public_referral_campaign('refer-x') as c`)
+      expect(camp['c']).toBeTruthy()
+      await db.query(
+        `select submit_referral('${CAMPAIGN}', 'Referrer', '9999999999', 'Friend', '8888888888',
+                                'f@example.test', 'notes', 'wedding', current_date, 2)`,
+      )
+    })
+
+    it('crew can acknowledge team terms by either arity', async () => {
+      // 0097 added a defaulted 5th parameter without dropping the 4-arg
+      // version, so both existed and the short form raised "is not unique".
+      await db.query(`select acknowledge_team_terms('tttok', 'Crew Member', '1.2.3.4', 'UA')`)
+      const row = await one(`select acknowledged_by_name from team_terms_sends where id = '${SEND}'`)
+      expect(row['acknowledged_by_name']).toBe('Crew Member')
+    })
   })
 
   it('refuses an unknown token without raising', async () => {

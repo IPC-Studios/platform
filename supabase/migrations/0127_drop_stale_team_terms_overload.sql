@@ -1,0 +1,17 @@
+-- Drop the stale 4-argument acknowledge_team_terms.
+--
+-- 0097 added `p_email text default null` with `create or replace function`,
+-- which does not replace a different arity — it creates a second function. So
+-- both live, and a 4-argument call matches both:
+--
+--   function acknowledge_team_terms(unknown, unknown, unknown, unknown) is not unique
+--
+-- Latent rather than live: the API passes five named arguments, which resolves
+-- unambiguously. But the old body does not record acknowledged_by_email, so any
+-- caller that did use the short form would either error or silently drop the
+-- email evidence 0097 exists to capture.
+--
+-- This is the third time this repo has hit the defaulted-trailing-parameter
+-- trap. The rule: when adding a parameter to an existing function, DROP the old
+-- exact signature first.
+drop function if exists acknowledge_team_terms(text, text, text, text);

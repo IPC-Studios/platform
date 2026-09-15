@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Building2, Users, FolderKanban, Download, Copy, Search, KeyRound } from 'lucide-react'
+import { Building2, Users, FolderKanban, Download, Copy, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import type { PlanGate, PlatformStudio } from '@ipc/contracts'
 import { PlatformPage } from '@/shared/layout/PlatformPage'
@@ -340,15 +340,15 @@ function CreateStudioDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild><Button size="sm">New studio</Button></DialogTrigger>
-      <DialogContent title="Create studio" description="Vendor-provisioned studio. Login provisioning is a stub — Supabase Auth owns identity here.">
+      <DialogContent
+        title="Create studio"
+        description="Creates the tenant and records the owner invite. The studio has no owner until that person registers against it."
+      >
         <div className="mt-3 flex flex-col gap-2">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Studio name *" />
           <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Owner email *" />
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Owner phone (optional)" />
           <Input value={planKey} onChange={(e) => setPlanKey(e.target.value)} placeholder="Plan key (optional — grants trial)" />
-          <Button variant="outline" onClick={() => toast.message('Firebase provision stub: create the Supabase Auth user for this email, then assign the plan.')}>
-            <KeyRound className="mr-1 size-4" /> Provision login (stub)
-          </Button>
           <Button disabled={create.isPending || !name.trim() || !email.trim()} onClick={() => create.mutate({ name: name.trim(), owner_email: email.trim(), owner_phone: phone.trim() || undefined, plan_key: planKey.trim() || undefined })}>
             {create.isPending ? 'Creating…' : 'Create'}
           </Button>
