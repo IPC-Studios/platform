@@ -88,6 +88,29 @@ work**:
 
 **At parity or better:** `/my-work`, `/settings/lookups`, `/settings/task-bundles`, `/platform/usage`
 
+## Inside-screen pass: the project tabs
+
+Route-level sweeping runs out once the routes match. The next depth is the tabs
+*within* a screen — ten on the project detail.
+
+**A trap worth recording.** Driving the old app's tabs with `element.click()`
+does nothing: its tab component listens on `pointerdown`/`mousedown`. The first
+capture was therefore ten copies of the Overview tab, and the diff cheerfully
+reported every tab "at parity". Dispatch a real pointer sequence
+(`pointerdown` → `mousedown` → `pointerup` → `mouseup` → `click`) instead. Ours
+responds to a plain click, so the two apps disagree here and only one side
+silently fails.
+
+What the corrected pass found:
+
+| Tab | Finding | Outcome |
+|---|---|---|
+| Shoots | read-only; "Add shoot" navigated away to the global page | **closed** — ten quick-add chips + full form, in place |
+| Referrals | share link built `/refer/` and never appended the slug — a dead link in every copied message | **closed**, plus the reward block, WhatsApp and a Referrals-received list |
+| Deliverables | ours is richer (scope grouping, per-item status, linked shoots); theirs has Import Work Deliverables and Add brief | open, low value |
+| Tasks | ours has per-task status selects; theirs has a bulk-tools menu | open, low value |
+| Overview, Expenses, Data, Completed Work | naming differences only | no work |
+
 ## Deep pass: fields, tags and cards
 
 A third sweep extended the fingerprint past controls into the things a list
