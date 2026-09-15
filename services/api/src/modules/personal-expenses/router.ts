@@ -262,16 +262,17 @@ export const personalExpensesRouter = new Hono<AppEnv>()
   .get('/:id/attachments', requireModule('personal_expenses'), async (c) => {
     const id = uuidParam(c)
     const rows = await attempt(c, 'personal-expenses.attachments', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        try {
-          return await sql`select id, file_name, file_url, file_size, mime_type, created_at
+      // No try/catch here on purpose. This used to swallow the error and
+      // return [], so a broken table read as "no attachments yet" — which is
+      // exactly what it did for as long as the column names were wrong.
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`select id, file_name, file_url, file_size, mime_type, created_at
             from expense_attachments
            where personal_expense_id = ${id} and company_id = ${c.get('auth').companyId}
-           order by created_at desc`
-        } catch {
-          return []
-        }
-      }),
+           order by created_at desc`,
+      ),
     )
     if (!rows) fail(400, 'We could not load attachments.')
     return c.json(rows)
