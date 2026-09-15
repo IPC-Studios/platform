@@ -5,7 +5,8 @@ import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
-import { useAddLead } from './api'
+import { useAddLead, usePipelines } from './api'
+import { useMembers } from '@/features/allocation/api'
 import { useCrmAccess } from './access'
 
 type Field = 'name' | 'phone' | 'email'
@@ -32,6 +33,11 @@ export function AddLeadDialog({
   const add = useAddLead()
   const { canCreate } = useCrmAccess()
   const [openSelf, setOpenSelf] = useState(false)
+  const members = useMembers()
+  const pipelines = usePipelines()
+  // The default pipeline's stages — a lead can start anywhere, not only at the
+  // top, because a studio often adds one that is already part-way along.
+  const stages = pipelines.data?.[0]?.stages ?? []
   const open = openProp ?? openSelf
   const setOpen = (v: boolean) => {
     setOpenSelf(v)
@@ -49,6 +55,16 @@ export function AddLeadDialog({
   const [eventLocation, setEventLocation] = useState('')
   const [alternatePhone, setAlternatePhone] = useState('')
   const [city, setCity] = useState('')
+  /**
+   * The four the old form had and this one did not. All were already in
+   * createLeadRequest — the dialog simply never asked, so a lead arrived
+   * unowned, undated and untagged and someone had to open it again to fix
+   * that.
+   */
+  const [assignedTo, setAssignedTo] = useState('')
+  const [followUpAt, setFollowUpAt] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [stageId, setStageId] = useState('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -64,6 +80,10 @@ export function AddLeadDialog({
     setEventLocation('')
     setAlternatePhone('')
     setCity('')
+    setAssignedTo('')
+    setFollowUpAt('')
+    setGroupName('')
+    setStageId('')
     setErrors({})
   }
 
@@ -82,6 +102,10 @@ export function AddLeadDialog({
       ...(eventLocation.trim() ? { event_location: eventLocation.trim() } : {}),
       ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
       ...(city.trim() ? { city: city.trim() } : {}),
+      ...(assignedTo ? { assigned_to: assignedTo } : {}),
+      ...(followUpAt ? { follow_up_at: new Date(followUpAt).toISOString() } : {}),
+      ...(groupName.trim() ? { group_name: groupName.trim() } : {}),
+      ...(stageId ? { stage_id: stageId } : {}),
     }
     const found = fieldErrors<Field>(createLeadRequest, body, { labels: LABELS })
     setErrors(found)
@@ -210,6 +234,53 @@ export function AddLeadDialog({
             <div className="flex flex-col gap-1.5">
               <Label>Expected close</Label>
               <Input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Assign to</Label>
+              <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+                <option value="">
+                  {/* Empty is not "nobody" — the distribution rota picks. */}
+                  Auto-assign
+                </option>
+                {(members.data ?? []).map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Follow up at</Label>
+              <Input
+                type="datetime-local"
+                value={followUpAt}
+                onChange={(e) => setFollowUpAt(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Stage</Label>
+              <Select value={stageId} onChange={(e) => setStageId(e.target.value)}>
+                <option value="">First stage</option>
+                {stages.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Group / segment</Label>
+              <Input
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                placeholder="Wedding 2027, Corporate…"
+              />
             </div>
           </div>
 
