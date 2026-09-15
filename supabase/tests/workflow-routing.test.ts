@@ -257,3 +257,37 @@ describe('cadence filters', () => {
     expect(started.rows.length).toBe(1)
   })
 })
+
+describe('the workflow read query', () => {
+  it('returns the four settings, so the editor cannot show defaults over them', async () => {
+    // selectWorkflows in services/api/src/modules/crm/workflows.ts, trimmed to
+    // the columns that matter here. It used to omit all four: the editor then
+    // showed the contract defaults, and saving wrote those back — quietly
+    // downgrading a seeded 'critical' rule to 'info' on the first edit.
+    const wf = (
+      await db.query<{ id: string }>(
+        `insert into crm_workflows (company_id, name, trigger, severity, cooldown_hours, notify_assignee, notify_roles)
+         values ('${COMPANY}', 'Round trip', 'lead_created', 'critical', 2, false, array['manager'])
+         returning id;`,
+      )
+    ).rows[0]!.id
+
+    const row = (
+      await db.query<{
+        severity: string
+        cooldown_hours: number
+        notify_assignee: boolean
+        notify_roles: string[]
+      }>(
+        `select w.id, w.name, w.trigger, w.condition, w.is_active, w.allow_reenroll, w.exit_on_reply,
+                w.severity, w.cooldown_hours, w.notify_assignee, w.notify_roles
+           from crm_workflows w where w.id = '${wf}';`,
+      )
+    ).rows[0]!
+
+    expect(row.severity).toBe('critical')
+    expect(Number(row.cooldown_hours)).toBe(2)
+    expect(row.notify_assignee).toBe(false)
+    expect(row.notify_roles).toEqual(['manager'])
+  })
+})

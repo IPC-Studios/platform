@@ -33,6 +33,11 @@ const remove = requireAction('crm', 'delete')
 
 const selectWorkflows = (sql: TransactionSql) => sql`
   select w.id, w.name, w.trigger, w.condition, w.is_active, w.allow_reenroll, w.exit_on_reply, w.created_at,
+         -- How loud it is, how often it may repeat, and who hears it. These
+         -- were never selected, so the editor always showed the contract's
+         -- defaults — and saving wrote those back over a seeded rule's real
+         -- 'critical' / 2h / route-to-manager settings.
+         w.severity, w.cooldown_hours, w.notify_assignee, w.notify_roles,
          coalesce((
            select jsonb_agg(jsonb_build_object('id', s.id, 'step_no', s.step_no, 'kind', s.kind, 'config', s.config) order by s.step_no)
            from crm_workflow_steps s where s.workflow_id = w.id
@@ -79,8 +84,10 @@ export const crmWorkflowsRouter = new Hono<AppEnv>()
       () =>
         withUser(c.env, c.get('auth').userId, async (sql) => {
           const [w] = await sql<{ id: string }[]>`
-            insert into crm_workflows (company_id, name, trigger, condition, is_active, allow_reenroll, exit_on_reply)
-            values (get_current_company_id(), ${v.name}, ${v.trigger}, ${sql.json(v.condition)}, ${v.is_active}, ${v.allow_reenroll}, ${v.exit_on_reply})
+            insert into crm_workflows (company_id, name, trigger, condition, is_active, allow_reenroll, exit_on_reply,
+                                       severity, cooldown_hours, notify_assignee, notify_roles)
+            values (get_current_company_id(), ${v.name}, ${v.trigger}, ${sql.json(v.condition)}, ${v.is_active}, ${v.allow_reenroll}, ${v.exit_on_reply},
+                    ${v.severity}, ${v.cooldown_hours}, ${v.notify_assignee}, ${sql.array(v.notify_roles)})
             returning id`
           if (!w) return null
           await writeSteps(sql, w.id, v.steps)
@@ -106,6 +113,8 @@ export const crmWorkflowsRouter = new Hono<AppEnv>()
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const patch: Record<string, unknown> = { ...rest }
         if (condition) patch.condition = sql.json(condition)
+        // text[] column: postgres.js needs the array wrapper, not a bare JS array.
+        if (rest.notify_roles) patch['notify_roles'] = sql.array(rest.notify_roles)
         const out = Object.keys(patch).length
           ? await sql<{ id: string }[]>`update crm_workflows set ${sql(patch)} where id = ${id} returning id`
           : await sql<{ id: string }[]>`select id from crm_workflows where id = ${id}`
