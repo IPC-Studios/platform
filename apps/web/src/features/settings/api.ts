@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import {
   auditLogPage,
   authToken,
+  companyProfile,
   cronRun,
   healthBody,
   z,
@@ -21,6 +22,17 @@ function rememberSession(pair: { access_token: string; refresh_token: string }) 
 }
 
 /** The studio's audit trail, newest first, a page at a time. Owner only. */
+/** The studio's own profile and branding — read by documents, not just Settings. */
+export function useCompanyProfile() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => callApi('/settings/company', { responseSchema: companyProfile }),
+    enabled: !!session,
+    staleTime: 60_000,
+  })
+}
+
 export function useAuditLog(entityType?: string) {
   const { session } = useAuth()
   return useInfiniteQuery({

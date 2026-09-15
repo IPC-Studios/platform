@@ -34,11 +34,78 @@ export function useTermsDocuments() {
   })
 }
 
+export const termsTemplate = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  body: z.string(),
+  version: z.number().int(),
+  created_at: z.string(),
+})
+export type TermsTemplate = z.infer<typeof termsTemplate>
+
+/** The studio's saved starting points for a terms document. */
+export function useTermsTemplates() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['terms', 'templates'],
+    queryFn: () => callApi('/terms/templates', { responseSchema: termsTemplate.array() }),
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 60_000,
+  })
+}
+
+export function useSeedTermsTemplates() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      callApi('/terms/templates/seed', { method: 'POST', responseSchema: z.object({ seeded: z.number() }) }),
+    onSuccess: (r) => {
+      toast.success(r.seeded ? `Added ${r.seeded} template${r.seeded === 1 ? '' : 's'}` : 'You already have all three')
+      void qc.invalidateQueries({ queryKey: ['terms', 'templates'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useSaveTermsTemplate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; body: string }) =>
+      callApi('/terms/templates', { method: 'POST', body: input, responseSchema: z.object({ id: z.string() }) }),
+    onSuccess: () => {
+      toast.success('Template saved')
+      void qc.invalidateQueries({ queryKey: ['terms', 'templates'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+/** One instalment of the schedule the client is agreeing to. */
+export interface PaymentTermDraft {
+  label: string
+  mode: 'percent' | 'amount'
+  value: number
+  due_trigger?: string | undefined
+  notes?: string | undefined
+}
+
+export interface IssueTermsInput {
+  project_id: string | null
+  rendered_body: string
+  title?: string | undefined
+  payment_summary?: string | undefined
+  payment_terms?: PaymentTermDraft[] | undefined
+  total_cost?: number | undefined
+  legal_note?: string | undefined
+  expiry_days?: number | undefined
+}
+
 /** Issuing again replaces the active link for that project — the old one still shows in history. */
 export function useIssueTerms() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: { project_id: string | null; rendered_body: string }) =>
+    mutationFn: (input: IssueTermsInput) =>
       callApi('/terms/issue', { method: 'POST', body: input, responseSchema: issued }),
     onSuccess: () => {
       toast.success('Terms link issued')

@@ -18,6 +18,13 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Browser snippets pasted into a page's console, not modules we build.
+    files: ['docs/**/*.js'],
+    languageOptions: {
+      globals: { window: 'readonly', document: 'readonly', CSS: 'readonly', location: 'readonly' },
+    },
+  },
+  {
     // Standalone Node scripts (run manually via bun), not part of the app build.
     files: ['**/*.mjs'],
     languageOptions: {

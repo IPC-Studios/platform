@@ -18,6 +18,20 @@ const issueTermsRequest = z.object({
   payment_summary: z.string().trim().max(2000).nullish(),
   sections: z.array(z.record(z.string(), z.unknown())).nullish(),
   expiry_days: z.number().int().min(1).max(3650).nullish(),
+  // The payment schedule the client is agreeing to, frozen at issue time so a
+  // later edit to the project cannot change what they signed.
+  payment_terms: z.array(z.record(z.string(), z.unknown())).max(20).nullish(),
+  total_cost: z.number().nonnegative().nullish(),
+  legal_note: z.string().trim().max(2000).nullish(),
+  template_id: z.string().uuid().nullish(),
+})
+
+const termsTemplate = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  body: z.string(),
+  version: z.number().int(),
+  created_at: z.string(),
 })
 const issueTermsResponse = z.object({ document_id: z.string().uuid(), token: z.string() })
 const termsBody = z.object({ body: z.string() })
@@ -149,6 +163,45 @@ export const termsRouter = new Hono<AppEnv>()
     return c.json(rows)
   })
 
+  /** The studio's saved terms templates — the wizard opens from these. */
+  .get('/templates', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'terms.templates', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, name, body, version, created_at
+          from project_terms_templates order by name`),
+    )
+    if (!rows) fail(400, 'We could not load your terms templates.')
+    return c.json(termsTemplate.array().parse(rows))
+  })
+
+  .post('/templates', requireAction('projects', 'edit'), async (c) => {
+    const parsed = z
+      .object({ name: z.string().trim().min(2).max(120), body: z.string().trim().min(1).max(20000) })
+      .safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Give the template a name and some text.')
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'terms.template_create', () =>
+      withUser(c.env, auth.userId, (sql) => sql<{ id: string }[]>`
+        insert into project_terms_templates (company_id, name, body)
+        values (${auth.companyId}, ${parsed.data.name}, ${parsed.data.body})
+        returning id`),
+    )
+    if (!rows?.length) fail(400, 'We could not save that template.')
+    await audit(c, { action: 'terms.template_create', entityType: 'terms_template', entityId: rows[0]!.id })
+    return c.json({ id: rows[0]!.id }, 201)
+  })
+
+  /** Three starting points, for a studio with an empty library. */
+  .post('/templates/seed', requireAction('projects', 'edit'), async (c) => {
+    const rows = await attempt(c, 'terms.template_seed', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ n: number }[]>`select seed_terms_templates() as n`),
+    )
+    if (!rows) fail(400, 'We could not add the default templates.')
+    const seeded = rows[0]?.n ?? 0
+    await audit(c, { action: 'terms.template_seed', entityType: 'terms_template', after: { seeded } })
+    return c.json({ seeded })
+  })
+
   .post('/issue', requireAction('projects', 'edit'), async (c) => {
     const parsed = issueTermsRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Terms text is required.')
@@ -170,6 +223,9 @@ export const termsRouter = new Hono<AppEnv>()
             title = coalesce(${parsed.data.title ?? null}, title),
             payment_summary = coalesce(${parsed.data.payment_summary ?? null}, payment_summary),
             sections = coalesce(${parsed.data.sections ? sql.json(parsed.data.sections as never) : null}::jsonb, sections),
+            payment_terms = coalesce(${parsed.data.payment_terms ? sql.json(parsed.data.payment_terms as never) : null}::jsonb, payment_terms),
+            total_cost = coalesce(${parsed.data.total_cost ?? null}, total_cost),
+            legal_note = coalesce(${parsed.data.legal_note ?? null}, legal_note),
             expires_at = coalesce((${parsed.data.expiry_days != null ? sql`now() + make_interval(days => ${parsed.data.expiry_days})` : sql`null`})::timestamptz, expires_at)
           where id = ${row.document_id}`
       })

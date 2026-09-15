@@ -1,11 +1,12 @@
-import { FileSignature, Copy } from 'lucide-react'
+import { useState } from 'react'
+import { FileSignature, Copy, Plus } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useTermsDocuments } from '@/features/terms/api'
-import { IssueTermsDialog } from '@/routes/project-documents'
+import { TermsWizard } from '@/features/terms/TermsWizard'
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -13,12 +14,27 @@ const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', 
 export function TermsTab({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const { data, isLoading, isError, refetch } = useTermsDocuments()
   const docs = (data ?? []).filter((d) => d.project_id === projectId)
+  const [authoring, setAuthoring] = useState(false)
+
+  if (authoring && canEdit) {
+    return (
+      <TermsWizard
+        projectId={projectId}
+        onIssued={() => setAuthoring(false)}
+        onCancel={() => setAuthoring(false)}
+      />
+    )
+  }
 
   return (
     <div className="mt-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-muted-foreground">Terms &amp; conditions</h2>
-        {canEdit && <IssueTermsDialog projectId={projectId} />}
+        {canEdit && (
+          <Button size="sm" onClick={() => setAuthoring(true)}>
+            <Plus /> New terms document
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -29,7 +45,13 @@ export function TermsTab({ projectId, canEdit }: { projectId: string; canEdit: b
         <EmptyState
           title="No terms issued yet"
           description="Send this project's terms & conditions for the client to read and agree to."
-          action={canEdit ? <IssueTermsDialog projectId={projectId} /> : undefined}
+          action={
+            canEdit ? (
+              <Button onClick={() => setAuthoring(true)}>
+                <Plus /> New terms document
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <ul className="flex flex-col gap-2">
@@ -51,14 +73,9 @@ export function TermsTab({ projectId, canEdit }: { projectId: string; canEdit: b
                     <StatusBadge tone="neutral">Link expired</StatusBadge>
                   )}
                   {canEdit && (
-                    <IssueTermsDialog
-                      projectId={projectId}
-                      trigger={
-                        <Button variant="outline" size="sm">
-                          <Copy /> Resend
-                        </Button>
-                      }
-                    />
+                    <Button variant="outline" size="sm" onClick={() => setAuthoring(true)}>
+                      <Copy /> Reissue
+                    </Button>
                   )}
                 </CardContent>
               </Card>
