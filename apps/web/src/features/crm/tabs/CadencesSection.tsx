@@ -9,9 +9,27 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useCadences, useCreateCadence, useDeleteCadence, useTemplates, useUpdateCadence } from '../api'
+import { useCadences, useCreateCadence, useDeleteCadence, usePipelines, useTemplates, useUpdateCadence } from '../api'
 
 type Draft = { day: string; template_id: string; note: string }
+
+/**
+ * Which leads a cadence is written for. Both columns have existed since 0099
+ * and neither was ever settable, so every cadence applied to every lead — a
+ * workflow told to start "Instagram nurture" would start it on a referral.
+ * 0134 makes the automatic path honour them.
+ */
+const CADENCE_SOURCES: { value: string; label: string }[] = [
+  { value: 'webform', label: 'Web form' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'google_form', label: 'Google Form' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'enquiry', label: 'Enquiry' },
+  { value: 'manual', label: 'Added by hand' },
+  { value: 'other', label: 'Other' },
+]
 const EMPTY_STEP: Draft = { day: '0', template_id: '', note: '' }
 
 /**
@@ -76,6 +94,10 @@ export function CadencesSection() {
                     {c.steps.map((s) => `day ${s.day_offset}${s.template_name ? ` · ${s.template_name}` : s.note ? ` · ${s.note}` : ''}`).join('  →  ')}
                   </p>
                 </div>
+                {/* Who it is written for. Without this the list is a row of
+                    names that all look equally applicable to every lead. */}
+                {c.stage_filter && <StatusBadge tone="neutral">at {c.stage_filter}</StatusBadge>}
+                {c.source_filter && <StatusBadge tone="neutral">from {c.source_filter.replace(/_/g, ' ')}</StatusBadge>}
                 <StatusBadge tone={c.active_leads > 0 ? 'info' : 'neutral'}>{c.active_leads} on it</StatusBadge>
                 <StatusBadge tone={c.is_active ? 'success' : 'neutral'}>{c.is_active ? 'On' : 'Off'}</StatusBadge>
                 {canEdit && renaming === c.id && (
@@ -123,9 +145,18 @@ export function CadencesSection() {
 function CadenceForm() {
   const create = useCreateCadence()
   const { data: templates } = useTemplates()
+  const { data: pipelines } = usePipelines()
   const [name, setName] = useState('')
+  const [stageFilter, setStageFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
   const [steps, setSteps] = useState<Draft[]>([{ ...EMPTY_STEP }, { ...EMPTY_STEP, day: '3' }])
   const [error, setError] = useState<string | null>(null)
+
+  // Stage names across every pipeline, deduped — the filter is stored as text,
+  // so two pipelines with a "Proposal sent" stage are one choice here.
+  const stageNames = [
+    ...new Set((pipelines ?? []).flatMap((p) => (p.stages ?? []).map((st) => st.name))),
+  ]
 
   const patch = (i: number, p: Partial<Draft>) => setSteps((all) => all.map((s, idx) => (idx === i ? { ...s, ...p } : s)))
 
@@ -136,7 +167,12 @@ function CadenceForm() {
       template_id: s.template_id || null,
       note: s.note.trim() || null,
     }))
-    const parsed = createCadenceRequest.safeParse({ name: name.trim(), steps: input })
+    const parsed = createCadenceRequest.safeParse({
+      name: name.trim(),
+      steps: input,
+      ...(stageFilter ? { stage_filter: stageFilter } : {}),
+      ...(sourceFilter ? { source_filter: sourceFilter } : {}),
+    })
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Please check the steps.')
       return
@@ -144,6 +180,8 @@ function CadenceForm() {
     create.mutate(parsed.data, {
       onSuccess: () => {
         setName('')
+        setStageFilter('')
+        setSourceFilter('')
         setSteps([{ ...EMPTY_STEP }, { ...EMPTY_STEP, day: '3' }])
       },
     })
@@ -157,6 +195,35 @@ function CadenceForm() {
           <Label htmlFor="cad-name">Name</Label>
           <Input id="cad-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Wedding enquiry follow-up" aria-invalid={!!error && name.trim().length < 2} />
         </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="cad-stage">Only for leads at stage</Label>
+            <Select id="cad-stage" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+              <option value="">Any stage</option>
+              {stageNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="cad-source">Only for leads from</Label>
+            <Select id="cad-source" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+              <option value="">Any source</option>
+              {CADENCE_SOURCES.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A workflow will not start this cadence on a lead that does not match. Starting it by hand
+          from a lead always works — you can see what you are doing.
+        </p>
+
         <div className="flex flex-col gap-2">
           {steps.map((s, i) => (
             <div key={i} className="grid items-end gap-2 rounded-md border border-border p-2 sm:grid-cols-[6rem_1fr_1fr_auto]">

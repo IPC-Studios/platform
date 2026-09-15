@@ -53,7 +53,23 @@ type Draft = {
   steps: WorkflowStepInput[]
   allow_reenroll: boolean
   exit_on_reply: boolean
+  /**
+   * How loud it is, how often it may repeat, and who hears it. All four were
+   * on crm_workflows and seeded with real values per rule — 'critical' for a
+   * hot lead with no follow-up, a 2-hour cooldown, routing to admin and
+   * manager — and no screen ever showed them.
+   */
+  severity: 'info' | 'warning' | 'critical'
+  cooldown_hours: number
+  notify_assignee: boolean
+  notify_roles: string[]
 }
+
+/** The roles a rule can escalate to. 'admin' includes the studio owner. */
+const NOTIFY_ROLES: { value: string; label: string }[] = [
+  { value: 'admin', label: 'Admins & owner' },
+  { value: 'manager', label: 'Managers' },
+]
 
 const EMPTY: Draft = {
   name: '',
@@ -66,6 +82,10 @@ const EMPTY: Draft = {
   steps: [{ kind: 'action', config: { action: 'mark_hot' } }],
   allow_reenroll: false,
   exit_on_reply: true,
+  severity: 'info',
+  cooldown_hours: 24,
+  notify_assignee: true,
+  notify_roles: [],
 }
 
 function fromWorkflow(w: Workflow): Draft {
@@ -80,6 +100,10 @@ function fromWorkflow(w: Workflow): Draft {
     steps: w.steps.map((s) => ({ kind: s.kind, config: s.config }) as WorkflowStepInput),
     allow_reenroll: w.allow_reenroll,
     exit_on_reply: w.exit_on_reply,
+    severity: w.severity ?? 'info',
+    cooldown_hours: w.cooldown_hours ?? 24,
+    notify_assignee: w.notify_assignee ?? true,
+    notify_roles: [...(w.notify_roles ?? [])],
   }
 }
 
@@ -98,6 +122,10 @@ function toRequest(d: Draft): CreateWorkflowRequest {
     is_active: true,
     allow_reenroll: d.allow_reenroll,
     exit_on_reply: d.exit_on_reply,
+    severity: d.severity,
+    cooldown_hours: d.cooldown_hours,
+    notify_assignee: d.notify_assignee,
+    notify_roles: d.notify_roles,
   })
 }
 
@@ -506,6 +534,70 @@ function WorkflowForm({ initial, existing, names, onClose }: { initial: Draft; e
             <input type="checkbox" checked={d.allow_reenroll} onChange={(e) => setD({ ...d, allow_reenroll: e.target.checked })} />
             Allow a lead to go through it again
           </label>
+        </div>
+
+        <div className="rounded-md border border-border p-3">
+          <p className="text-xs font-medium">When it notifies someone</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="wf-severity">How urgent</Label>
+              <Select
+                id="wf-severity"
+                value={d.severity}
+                onChange={(e) => setD({ ...d, severity: e.target.value as Draft['severity'] })}
+              >
+                <option value="info">For information</option>
+                <option value="warning">Needs attention</option>
+                <option value="critical">Critical</option>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="wf-cooldown">Do not repeat within</Label>
+              <Input
+                id="wf-cooldown"
+                type="number"
+                min={0}
+                max={720}
+                value={d.cooldown_hours}
+                onChange={(e) => setD({ ...d, cooldown_hours: Math.max(0, Math.min(720, Number(e.target.value) || 0)) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Hours. 0 notifies every time the rule fires.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={d.notify_assignee}
+                onChange={(e) => setD({ ...d, notify_assignee: e.target.checked })}
+              />
+              Tell whoever owns the lead
+            </label>
+            {NOTIFY_ROLES.map((r) => (
+              <label key={r.value} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={d.notify_roles.includes(r.value)}
+                  onChange={(e) =>
+                    setD({
+                      ...d,
+                      notify_roles: e.target.checked
+                        ? [...d.notify_roles, r.value]
+                        : d.notify_roles.filter((x) => x !== r.value),
+                    })
+                  }
+                />
+                Also tell {r.label.toLowerCase()}
+              </label>
+            ))}
+          </div>
+          {!d.notify_assignee && d.notify_roles.length === 0 && (
+            <p className="mt-2 text-xs text-warning">
+              Nobody is set to hear this. A notify step will run and reach no one.
+            </p>
+          )}
         </div>
 
         {preview && <p className="text-sm text-muted-foreground">{preview}</p>}
