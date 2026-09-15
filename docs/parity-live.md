@@ -244,3 +244,55 @@ Ours is ahead in places, and closing "gaps" here would be a regression:
 - Continuous lead score against a three-state hot/warm/cold flag
 - Per-attempt activity history against a single contacted field
 - Richer tasks, roles and attendance screens
+
+## Round: seeded live data (2026-09-15)
+
+The rounds above compared empty screens. Seeding the deployed studio with real
+clients, projects, shoots, crew bookings, tasks and expenses changed the
+picture: several screens that had looked "thin but fine" were broken, and the
+empty state was hiding it.
+
+### Defects only real data exposed
+
+| Screen | What was wrong |
+| --- | --- |
+| Company expenses | Every insert 400'd — `itemize_json: undefined`, which postgres.js rejects outright |
+| Company expenses | The list returned nothing for any studio: `Number('')` is `0`, so a missing `max_amount` became `amount <= 0`. The summary tiles above it, which have no such clause, counted the same rows correctly |
+| Personal expenses | The same `Number('')` line |
+| Monthly profit | White "Something went wrong" — a `useMemo` below `if (isLoading) return` |
+| Dashboard | Same shape: the employee branch returned before nine hooks |
+| Monthly team cost | Grouped by `team_payouts.employment_type`, a column in no migration. A bare `catch` swallowed it and five ₹0 tiles rendered under a non-zero salary figure |
+| GOPO dashboard | From/To pickers sent to an RPC that takes no parameters, under a caption claiming they filtered payments, expenses and activity |
+
+None of these were visible to typecheck, lint or the 1449-test suite.
+`react-hooks/rules-of-hooks` is now on for `apps/web` and caught both hook
+bugs; `numberQuery()` replaces the `Number('')` pattern with a test;
+`supabase/tests/monthly-profit.test.ts` runs the bucket SQL against every
+migration and asserts the tiles reconcile with the figure above them.
+
+### Gaps closed in this round
+
+- **Data management** — counts on the filter chips, data-status and
+  backup-status selects, a received-date range, and the how-to banner
+- **Team payouts** — the note that the settlement ledger does not move project
+  cost or profit. (The screen itself was already at parity; the "From shoots"
+  tab simply had nothing in it before seeding)
+- **Project tracking** — tasks / deliverables / data / overdue / review back on
+  the row instead of one click away in the health breakdown
+- **Billing** — an "Invoice settings" button. `/billing/templates` is a superset
+  of the old Billing → Settings tab but was reachable only from a link inside
+  the invoice form
+- **How-to banners** on Clients, Company expenses and Billing → Payments
+
+### Confirmed at parity once seeded
+
+Team payouts (five KPIs, four filters, per-member grouping, Mark paid,
+settlement history), Billing → Payments (five KPIs, chips, filters), CRM
+(fourteen tabs against the old app's eleven), Task management, Dashboard
+(the seven-step setup journey exists and is correctly hidden once complete).
+
+### Divergence kept deliberately
+
+The production board lanes stay four task statuses with the old app's seven
+production buckets applied to deliverables, as the code comment records —
+task rows carry no review or revision state to lane them by.
