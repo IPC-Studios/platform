@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Plus, IndianRupee, Download, ChevronLeft, ChevronRight, Eye, Pencil, Trash2, Copy, Mail, MessageCircle, Receipt } from 'lucide-react'
+import { Plus, IndianRupee, Download, ChevronLeft, ChevronRight, Eye, Pencil, Trash2, Copy, Mail, MessageCircle, Receipt, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { buildMailtoUrl, friendlyInvoiceError, type ReceivedPayment } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -56,7 +56,24 @@ function Billing() {
   const [tab, setTab] = useState<'invoices' | 'payments'>('invoices')
   return (
     <>
-      <PageHeader title="Billing" description="GST invoices and payments." actions={<NewInvoiceDialog />} />
+      <PageHeader
+        title="Billing"
+        description="GST invoices and payments."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {/* Everything printed on a client document — the studio's contact
+                block, bank accounts, note and terms templates — lives on its
+                own page. It was only reachable from a link buried inside the
+                invoice form, so most studios never found it. */}
+            <Button variant="outline" asChild>
+              <Link to="/billing/templates">
+                <Settings2 /> Invoice settings
+              </Link>
+            </Button>
+            <NewInvoiceDialog />
+          </div>
+        }
+      />
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'invoices' | 'payments')}>
         <TabsList className="mb-4">
           <TabsTrigger value="invoices">Invoices</TabsTrigger>

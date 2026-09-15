@@ -307,6 +307,31 @@ function ProjectRow({ project: p }: { project: TrackedProject }) {
           </p>
         </div>
 
+        {/* The same five figures the health breakdown spells out below, kept on
+            the row so a studio can scan twenty projects for the one that is
+            short a copy or a review without expanding each of them. */}
+        <div className="hidden shrink-0 gap-5 lg:flex">
+          <Figure label="Tasks" value={`${p.tasks_done}/${p.tasks_total}`} />
+          <Figure label="Deliverables" value={`${p.deliverables_done}/${p.deliverables_total}`} />
+          <Figure
+            label="Data"
+            value={
+              p.data_records_total === 0
+                ? '—'
+                : p.data_records_unverified > 0
+                  ? String(p.data_records_unverified)
+                  : 'OK'
+            }
+            tone={p.data_records_unverified > 0 ? 'danger' : undefined}
+          />
+          <Figure
+            label="Overdue"
+            value={String(p.tasks_overdue)}
+            tone={p.tasks_overdue > 0 ? 'danger' : undefined}
+          />
+          <Figure label="Review" value={String(p.pending_reviews)} />
+        </div>
+
         <div className="flex min-w-56 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
           <Link
             to="/projects/$id"
@@ -334,6 +359,18 @@ function ProjectRow({ project: p }: { project: TrackedProject }) {
       </CardContent>
       {open && <DetailsPanel project={p} />}
     </Card>
+  )
+}
+
+/** One figure in the row's at-a-glance strip: a caption over a number. */
+function Figure({ label, value, tone }: { label: string; value: string; tone?: 'danger' | undefined }) {
+  return (
+    <div className="text-center">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={cn('mt-0.5 text-sm font-medium tabular-nums', tone === 'danger' && 'text-destructive')}>
+        {value}
+      </p>
+    </div>
   )
 }
 
