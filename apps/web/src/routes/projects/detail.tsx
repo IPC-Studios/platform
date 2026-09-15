@@ -59,7 +59,7 @@ import {
   useDeletePayment,
   useDeleteProject,
 } from '@/features/projects/api'
-import { useReferralCampaigns } from '@/features/referrals/api'
+import { useReferralCampaigns, useReferralSubmissions } from '@/features/referrals/api'
 import { useProjectFinancials } from '@/features/financials/api'
 import { EntityReminders } from '@/features/reminders/EntityReminders'
 import { ShootsTab } from '@/features/projects/tabs/ShootsTab'
@@ -838,8 +838,21 @@ function ReferralsTab({ projectId, projectName, clientName }: { projectId: strin
   void projectId
   const { data, isLoading } = useReferralCampaigns()
   const campaigns = data?.campaigns ?? []
-  const first = campaigns[0]
-  const shareText = `Hi ${clientName ?? 'there'}! Loved working on ${projectName} with you. If anyone you know is looking for a photo/video team, please share this link: ${typeof window !== 'undefined' ? `${window.location.origin}/refer/` : '/refer/'}${first ? '' : ''}`
+  const [pickedId, setPickedId] = useState('')
+  const campaign = campaigns.find((c) => c.id === pickedId) ?? campaigns[0]
+  const submissions = useReferralSubmissions(campaign?.id)
+  const received = submissions.data?.pages.flatMap((pg) => pg.items) ?? []
+
+  /**
+   * The share link needs the campaign's slug on the end. It used to build
+   * `/refer/` and append `first ? '' : ''` — a no-op — so every message a
+   * studio copied from here carried a link that went nowhere.
+   */
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const shareUrl = campaign ? `${origin}/refer/${campaign.slug}` : null
+  const shareText = shareUrl
+    ? `Hi ${clientName ?? 'there'}! Loved working on ${projectName} with you. If anyone you know is looking for a photo/video team, please share this link: ${shareUrl}`
+    : ''
 
   return (
     <div className="mt-4 flex flex-col gap-4">
@@ -853,10 +866,45 @@ function ReferralsTab({ projectId, projectName, clientName }: { projectId: strin
           <p className="text-sm text-muted-foreground">
             Ask {clientName ?? 'the client'} to send new bookings your way after {projectName}.
           </p>
+
+          {campaigns.length > 1 && (
+            <label className="mt-3 flex flex-col gap-1.5 text-sm">
+              <span className="text-muted-foreground">Campaign to share</span>
+              <Select value={campaign?.id ?? ''} onChange={(e) => setPickedId(e.target.value)} className="max-w-xs">
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+
+          {campaign && (
+            <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                The reward
+              </p>
+              <p className="mt-1 font-medium">
+                {campaign.reward_title ??
+                  (campaign.reward_type === 'percentage'
+                    ? `${campaign.reward_value}% off`
+                    : formatINR(campaign.reward_value))}
+              </p>
+              {campaign.reward_description && (
+                <p className="text-muted-foreground">{campaign.reward_description}</p>
+              )}
+              {shareUrl && (
+                <code className="mt-2 block truncate rounded bg-card px-2 py-1 font-mono text-xs">{shareUrl}</code>
+              )}
+            </div>
+          )}
+
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
+              disabled={!shareUrl}
               onClick={() => {
                 void navigator.clipboard?.writeText(shareText)
                 toast.success('Referral message copied')
@@ -864,9 +912,22 @@ function ReferralsTab({ projectId, projectName, clientName }: { projectId: strin
             >
               <Link2 /> Copy referral message
             </Button>
+            <Button variant="outline" size="sm" disabled={!shareUrl} asChild={!!shareUrl}>
+              {shareUrl ? (
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  <MessageCircle /> WhatsApp
+                </a>
+              ) : (
+                <span>WhatsApp</span>
+              )}
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <Link to="/referrals">
-                <Gift /> Open referrals
+                <Gift /> Edit reward
               </Link>
             </Button>
           </div>
@@ -889,6 +950,38 @@ function ReferralsTab({ projectId, projectName, clientName }: { projectId: strin
                   <Button variant="ghost" size="sm" asChild>
                     <Link to="/referrals">Open</Link>
                   </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Whether the ask actually worked. Sharing a link and never seeing what
+          came back is why referral schemes quietly die. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Referrals received{campaign ? ` — ${campaign.name}` : ''}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!campaign ? (
+            <p className="text-sm text-muted-foreground">Create a campaign to start collecting referrals.</p>
+          ) : submissions.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : received.length === 0 ? (
+            <EmptyState
+              title="Nobody yet"
+              description="Send the link above to this client — anyone who fills it in shows up here."
+            />
+          ) : (
+            <ul className="divide-y divide-border text-sm">
+              {received.slice(0, 8).map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center gap-2 py-2">
+                  <span className="min-w-0 flex-1 truncate font-medium">{r.client_name ?? 'Unnamed'}</span>
+                  {r.referrer_name && (
+                    <span className="text-xs text-muted-foreground">via {r.referrer_name}</span>
+                  )}
+                  <StatusBadge tone={r.status === 'converted' ? 'success' : 'neutral'}>{r.status}</StatusBadge>
                 </li>
               ))}
             </ul>
