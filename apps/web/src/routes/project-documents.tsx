@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { FileSignature, Copy, CheckCircle2, Clock, Search, MessageCircle, RefreshCw, AlertTriangle, FileText, Send } from 'lucide-react'
+import { FileSignature, Copy, CheckCircle2, Clock, History, Search, MessageCircle, RefreshCw, AlertTriangle, FileText, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -10,7 +10,7 @@ import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/d
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { SkeletonList } from '@/shared/ui/skeleton'
-import { useTermsDocuments, useIssueTerms, type TermsDocument } from '@/features/terms/api'
+import { useTermsDocuments, useIssueTerms, useTermsEmailLogs, type TermsDocument } from '@/features/terms/api'
 import { useProjects } from '@/features/projects/api'
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -62,6 +62,7 @@ function ProjectDocuments() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [busy, setBusy] = useState<{ id: string; kind: 'copy' | 'wa' | 'gen' } | null>(null)
+  const [logFor, setLogFor] = useState<string | null>(null)
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -237,6 +238,9 @@ function ProjectDocuments() {
                           <Button size="sm" variant="ghost" disabled={isBusy(d.id, 'wa')} onClick={() => void onWhatsApp(d)} title="Send on WhatsApp">
                             <MessageCircle />
                           </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setLogFor(d.id)} title="Email history">
+                            <History />
+                          </Button>
                           <IssueTermsDialog
                             projectId={d.project_id}
                             trigger={
@@ -255,7 +259,48 @@ function ProjectDocuments() {
           </div>
         )}
       </div>
+      {logFor && <EmailLogDialog documentId={logFor} onClose={() => setLogFor(null)} />}
     </>
+  )
+}
+
+/**
+ * Was it actually emailed, to whom, and did it land? "I sent it, they say it
+ * never arrived" is otherwise unanswerable — the log keeps the address, the
+ * outcome and the provider's own error.
+ */
+function EmailLogDialog({ documentId, onClose }: { documentId: string; onClose: () => void }) {
+  const { data, isLoading } = useTermsEmailLogs(documentId)
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent title="Email history" description="Every send attempt for this document.">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !data || data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            This document has not been emailed yet — it may have been shared by link or WhatsApp.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {data.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                <span className="min-w-0 flex-1 truncate">{row.to_email ?? 'No address recorded'}</span>
+                <StatusBadge tone={row.status === 'sent' ? 'success' : row.status === 'failed' ? 'danger' : 'neutral'}>
+                  {row.status}
+                </StatusBadge>
+                <span className="text-xs text-muted-foreground">{when.format(new Date(row.created_at))}</span>
+                {row.error && <span className="w-full text-xs text-destructive">{row.error}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3 flex justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

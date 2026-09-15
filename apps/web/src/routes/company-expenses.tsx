@@ -18,7 +18,7 @@ import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent } from '@/shared/ui/card'
-import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } from '@/features/financials/api'
+import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense, useExpenseSummary } from '@/features/financials/api'
 import { useProjects } from '@/features/projects/api'
 import { PartyPicker } from '@/features/parties/PartyPicker'
 import { useConfirm } from '@/shared/ui/confirm'
@@ -128,6 +128,8 @@ function Expenses() {
   const [detail, setDetail] = useState<Expense | null>(null)
   const [catsOpen, setCatsOpen] = useState(false)
 
+  const { data: serverSummary } = useExpenseSummary(dateFrom || undefined, dateTo || undefined)
+
   const { data, isLoading, isError, refetch, isFetching } = useExpenses({
     search: search.trim() || undefined,
     category: category || undefined,
@@ -218,12 +220,14 @@ function Expenses() {
         }
       />
 
-      {/* SummaryCards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="Total" value={formatINR(summary.total)} icon={Wallet} />
-        <StatCard label="Entries" value={String(summary.count)} icon={Wallet} />
+      {/* SummaryCards. Money comes from the server, over the whole date range —
+          summing the rows on screen made "Total" mean "total of this page". */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+        <StatCard label="Total" value={formatINR(serverSummary?.total ?? summary.total)} icon={Wallet} />
+        <StatCard label="Entries" value={String(serverSummary?.count ?? summary.count)} icon={Wallet} />
+        <StatCard label="Tax" value={formatINR(serverSummary?.tax_total ?? 0)} icon={Wallet} />
+        <StatCard label="Reverse charge" value={formatINR(serverSummary?.rcm_total ?? 0)} icon={Wallet} />
         <StatCard label="Project-linked" value={String(summary.linked)} icon={Wallet} />
-        <StatCard label="General" value={String(summary.general)} icon={Wallet} />
         <StatCard label="Categories used" value={String(summary.cats)} icon={Tags} />
       </div>
 

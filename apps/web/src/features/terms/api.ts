@@ -46,3 +46,29 @@ export function useIssueTerms() {
     },
   })
 }
+
+/** What was emailed for one document, and whether it actually went. */
+export const termsEmailLog = z.object({
+  id: z.string().uuid(),
+  to_email: z.string().nullable(),
+  status: z.string(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+})
+export type TermsEmailLog = z.infer<typeof termsEmailLog>
+
+/**
+ * The send history behind a terms document. "I sent it, they say it never
+ * arrived" is otherwise unanswerable — the log records the address, the
+ * outcome and the provider's error.
+ */
+export function useTermsEmailLogs(documentId: string | null) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['terms', 'email-logs', documentId],
+    queryFn: () =>
+      callApi(`/terms/documents/${documentId}/email-logs`, { responseSchema: termsEmailLog.array() }),
+    enabled: !!session && !!documentId,
+    staleTime: 15_000,
+  })
+}

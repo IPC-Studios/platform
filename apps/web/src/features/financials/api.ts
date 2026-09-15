@@ -216,3 +216,34 @@ export function useDeleteFixedOverhead() {
     },
   })
 }
+
+export const expenseSummary = z.object({
+  count: z.number().int(),
+  total: z.number(),
+  tax_total: z.number(),
+  rcm_total: z.number(),
+})
+export type ExpenseSummary = z.infer<typeof expenseSummary>
+
+/**
+ * Totals over the whole date range, not the page on screen.
+ *
+ * The cards used to sum whatever rows the current page happened to hold, so
+ * "Total" meant "total of these twenty" — a number that changed as you paged
+ * and was wrong every time.
+ */
+export function useExpenseSummary(dateFrom?: string, dateTo?: string) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const params = new URLSearchParams()
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo) params.set('date_to', dateTo)
+  const qs = params.toString()
+  return useQuery({
+    queryKey: ['expenses', 'summary', qs],
+    queryFn: () =>
+      callApi(`/financials/expenses/summary${qs ? `?${qs}` : ''}`, { responseSchema: expenseSummary }),
+    enabled: !!session && access.hasModule('company_expenses'),
+    staleTime: 15_000,
+  })
+}
