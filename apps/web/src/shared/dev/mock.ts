@@ -235,6 +235,19 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PUT' && /^\/projects\/[^/]+\/deliverables\/[^/]+\/shoots$/.test(path)) return {}
   if (method === 'POST' && /^\/projects\/[^/]+\/(deliverables|payments)$/.test(path)) return {}
   if (method === 'POST' && path === '/clients') return fakeClient(uid(0xc9), 'New Client', null)
+  // Single client — the project editor loads this to edit contact details.
+  if (method === 'GET' && /^\/clients\/[^/]+$/.test(path)) {
+    const id = path.split('/')[2]!
+    return clients.find((c) => c.id === id) ?? fakeClient(id, 'Sharma Family', '9876543210')
+  }
+  if (method === 'PATCH' && /^\/clients\/[^/]+$/.test(path)) {
+    const id = path.split('/')[2]!
+    const existing = clients.find((c) => c.id === id) ?? fakeClient(id, 'Sharma Family', '9876543210')
+    const merged = { ...existing, ...(body as object) }
+    const i = clients.findIndex((c) => c.id === id)
+    if (i >= 0) clients[i] = merged
+    return merged
+  }
   if (method === 'GET' && path === '/team/members') return atStage(members, 'partial')
   if (method === 'GET' && path === '/team/directory') return atStage(directory, 'partial')
   if (method === 'GET' && (path === '/enquiries' || path.startsWith('/enquiries?')))
