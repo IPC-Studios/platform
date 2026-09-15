@@ -7,8 +7,11 @@ import {
   leadSourceRow,
   z,
   type CreateLeadSourceRequest,
+  type LeadQuality,
+  type LeadSource,
   type LeadSourceKind,
   type LeadSourceRow,
+  type WebhookSourceType,
   type UpdateLeadSourceRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
@@ -28,6 +31,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { MetaConnectionCard } from '@/features/facebook/MetaConnectionCard'
+import { useMembers } from '@/features/allocation/api'
 import { ImportLogPanel } from '@/features/facebook/ImportLogPanel'
 
 const list = leadSourceRow.array()
@@ -274,6 +278,32 @@ function SourceCard({ source }: { source: LeadSourceRow }) {
   )
 }
 
+/**
+ * What kind of thing is posting to this endpoint. It is not cosmetic: it is
+ * what tells you, six months from now, why one source stopped receiving —
+ * and the dialog used to hardcode it to 'website_form' whatever you picked.
+ */
+const SOURCE_TYPES: { value: WebhookSourceType; label: string }[] = [
+  { value: 'website_form', label: 'Website contact form' },
+  { value: 'google_form', label: 'Google Form' },
+  { value: 'elementor', label: 'Elementor / WordPress' },
+  { value: 'landing_page', label: 'Landing page' },
+  { value: 'webhook', label: 'Generic webhook' },
+  { value: 'other', label: 'Something else' },
+]
+
+/** Stamped onto every lead this source creates, so nothing lands unlabelled. */
+const DEFAULT_SOURCES: { value: LeadSource; label: string }[] = [
+  { value: 'webform', label: 'Web form' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'google_form', label: 'Google Form' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'enquiry', label: 'Enquiry' },
+  { value: 'other', label: 'Other' },
+]
+
 /** What to actually do with the URL, per kind. */
 function SetupHelp({ kind, url }: { kind: LeadSourceKind; url: string }) {
   if (kind === 'meta') {
@@ -337,8 +367,20 @@ function NewSourceDialog() {
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState('')
   const [kind, setKind] = useState<LeadSourceKind>('webform')
+  /**
+   * Everything below was already in createLeadSourceRequest, the API handler
+   * and the table. The dialog asked for a name and a kind, then sent
+   * `source_type: 'website_form'` hardcoded — so picking Meta lead ads created
+   * a website form, and the four per-source defaults could not be set at all.
+   */
+  const [sourceType, setSourceType] = useState<WebhookSourceType>('website_form')
+  const [allowedOrigin, setAllowedOrigin] = useState('')
+  const [defaultSource, setDefaultSource] = useState<LeadSource | ''>('')
+  const [defaultQuality, setDefaultQuality] = useState<LeadQuality | ''>('')
+  const [assignedTo, setAssignedTo] = useState('')
   const [created, setCreated] = useState<LeadSourceRow | null>(null)
   const [copied, setCopied] = useState(false)
+  const members = useMembers()
 
   const create = useMutation({
     mutationFn: (input: CreateLeadSourceRequest) =>
@@ -357,13 +399,29 @@ function NewSourceDialog() {
   function reset() {
     setLabel('')
     setKind('webform')
+    setSourceType('website_form')
+    setAllowedOrigin('')
+    setDefaultSource('')
+    setDefaultQuality('')
+    setAssignedTo('')
     setCreated(null)
     setCopied(false)
   }
 
+  /** Meta posts through its own webhook; the web-form-only fields do not apply. */
+  const isMeta = kind === 'meta'
+
   function onSubmit(e: FormEvent) {
     e.preventDefault()
-    create.mutate({ label: label.trim(), kind, source_type: "website_form" })
+    create.mutate({
+      label: label.trim(),
+      kind,
+      source_type: isMeta ? 'webhook' : sourceType,
+      ...(!isMeta && allowedOrigin.trim() ? { allowed_origin: allowedOrigin.trim() } : {}),
+      ...(defaultSource ? { default_source: defaultSource } : {}),
+      ...(defaultQuality ? { default_quality: defaultQuality } : {}),
+      ...(assignedTo ? { default_assigned_to: assignedTo } : {}),
+    })
   }
 
   return (
@@ -404,6 +462,10 @@ function NewSourceDialog() {
                 {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy'}
               </Button>
             </div>
+            {/* The same per-kind instructions the source card shows. A Meta
+                callback URL and a JSON endpoint need different things done to
+                them, and this panel used to explain neither. */}
+            <SetupHelp kind={created.kind} url={endpointFor(created.source_key)} />
             <p className="text-sm text-muted-foreground">
               Treat it like a password: anyone holding it can post leads into your CRM. You can
               always pause or delete the source.
@@ -429,11 +491,104 @@ function NewSourceDialog() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Kind</Label>
-              <Select value={kind} onChange={(e) => setKind(e.target.value as LeadSourceKind)}>
+              <Select
+                value={kind}
+                onChange={(e) => {
+                  const next = e.target.value as LeadSourceKind
+                  setKind(next)
+                  // Pre-set the label a lead will carry to match the channel,
+                  // unless the studio has already chosen one deliberately.
+                  if (!defaultSource) setDefaultSource(next === 'meta' ? 'facebook' : 'webform')
+                }}
+              >
                 <option value="webform">Web form — your site posts JSON</option>
                 <option value="meta">Meta lead ads — Facebook or Instagram</option>
               </Select>
             </div>
+
+            {isMeta ? (
+              <p className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                Meta posts through its own webhook, so there is nothing else to configure here.
+                Create the source and the next screen gives you the callback URL to paste into your
+                lead-ads webhook settings.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label>What is posting to it</Label>
+                  <Select
+                    value={sourceType}
+                    onChange={(e) => setSourceType(e.target.value as WebhookSourceType)}
+                  >
+                    {SOURCE_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Only accept posts from</Label>
+                  <Input
+                    value={allowedOrigin}
+                    onChange={(e) => setAllowedOrigin(e.target.value)}
+                    placeholder="https://yourstudio.in"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Optional. Leave it empty and anyone holding the URL can post; set it and only
+                    your own site can.
+                  </p>
+                </div>
+              </>
+            )}
+
+            <div className="rounded-md border border-border p-3">
+              <p className="text-xs font-medium">Stamped on every lead from this source</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Source label</Label>
+                  <Select
+                    value={defaultSource}
+                    onChange={(e) => setDefaultSource(e.target.value as LeadSource | '')}
+                  >
+                    <option value="">Leave unset</option>
+                    {DEFAULT_SOURCES.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Quality</Label>
+                  <Select
+                    value={defaultQuality}
+                    onChange={(e) => setDefaultQuality(e.target.value as LeadQuality | '')}
+                  >
+                    <option value="">Leave unset</option>
+                    <option value="hot">Hot</option>
+                    <option value="warm">Warm</option>
+                    <option value="cold">Cold</option>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <Label>Assign to</Label>
+                  <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+                    <option value="">Use the distribution rules</option>
+                    {(members.data ?? []).map((m) => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Pick someone to send every lead from this source straight to them, bypassing the
+                    rota.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end gap-2">
               <DialogClose asChild>
                 <Button type="button" variant="outline">

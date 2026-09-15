@@ -49,39 +49,77 @@ export const subscriptionRouter = new Hono<AppEnv>()
   })
 
   // Lovable parity: extended status (current/latest/can_purchase/webhook + history + recovery).
+  //
+  // Every column here used to be invented: companies.plan_key / plan_name /
+  // plan_gate, users.plan_gate / plan_expiry and payment_orders.expires_at
+  // exist on no table, so this endpoint 400'd on every call and the screen
+  // showed "This didn't load". The real facts: the key is companies.plan, the
+  // name comes from plans, an order's expiry is on the company_subscriptions
+  // row activation writes, and the gate is derived — with the same CASE
+  // 0004_access_control uses, so this and the access payload cannot disagree
+  // about whether a studio has paid.
   .get('/status', async (c) => {
     const auth = c.get('auth')
     const row = await attempt(c, 'subscription.status', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const me = await sql<Record<string, unknown>[]>`select plan_gate, plan_expiry from users where user_id = ${auth.userId}`
-        void me
-        const comp = await sql<Record<string, unknown>[]>`select plan_key, plan_name, plan_gate, plan_expiry from companies where id = ${auth.companyId}`
-        const orders = await sql<Record<string, unknown>[]>`select id, status, amount, plan_id, created_at, expires_at
-          from payment_orders where company_id = ${auth.companyId} order by created_at desc limit 10`
-        const plans = await sql<Record<string, unknown>[]>`select id, name from plans where is_active = true`
-        const planName = new Map(plans.map((p) => [String(p['id']), String(p['name'])]))
-        return { comp: comp[0] ?? {}, orders, planName }
+        const comp = await sql<Record<string, unknown>[]>`
+          select c.plan as plan_key,
+                 p.name as plan_name,
+                 c.plan_expiry::text as plan_expiry,
+                 case
+                   when coalesce(c.plan_expiry,         'epoch'::timestamptz) > now() then 'active'
+                   when coalesce(c.grandfathered_until, 'epoch'::timestamptz) > now() then 'grandfathered'
+                   when coalesce(c.grace_until,         'epoch'::timestamptz) > now() then 'grace'
+                   else 'expired'
+                 end as plan_gate
+            from companies c
+            left join plans p on p.key = c.plan
+           where c.id = ${auth.companyId}`
+        const orders = await sql<Record<string, unknown>[]>`
+          select o.id, o.status, o.amount, pl.name as plan_name,
+                 o.created_at::text as created_at,
+                 cs.expires_at::text as expires_at
+            from payment_orders o
+            left join plans pl on pl.id = o.plan_id
+            left join lateral (
+              -- Linked from 0131 onward; older rows fall back to the
+              -- subscription for the same plan that started right after.
+              select s.expires_at from company_subscriptions s
+               where s.company_id = o.company_id
+                 and (s.order_id = o.id
+                      or (s.order_id is null and s.plan_id = o.plan_id and s.started_at >= o.created_at))
+               order by s.order_id nulls last, s.started_at
+               limit 1
+            ) cs on true
+           where o.company_id = ${auth.companyId}
+           order by o.created_at desc
+           limit 10`
+        return { comp: comp[0] ?? {}, orders }
       }),
     )
     if (!row) fail(400, 'We could not load subscription status.')
     const comp = row.comp as Record<string, unknown>
     const gate = (comp['plan_gate'] as string ?? 'expired') as 'active' | 'grandfathered' | 'grace' | 'expired'
+    const orders = row.orders as Record<string, unknown>[]
+    const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
     return c.json(subscriptionStatus.parse({
-      plan_key: (comp['plan_key'] as string | null) ?? null,
-      plan_name: (comp['plan_name'] as string | null) ?? null,
+      plan_key: str(comp['plan_key']),
+      plan_name: str(comp['plan_name']),
       plan_gate: gate,
-      plan_expiry: (comp['plan_expiry'] as string | null) ?? null,
+      plan_expiry: str(comp['plan_expiry']),
       can_purchase: gate !== 'active',
-      latest_order_id: ((row.orders as Record<string, unknown>[])[0]?.['id'] as string | undefined) ?? null,
-      latest_order_status: ((row.orders as Record<string, unknown>[])[0]?.['status'] as string | undefined) ?? null,
+      latest_order_id: (orders[0]?.['id'] as string | undefined) ?? null,
+      latest_order_status: (orders[0]?.['status'] as string | undefined) ?? null,
       webhook_configured: Boolean(c.env.RAZORPAY_WEBHOOK_SECRET),
-      history: (row.orders as Record<string, unknown>[]).map((o) => ({
+      history: orders.map((o) => ({
         id: String(o['id']),
-        plan_name: (row.planName as Map<string, string>).get(String(o['plan_id'])) ?? null,
-        amount: typeof o['amount'] === 'number' ? o['amount'] : null,
-        status: typeof o['status'] === 'string' ? o['status'] : null,
-        created_at: typeof o['created_at'] === 'string' ? o['created_at'] : null,
-        expires_at: typeof o['expires_at'] === 'string' ? o['expires_at'] : null,
+        plan_name: str(o['plan_name']),
+        // numeric(12,2) arrives as a string from the driver, not a number —
+        // the old `typeof === 'number'` test nulled every amount.
+        amount: o['amount'] === null || o['amount'] === undefined ? null : Number(o['amount']),
+        status: str(o['status']),
+        created_at: str(o['created_at']),
+        expires_at: str(o['expires_at']),
       })),
     }))
   })
