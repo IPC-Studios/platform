@@ -57,7 +57,7 @@ function InvoiceDoc() {
 
   return (
     <>
-      <div className="no-print mb-4 flex items-center justify-between">
+      <div className="paper-toolbar mb-4 flex items-center justify-between">
         <Button asChild variant="outline" size="sm">
           <Link to="/billing">
             <ArrowLeft /> Back
@@ -81,7 +81,7 @@ function InvoiceDoc() {
         </div>
       </div>
 
-      <div className="print-invoice mx-auto max-w-3xl rounded-lg border border-border bg-card p-8 print:border-0 print:p-0">
+      <div className="paper mx-auto max-w-3xl rounded-lg border border-border bg-card p-8">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-border pb-4">
           {layout.show_header ? (
@@ -242,8 +242,6 @@ function InvoiceDoc() {
         )}
       </div>
 
-      {/* Print styles */}
-      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
     </>
   )
 }
@@ -656,13 +654,3 @@ function InvoiceEmailDialog({
   )
 }
 
-// Print-optimized styles
-const printStyles = `
-  @media print {
-    body * { visibility: hidden; }
-    .print-invoice, .print-invoice * { visibility: visible; }
-    .print-invoice { position: absolute; left: 0; top: 0; width: 100%; }
-    .no-print { display: none !important; }
-    @page { margin: 1cm; size: A4; }
-  }
-`

@@ -195,8 +195,8 @@ function ProjectDocuments() {
             action={<IssueTermsDialog />}
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-sm">
+          <div className="table-wrap rounded-lg border border-border">
+            <table className="table-sticky w-full min-w-[36rem] text-sm">
               <thead className="bg-muted/50 text-left text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 font-medium">Project</th>

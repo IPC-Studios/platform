@@ -50,7 +50,7 @@ export function ReceiptPage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
-      <Card>
+      <Card className="paper">
         <CardContent className="p-6">
           {error ? (
             <p className="text-sm text-destructive">{error}</p>

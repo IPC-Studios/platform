@@ -180,6 +180,7 @@ export function TermsAcknowledgePage() {
         </div>
       ) : (
         <>
+          <div className="paper flex flex-col gap-4">
           {doc.total_cost != null && doc.total_cost > 0 && (
             <Card>
               <CardContent className="p-4 text-sm">
@@ -276,7 +277,7 @@ export function TermsAcknowledgePage() {
               <Copy className="mr-1 size-4" /> Copy
             </Button>
           </div>
-          <Card>
+          <Card className="no-print">
             <CardContent className="p-6">
               <form onSubmit={onAgree} className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1.5">
@@ -297,6 +298,7 @@ export function TermsAcknowledgePage() {
               </form>
             </CardContent>
           </Card>
+          </div>
         </>
       )}
       </div>

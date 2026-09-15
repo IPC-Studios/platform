@@ -53,3 +53,21 @@ export function useReviewWork() {
     },
   })
 }
+
+/**
+ * Send the work-submission nudges now instead of waiting for the hourly tick.
+ *
+ * Owner-only on the server. Useful straight after changing the day offsets —
+ * otherwise the only way to know the settings do anything is to wait an hour.
+ */
+export function useRunWorkReminders() {
+  return useMutation({
+    mutationFn: () =>
+      callApi('/work/reminders/run', {
+        method: 'POST',
+        responseSchema: z.object({ ok: z.boolean(), summary: z.record(z.unknown()).default({}) }),
+      }),
+    onSuccess: () => toast.success('Reminders sent'),
+    onError: (e: Error) => toast.error(e.message),
+  })
+}

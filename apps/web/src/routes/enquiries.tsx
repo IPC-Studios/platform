@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
-import { ExternalLink, Inbox, Mail, Pencil, Phone, Plus, Trash2, UserPlus } from 'lucide-react'
+import { ExternalLink, Eye, Inbox, Mail, Pencil, Phone, Plus, Trash2, UserPlus } from 'lucide-react'
 import type { Enquiry, EnquiryStatus, SaveEnquiryRequest } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -292,6 +292,7 @@ function EnquiryRow({ enquiry, canEdit }: { enquiry: Enquiry; canEdit: boolean }
   const remove = useDeleteEnquiry()
   const convert = useConvertEnquiry()
   const confirm = useConfirm()
+  const [detail, setDetail] = useState(false)
 
   async function onDelete() {
     const yes = await confirm({
@@ -333,8 +334,21 @@ function EnquiryRow({ enquiry, canEdit }: { enquiry: Enquiry; canEdit: boolean }
             {enquiry.assigned_to_name && <span>· {enquiry.assigned_to_name}</span>}
           </div>
           {enquiry.message && (
-            <p className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">{enquiry.message}</p>
+            <button
+              type="button"
+              onClick={() => setDetail(true)}
+              className="mt-1.5 line-clamp-2 text-left text-sm text-muted-foreground hover:text-foreground"
+            >
+              {enquiry.message}
+            </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setDetail(true)} title="View enquiry">
+            <Eye />
+            <span className="sr-only">View the enquiry from {enquiry.name}</span>
+          </Button>
         </div>
 
         {canEdit && (
@@ -366,7 +380,73 @@ function EnquiryRow({ enquiry, canEdit }: { enquiry: Enquiry; canEdit: boolean }
           </div>
         )}
       </CardContent>
+      {detail && <EnquiryDetailDialog enquiry={enquiry} onClose={() => setDetail(false)} />}
     </Card>
+  )
+}
+
+/**
+ * The whole enquiry, which the row cannot show: the message in full rather than
+ * clamped to two lines, and when it arrived. The old app gave this its own
+ * route; a dialog keeps the list position, which is what someone triaging an
+ * inbox actually wants.
+ */
+function EnquiryDetailDialog({ enquiry, onClose }: { enquiry: Enquiry; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent
+        title={enquiry.name}
+        description={`Arrived ${new Date(enquiry.created_at).toLocaleString('en-IN')}`}
+      >
+        <div className="flex flex-col gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge tone={TONE[enquiry.enquiry_status] ?? 'neutral'}>
+              {humanize(enquiry.enquiry_status)}
+            </StatusBadge>
+            {enquiry.source && <StatusBadge>{humanize(enquiry.source)}</StatusBadge>}
+          </div>
+          <dl className="grid gap-2">
+            <DetailRow label="Phone" value={enquiry.phone} href={enquiry.phone ? `tel:${enquiry.phone}` : null} />
+            <DetailRow label="Email" value={enquiry.email} href={enquiry.email ? `mailto:${enquiry.email}` : null} />
+            <DetailRow label="Looked after by" value={enquiry.assigned_to_name} href={null} />
+          </dl>
+          {enquiry.message ? (
+            <div>
+              <p className="text-xs text-muted-foreground">What they said</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/40 p-3">{enquiry.message}</p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">They left no message.</p>
+          )}
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DetailRow({ label, value, href }: { label: string; value: string | null; href: string | null }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate">
+        {value ? (
+          href ? (
+            <a href={href} className="hover:underline">
+              {value}
+            </a>
+          ) : (
+            value
+          )
+        ) : (
+          '—'
+        )}
+      </dd>
+    </div>
   )
 }
 

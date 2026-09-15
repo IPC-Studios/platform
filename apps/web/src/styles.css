@@ -154,6 +154,99 @@
     background: #fff;
     color: #000;
   }
+
+  /* ── Documents on paper ──────────────────────────────────────
+     An invoice, quotation, receipt or terms sheet is a document a client
+     keeps, not a screenshot of an app. When one of these pages marks its
+     document `.paper`, printing gives that element the whole sheet and drops
+     everything else — including the app chrome that `display: none` above
+     cannot reach inside a public route that has no <aside> or <header>.
+
+     `visibility` rather than `display` for the hiding: collapsing every other
+     node would reflow the document out from under its own absolute position. */
+  body:has(.paper) * {
+    visibility: hidden !important;
+  }
+  body:has(.paper) .paper,
+  body:has(.paper) .paper * {
+    visibility: visible !important;
+  }
+  .paper-toolbar {
+    display: none !important;
+  }
+
+  .paper {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0 !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    /* Paper is read at arm's length, not at a screen's viewing distance. */
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+  .paper h1 {
+    font-size: 20pt;
+  }
+  .paper h2 {
+    font-size: 13pt;
+  }
+  .paper h3 {
+    font-size: 11pt;
+  }
+
+  /* Tints and brand colour are information here — a "PAID" stamp that prints
+     white is worse than one that never existed. */
+  .paper,
+  .paper * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Nothing that reads as one block should be split across two sheets, and a
+     table running past a page break has to reprint its headings or the second
+     sheet is a grid of unlabelled numbers. */
+  .paper section,
+  .paper .paper-block,
+  .paper table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .paper thead {
+    display: table-header-group;
+  }
+  .paper tfoot {
+    display: table-footer-group;
+  }
+
+  /* Soft greys survive a black-and-white printer; borders that were tuned for
+     a dark UI come out nearly invisible on white. */
+  .paper .bg-muted,
+  .paper .bg-muted\/20,
+  .paper .bg-muted\/30,
+  .paper .bg-muted\/40,
+  .paper .bg-muted\/50 {
+    background: #f5f5f5 !important;
+  }
+  .paper .border,
+  .paper .border-t,
+  .paper .border-b,
+  .paper .border-border,
+  .paper .divide-border > * {
+    border-color: #d4d4d4 !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
 }
 /* The app's base size. Tailwind's rem scale hangs off this, so it is the one
    place to adjust density — 15px reads tighter than the browser's 16px default

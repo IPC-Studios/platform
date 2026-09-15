@@ -99,7 +99,7 @@ export function TeamTermsAcknowledgePage() {
           {terms && <StatusPill status={terms.status} requireAck={mustSign} />}
         </div>
 
-        <Card>
+        <Card className="paper">
           <CardContent className="p-5 sm:p-6">
             {loadError ? (
               <p className="text-sm text-destructive">{loadError}</p>
@@ -125,7 +125,7 @@ export function TeamTermsAcknowledgePage() {
                       <CheckCircle2 className="size-4 shrink-0" />
                       Agreed by {name || terms.acknowledged_by_name} — nothing else to do.
                     </p>
-                    <Button variant="outline" size="sm" className="mt-2" onClick={() => window.print()}>
+                    <Button variant="outline" size="sm" className="no-print mt-2" onClick={() => window.print()}>
                       <Printer className="mr-1 size-4" /> Print
                     </Button>
                   </div>

@@ -21,7 +21,7 @@ import { humanize } from '@/shared/ui/format'
 import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup, useUpdateCustomLookup } from '@/features/settings/api'
 import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
 import { useTaskPriorities, useCreateTaskPriority, useUpdateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
-import { useWorkReminderSettings, useUpdateWorkReminderSettings } from '@/features/work/api'
+import { useWorkReminderSettings, useUpdateWorkReminderSettings, useRunWorkReminders } from '@/features/work/api'
 import type { TaskPriorityTone } from '@ipc/contracts'
 
 const when = new Intl.DateTimeFormat('en-IN', {
@@ -620,6 +620,7 @@ const REMINDER_PRESET_DAYS = [14, 7, 3, 1, 0]
 function WorkReminders() {
   const { data, isLoading } = useWorkReminderSettings()
   const update = useUpdateWorkReminderSettings()
+  const runNow = useRunWorkReminders()
   const [enabled, setEnabled] = useState(true)
   const [days, setDays] = useState<number[]>([7, 3, 1])
   const [loaded, setLoaded] = useState(false)
@@ -671,7 +672,17 @@ function WorkReminders() {
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {/* Otherwise the only way to tell whether these settings do
+                  anything is to wait for the next hourly tick. */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => runNow.mutate()}
+                disabled={runNow.isPending || !enabled}
+              >
+                {runNow.isPending ? 'Sending…' : 'Send now'}
+              </Button>
               <Button
                 size="sm"
                 onClick={() => update.mutate({ enabled, reminder_days: days })}

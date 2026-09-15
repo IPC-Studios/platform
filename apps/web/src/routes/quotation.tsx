@@ -163,7 +163,7 @@ export function QuotationPage() {
           {answered === 'declined' && <StatusBadge tone="warning">Declined</StatusBadge>}
         </div>
 
-        <Card>
+        <Card className="paper">
           <CardContent className="p-5 sm:p-6">
             {loadError ? (
               <p className="text-sm text-destructive">{loadError}</p>
@@ -295,7 +295,7 @@ export function QuotationPage() {
                       Acknowledgement receipt{quote.accepted_at ? ` · recorded ${new Date(quote.accepted_at).toLocaleString('en-IN')}` : ''}.
                       Keep this link as your receipt.
                     </p>
-                    <Button size="sm" variant="outline" className="mt-2" onClick={() => window.print()}>
+                    <Button size="sm" variant="outline" className="no-print mt-2" onClick={() => window.print()}>
                       <Printer className="mr-1 size-4" /> Print receipt
                     </Button>
                   </div>

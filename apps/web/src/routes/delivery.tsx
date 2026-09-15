@@ -82,7 +82,7 @@ export function DeliveryPage() {
           {delivery?.delivery_type && <StatusBadge>{delivery.delivery_type}</StatusBadge>}
         </div>
 
-        <Card>
+        <Card className="paper">
           <CardContent className="p-5 sm:p-6">
             {error ? (
               <p className="text-sm text-destructive">{error}</p>
