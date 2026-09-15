@@ -101,13 +101,17 @@ harness again:
 | `/team-payouts` — Mark Paid, Payment history, Due/Paid/Settlement | Mark paid and a settlement-history dialog both exist; ours renders cards where theirs renders a table. |
 | `/shoots` — filters | Ours filters by search, status, date and sort; theirs by month, assignment, project and role. Different axes, not fewer. |
 
-**Genuinely still missing, all on the production board:**
+**Found, and now closed:**
 
-- **Change lane colour** — per-lane customisation
-- **Card details panel** — expanding a card in place
+- **Change lane colour** — seven tints per lane, saved per studio (`0130`)
+- **Card details panel** — expands in place with description, full assignee
+  list and status/priority changers
+
+**Deliberately left:**
+
 - **"Any data" filter** — needs a data-custody flag on tasks, which the schema
-  does not carry. Building it would mean matching everything, so it stays out
-  until the flag exists.
+  does not carry. Building it would mean matching everything, and a filter that
+  silently does nothing is worse than an absent one. Revisit if the flag lands.
 
 Everything else on both apps now matches or is a deliberate divergence.
 

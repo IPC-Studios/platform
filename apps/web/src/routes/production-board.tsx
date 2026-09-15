@@ -17,7 +17,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useDroppable } from '@dnd-kit/core'
 import { Link } from '@tanstack/react-router'
 import { toast } from 'sonner'
-import { CalendarDays, Check, ChevronDown, ChevronRight, Package, Search, Users, X } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronRight, Package, Palette, Search, Users, X } from 'lucide-react'
 import type { TaskListItem, TaskStatus } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -28,7 +28,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { cn } from '@/shared/ui/cn'
-import { useBoard, useSetBoardOrder, useUpdateTaskStatus } from '@/features/tasks/api'
+import { useBoard, useLaneColors, useSetBoardOrder, useSetLaneColor, useUpdateTask, useUpdateTaskStatus } from '@/features/tasks/api'
 import { useBoardDeliverables, type BoardDeliverable } from '@/features/projects/api'
 
 /**
@@ -114,6 +114,21 @@ function inBucket(t: TaskListItem, key: Exclude<FocusKey, null>): boolean {
   }
 }
 
+/**
+ * Lane tints. Token pairs rather than hex, so a lane stays legible in both
+ * schemes — a colour picked against a white panel goes muddy on a dark one.
+ */
+export const LANE_COLORS = {
+  default: { label: 'Default', head: 'bg-muted/30 border-border', dot: 'bg-muted-foreground/40' },
+  slate: { label: 'Slate', head: 'bg-slate-500/10 border-slate-500/30', dot: 'bg-slate-500' },
+  blue: { label: 'Blue', head: 'bg-sky-500/10 border-sky-500/30', dot: 'bg-sky-500' },
+  green: { label: 'Green', head: 'bg-emerald-500/10 border-emerald-500/30', dot: 'bg-emerald-500' },
+  amber: { label: 'Amber', head: 'bg-amber-500/10 border-amber-500/30', dot: 'bg-amber-500' },
+  rose: { label: 'Rose', head: 'bg-rose-500/10 border-rose-500/30', dot: 'bg-rose-500' },
+  violet: { label: 'Violet', head: 'bg-violet-500/10 border-violet-500/30', dot: 'bg-violet-500' },
+} as const
+export type LaneColor = keyof typeof LANE_COLORS
+
 type Lanes = Record<TaskStatus, TaskListItem[]>
 
 export function ProductionBoardPage() {
@@ -137,6 +152,8 @@ function Board() {
   const { data, isLoading, isError, refetch } = useBoard()
   const setOrder = useSetBoardOrder()
   const updateStatus = useUpdateTaskStatus()
+  const laneColors = useLaneColors()
+  const setLaneColor = useSetLaneColor()
   const [view, setView] = useState<BoardView>('status')
   const [search, setSearch] = useState('')
   const [project, setProject] = useState('all')
@@ -424,7 +441,17 @@ function Board() {
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           {LANES.map((lane) => (
-            <Lane key={lane.key} laneKey={lane.key} label={lane.label} hint={lane.hint} tasks={lanes[lane.key]} selected={selected} onToggleSelect={toggleSelect} />
+            <Lane
+              key={lane.key}
+              laneKey={lane.key}
+              label={lane.label}
+              hint={lane.hint}
+              tasks={lanes[lane.key]}
+              selected={selected}
+              onToggleSelect={toggleSelect}
+              color={(laneColors.data?.[lane.key] as LaneColor | undefined) ?? 'default'}
+              onColor={(c) => setLaneColor.mutate({ lane: lane.key, color: c })}
+            />
           ))}
         </div>
       </DndContext>
@@ -584,19 +611,75 @@ function DataView({ tasks }: { tasks: TaskListItem[] }) {
   )
 }
 
-function Lane({ laneKey, label, hint, tasks, selected, onToggleSelect }: { laneKey: TaskStatus; label: string; hint: string; tasks: TaskListItem[]; selected: ReadonlySet<string>; onToggleSelect: (id: string) => void }) {
+function Lane({
+  laneKey,
+  label,
+  hint,
+  tasks,
+  selected,
+  onToggleSelect,
+  color,
+  onColor,
+}: {
+  laneKey: TaskStatus
+  label: string
+  hint: string
+  tasks: TaskListItem[]
+  selected: ReadonlySet<string>
+  onToggleSelect: (id: string) => void
+  color: LaneColor
+  onColor: (c: LaneColor) => void
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: `lane:${laneKey}` })
+  const [picking, setPicking] = useState(false)
+  const tint = LANE_COLORS[color]
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-40 flex-col gap-2 rounded-lg border p-3 transition-colors ${
-        isOver ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'
-      }`}
+      className={cn(
+        'flex min-h-40 flex-col gap-2 rounded-lg border p-3 transition-colors',
+        isOver ? 'border-primary bg-primary/5' : tint.head,
+      )}
     >
       <div className="flex items-center justify-between px-1">
-        <span className="text-sm font-medium" title={hint}>{label}</span>
-        <span className="text-xs text-muted-foreground">{tasks.length}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium" title={hint}>
+          <span className={cn('size-2 shrink-0 rounded-full', tint.dot)} aria-hidden />
+          {label}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground">{tasks.length}</span>
+          <button
+            type="button"
+            aria-label={`Change ${label} lane colour`}
+            onClick={() => setPicking((v) => !v)}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+          >
+            <Palette className="size-3.5" />
+          </button>
+        </span>
       </div>
+      {picking && (
+        <div className="flex flex-wrap gap-1.5 rounded-md border border-border bg-card p-2">
+          {(Object.keys(LANE_COLORS) as LaneColor[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-label={LANE_COLORS[key].label}
+              aria-pressed={color === key}
+              title={LANE_COLORS[key].label}
+              onClick={() => {
+                onColor(key)
+                setPicking(false)
+              }}
+              className={cn(
+                'size-5 rounded-full border transition',
+                LANE_COLORS[key].dot,
+                color === key ? 'ring-2 ring-primary ring-offset-1' : 'border-border',
+              )}
+            />
+          ))}
+        </div>
+      )}
       <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
         {tasks.map((t) => (
           <TaskCard key={t.id} task={t} ticked={selected.has(t.id)} onToggle={() => onToggleSelect(t.id)} />
@@ -610,6 +693,9 @@ function TaskCard({ task, ticked, onToggle }: { task: TaskListItem; ticked: bool
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
   })
+  const [open, setOpen] = useState(false)
+  const setStatus = useUpdateTaskStatus()
+  const updateTask = useUpdateTask()
   const overdue = !!task.due_date && task.due_date < new Date().toISOString().slice(0, 10) && task.status !== 'completed' && task.status !== 'cancelled'
   return (
     <div
@@ -657,6 +743,79 @@ function TaskCard({ task, ticked, onToggle }: { task: TaskListItem; ticked: bool
           </span>
         )}
       </div>
+
+      {/* Details in place. Opening a dialog to read one line of description
+          loses your position on a board you are triaging down. */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-expanded={open}
+        className="mt-2 flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+      >
+        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} aria-hidden />
+        {open ? 'Hide details' : 'Details'}
+      </button>
+
+      {open && (
+        <div
+          className="mt-2 flex flex-col gap-2 border-t border-border pt-2 text-[11px]"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {task.description ? (
+            <p className="whitespace-pre-wrap text-muted-foreground">{task.description}</p>
+          ) : (
+            <p className="text-muted-foreground">No description.</p>
+          )}
+          {task.assignee_names.length > 0 && (
+            <p className="text-muted-foreground">
+              <span className="font-medium text-foreground">Assigned:</span> {task.assignee_names.join(', ')}
+            </p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-muted-foreground">Status</span>
+              <Select
+                value={task.status}
+                aria-label={`Change status of ${task.title}`}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  e.stopPropagation()
+                  setStatus.mutate({ id: task.id, status: e.target.value as TaskStatus })
+                }}
+                className="h-8 text-xs"
+              >
+                {LANES.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    {l.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-muted-foreground">Priority</span>
+              <Select
+                value={task.priority}
+                aria-label={`Change priority of ${task.title}`}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  e.stopPropagation()
+                  updateTask.mutate({ id: task.id, patch: { priority: e.target.value as TaskListItem['priority'] } })
+                }}
+                className="h-8 text-xs"
+              >
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </Select>
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

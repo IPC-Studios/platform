@@ -90,6 +90,43 @@ export function useBoard() {
   })
 }
 
+const laneColorRow = z.object({ lane_key: z.string(), color: z.string() })
+
+/** Per-lane colour for the board, keyed by lane. */
+export function useLaneColors() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['tasks', 'board', 'lanes'],
+    queryFn: async () => {
+      const rows = await callApi('/tasks/board/lanes', { responseSchema: laneColorRow.array() })
+      return Object.fromEntries(rows.map((r) => [r.lane_key, r.color])) as Record<string, string>
+    },
+    enabled: !!session && access.hasModule('tasks'),
+    staleTime: 60_000,
+  })
+}
+
+export function useSetLaneColor() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ lane, color }: { lane: string; color: string }) =>
+      callApi(`/tasks/board/lanes/${lane}`, { method: 'PUT', body: { color }, responseSchema: z.any() }),
+    // Optimistic: a colour that lags a round trip feels broken.
+    onMutate: async ({ lane, color }) => {
+      await qc.cancelQueries({ queryKey: ['tasks', 'board', 'lanes'] })
+      const prev = qc.getQueryData<Record<string, string>>(['tasks', 'board', 'lanes'])
+      qc.setQueryData(['tasks', 'board', 'lanes'], { ...(prev ?? {}), [lane]: color })
+      return { prev }
+    },
+    onError: (e: Error, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['tasks', 'board', 'lanes'], ctx.prev)
+      toast.error(e.message)
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['tasks', 'board', 'lanes'] }),
+  })
+}
+
 export function useSetBoardOrder() {
   const qc = useQueryClient()
   return useMutation({

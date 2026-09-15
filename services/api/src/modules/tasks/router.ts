@@ -19,7 +19,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam, uuidQuery } from '../../lib/params'
+import { textParam, uuidParam, uuidQuery } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
@@ -199,6 +199,37 @@ export const tasksRouter = new Hono<AppEnv>()
     if (!result) fail(400, 'We could not load the board.')
     const orderMap = new Map(result.orders.map((o) => [o.task_id, o.sort_order]))
     return c.json(list.parse(toItems(result.tasks, orderMap)))
+  })
+
+  /** Per-lane colour, so a studio can tint the piles it cares about. */
+  .get('/board/lanes', requireAction('tasks', 'view'), async (c) => {
+    const rows = await attempt(c, 'tasks.board_lanes', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select lane_key, color from board_lane_prefs where board_view = 'default'`),
+    )
+    if (!rows) fail(400, 'We could not load the board settings.')
+    return c.json(z.object({ lane_key: z.string(), color: z.string() }).array().parse(rows))
+  })
+
+  .put('/board/lanes/:lane', requireAction('tasks', 'edit'), async (c) => {
+    const lane = textParam(c, 'lane', 60)
+    const parsed = z
+      .object({ color: z.enum(['default', 'slate', 'blue', 'green', 'amber', 'rose', 'violet']) })
+      .safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'That is not a colour this board uses.')
+    const auth = c.get('auth')
+    const ok = await attempt(c, 'tasks.board_lane_color', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        await sql`
+          insert into board_lane_prefs (company_id, board_view, lane_key, color)
+          values (${auth.companyId}, 'default', ${lane}, ${parsed.data.color})
+          on conflict (company_id, board_view, lane_key)
+            do update set color = excluded.color, updated_at = now()`
+        return true
+      }),
+    )
+    if (!ok) fail(400, 'We could not save that colour.')
+    return c.body(null, 204)
   })
 
   .post('/board/order', requireAction('tasks', 'edit'), async (c) => {
