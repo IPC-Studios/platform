@@ -30,7 +30,7 @@ import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { AvatarGroup } from '@/shared/ui/avatar'
 import { CountUp } from '@/shared/ui/count-up'
-import { useProjects } from '@/features/projects/api'
+import { useBoardDeliverables, useProjects } from '@/features/projects/api'
 import { useDirectory } from '@/features/team/api'
 import {
   useApplyBundle,
@@ -586,11 +586,22 @@ function NewTaskDialog() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState('')
+  /**
+   * Which deliverable this work is for. The column, the contract and the API
+   * have always accepted it — "Generate tasks from deliverables" sets it
+   * server-side — but this dialog sent `deliverable_id: null` outright, so a
+   * task typed by hand could never be attached to the thing it delivers.
+   */
+  const [deliverableId, setDeliverableId] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
   const [customPriorityCode, setCustomPriorityCode] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [voiceNoteUrl, setVoiceNoteUrl] = useState('')
   const [assignees, setAssignees] = useState<string[]>([])
+  const { data: deliverables } = useBoardDeliverables()
+  // Only the chosen project's own deliverables: the list is every open one in
+  // the studio, and attaching a task to another project's would be a mistake.
+  const projectDeliverables = (deliverables ?? []).filter((d) => d.project_id === projectId)
 
   function reset() {
     setTitle('')
@@ -601,6 +612,7 @@ function NewTaskDialog() {
     setDueDate('')
     setVoiceNoteUrl('')
     setAssignees([])
+    setDeliverableId('')
   }
 
   function onSubmit(e: FormEvent) {
@@ -609,7 +621,7 @@ function NewTaskDialog() {
       {
         title: title.trim(),
         project_id: projectId || null,
-        deliverable_id: null,
+        deliverable_id: deliverableId || null,
         status: 'to_do',
         priority,
         custom_priority_code: customPriorityCode || null,
@@ -667,11 +679,39 @@ function NewTaskDialog() {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <Label>Project</Label>
-              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <Select
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value)
+                  // The old pick belongs to the old project.
+                  setDeliverableId('')
+                }}
+              >
                 <option value="">None</option>
                 {(projects ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Deliverable</Label>
+              <Select
+                value={deliverableId}
+                onChange={(e) => setDeliverableId(e.target.value)}
+                disabled={!projectId || projectDeliverables.length === 0}
+              >
+                <option value="">
+                  {!projectId
+                    ? 'Pick a project first'
+                    : projectDeliverables.length === 0
+                      ? 'None on this project'
+                      : 'Not tied to one'}
+                </option>
+                {projectDeliverables.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
                   </option>
                 ))}
               </Select>
