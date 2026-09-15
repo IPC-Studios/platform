@@ -116,8 +116,19 @@ export const financialsRouter = new Hono<AppEnv>()
     const auth = c.get('auth')
     const row = await attempt(c, 'financials.expense_create', () =>
       withUser(c.env, auth.userId, async (sql) => {
+        // Build the row without ever holding an `undefined`: postgres.js
+        // refuses those outright, so writing `itemize_json: undefined` when the
+        // caller omitted it failed EVERY insert — which is what it was doing,
+        // because nothing in the UI sends that field.
+        const values: Record<string, unknown> = {
+          ...parsed.data,
+          company_id: auth.companyId,
+          created_by: auth.userId,
+        }
+        if (parsed.data.itemize_json) values['itemize_json'] = sql.json(parsed.data.itemize_json as never)
+        else delete values['itemize_json']
         const rows = await sql`
-          insert into expenses ${sql({ ...parsed.data, itemize_json: parsed.data.itemize_json ? sql.json(parsed.data.itemize_json as never) as never : undefined, company_id: auth.companyId, created_by: auth.userId })}
+          insert into expenses ${sql(values)}
           returning id, project_id, party_id,
                     (select name from parties where id = party_id) as party_name,
                     category, description, amount, expense_date, gst_treatment, gst_rate, is_fixed_overhead,

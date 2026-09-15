@@ -293,5 +293,39 @@ check('B: the pre-reset session is rejected (401)', stale.status === 401)
 const fresh = await api('/clients', { token: reset.json.access_token })
 check('B: the post-reset session works', fresh.status === 200)
 
+// ── writes that only fail against the real driver ──────────────
+// postgres.js refuses `undefined` inside a values object. The expense insert
+// used to set `itemize_json: undefined` whenever the caller omitted it — which
+// is every caller — so creating a company expense failed for everyone while
+// typecheck, lint and the pglite suite all stayed green. Only a real insert
+// through the real driver catches that shape of bug.
+const expenseMin = await api('/financials/expenses', {
+  token: a.token,
+  method: 'POST',
+  body: { amount: 2500 },
+})
+check('A: can create an expense with only the required fields', expenseMin.status === 201)
+
+const expenseFull = await api('/financials/expenses', {
+  token: a.token,
+  method: 'POST',
+  body: {
+    amount: 8000,
+    description: 'Drone rental',
+    category: 'Equipment',
+    expense_date: new Date().toISOString().slice(0, 10),
+    gst_treatment: 'gst_applicable',
+    gst_rate: 18,
+  },
+})
+check('A: can create a fully specified expense', expenseFull.status === 201)
+
+const expenseItemized = await api('/financials/expenses', {
+  token: a.token,
+  method: 'POST',
+  body: { amount: 4000, itemize_json: [{ title: 'Battery', amount: 4000, qty: 1 }] },
+})
+check('A: can create an itemized expense', expenseItemized.status === 201)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
