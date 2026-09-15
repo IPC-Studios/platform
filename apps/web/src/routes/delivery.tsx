@@ -64,7 +64,7 @@ export function DeliveryPage() {
   return (
     <div className="relative overflow-hidden">
       <CameraBackdrop />
-      <div className="relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
+      <div className="paper relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
         <div className="flex items-center gap-2">
           {delivery?.logo_url ? (
             <img src={delivery.logo_url} alt={delivery.company_name ?? 'Studio logo'} className="size-9 rounded-lg object-contain" />
@@ -82,7 +82,7 @@ export function DeliveryPage() {
           {delivery?.delivery_type && <StatusBadge>{delivery.delivery_type}</StatusBadge>}
         </div>
 
-        <Card className="paper">
+        <Card>
           <CardContent className="p-5 sm:p-6">
             {error ? (
               <p className="text-sm text-destructive">{error}</p>

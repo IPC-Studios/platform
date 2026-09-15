@@ -175,13 +175,23 @@
     display: none !important;
   }
 
-  .paper {
+  /* Gated on the same :has() as the hiding above, deliberately. If a browser
+     does not support :has(), the hiding rule is dropped — and lifting the
+     document out of flow while everything else is still visible would print
+     the two on top of each other. Tied together, an unsupporting browser just
+     prints the page normally. */
+  body:has(.paper) .paper {
     position: absolute !important;
     left: 0;
     top: 0;
     width: 100%;
     margin: 0 !important;
     max-width: none !important;
+    /* The public documents centre themselves in a full-height flex column so
+       they sit mid-screen. On paper that pushes the letterhead down the sheet
+       and can spill a short document onto a second page. */
+    min-height: 0 !important;
+    justify-content: flex-start !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;

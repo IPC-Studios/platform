@@ -137,7 +137,7 @@ export function TermsAcknowledgePage() {
   return (
     <div className="relative overflow-hidden">
       <CameraBackdrop />
-      <div className="relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
+      <div className="paper relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
       <div className="flex items-center gap-2">
         {doc?.logo_url ? (
           <img src={doc.logo_url} alt={doc.company_name ?? 'Studio logo'} className="size-9 rounded-lg object-contain" />
@@ -180,7 +180,7 @@ export function TermsAcknowledgePage() {
         </div>
       ) : (
         <>
-          <div className="paper flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
           {doc.total_cost != null && doc.total_cost > 0 && (
             <Card>
               <CardContent className="p-4 text-sm">

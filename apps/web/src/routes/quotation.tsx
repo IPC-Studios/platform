@@ -138,7 +138,7 @@ export function QuotationPage() {
   return (
     <div className="relative overflow-hidden">
       <CameraBackdrop />
-      <div className="relative mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 p-4">
+      <div className="paper relative mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 p-4">
         <div className="flex items-center gap-2">
           {quote?.logo_url ? (
             <img src={quote.logo_url} alt={quote.company_name ?? 'Studio logo'} className="size-9 rounded-lg object-contain" />
@@ -163,7 +163,7 @@ export function QuotationPage() {
           {answered === 'declined' && <StatusBadge tone="warning">Declined</StatusBadge>}
         </div>
 
-        <Card className="paper">
+        <Card>
           <CardContent className="p-5 sm:p-6">
             {loadError ? (
               <p className="text-sm text-destructive">{loadError}</p>
