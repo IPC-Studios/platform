@@ -296,3 +296,56 @@ settlement history), Billing → Payments (five KPIs, chips, filters), CRM
 The production board lanes stay four task statuses with the old app's seven
 production buckets applied to deliverables, as the code comment records —
 task rows carry no review or revision state to lane them by.
+
+## Round: settings that were stored and read by nothing (2026-09-15)
+
+Prompted by two reports — the Subscription page showing "This didn't load", and
+the New lead source dialog's Kind dropdown changing nothing above it — this
+round stopped spot-checking screens and built two scans instead.
+
+### The scans
+
+**Contract vs form.** Pull the top-level keys out of every `create*/update*`
+request contract, then look for each key across `apps/web`: a key no file names
+is a field the API accepts and no human can set; a key whose every assignment
+site is a bare literal is fixed in code whatever the form appears to offer.
+75 contracts, 4 real hits.
+
+**SQL vs schema.** Build the schema by applying all migrations in pglite, then
+resolve the FROM/JOIN aliases in all 827 SQL template literals in the API and
+check each `alias.column`. A second pass catches unqualified columns in
+single-table statements, which is the form the Subscription bugs took.
+
+### What they found
+
+| Where | What was wrong |
+| --- | --- |
+| Subscription | Both endpoints selected columns on no table — `plans.description/currency/duration_days`, `companies.plan_key/plan_name/plan_gate`, `users.plan_gate/plan_expiry`, `payment_orders.expires_at`. Every request 400'd |
+| Lead sources | `source_type` hardcoded to `'website_form'`, so picking Meta lead ads created a web form. Five more fields the contract carries were on no screen |
+| Expense receipts | `expense_attachments` was declared twice — 0119's `create table if not exists` did nothing against 0012's table, so the reader and writer both named columns that do not exist. A bare catch turned the read into "no attachments yet" |
+| CRM automations | `severity`, `cooldown_hours`, `notify_assignee`, `notify_roles` all inert: notifications went to the assignee only, always at `info`, deduped per calendar day — so the seeded 2h/72h/168h cooldowns all behaved as 24h |
+| Cadences | `stage_filter` and `source_filter` inert: a cadence written for Instagram started on a referral |
+| Leads | `quality` (hot/warm/cold) stored, filterable and synced by a trigger, named by no screen |
+| Tasks | The New task dialog sent `deliverable_id: null` outright |
+
+### The rule this round follows
+
+Wire the engine first, then the UI. A control for a setting nothing reads is
+worse than no control — it is the GOPO date picker again. So 0133 and 0134
+make the six CRM settings real, with `workflow-routing.test.ts` covering all
+seven behaviours, and only then do the builders show them.
+
+### Gates added
+
+- `schema-drift.test.ts` — every `create table if not exists` is checked against
+  the applied schema, so a redefinition that silently does nothing fails.
+  Verified it fails without 0132 and names the table.
+- `subscription.test.ts` — runs both of that screen's queries against every
+  migration, and checks the gate it derives matches the access payload's.
+- `monthly-profit.test.ts`, `params.test.ts` — from the previous round.
+
+### Still open, needing a decision
+
+The `plans` table is empty and nothing in the app can create a plan, so
+Subscription correctly reports "No plans are on offer yet". Pricing is the
+studio's call, not something to invent.
