@@ -40,6 +40,15 @@ const termsPayload = z.object({
   acknowledged_at: z.string().nullable(),
   acknowledged_by_name: z.string().nullable(),
   access_count: z.number().default(0),
+  // Letterhead + bill-to, so the sheet reads as the legal document it is.
+  company_legal_name: z.string().nullable().nullish(),
+  company_website: z.string().nullable().nullish(),
+  document_footer_note: z.string().nullable().nullish(),
+  client_email: z.string().nullable().nullish(),
+  client_address: z.string().nullable().nullish(),
+  gstin: z.string().nullable().nullish(),
+  document_number: z.string().nullable().nullish(),
+  issued_at: z.string().nullable().nullish(),
 })
 const ackRequest = z.object({ name: z.string().trim().min(1).max(160), email: z.string().max(200).optional() })
 

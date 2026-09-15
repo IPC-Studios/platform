@@ -73,11 +73,21 @@ export function DeliveryPage() {
               <PackageCheck className="size-5" />
             </span>
           )}
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-semibold leading-tight">{delivery?.company_name ?? 'Your work'}</p>
+            {delivery?.company_legal_name && delivery.company_legal_name !== delivery.company_name && (
+              <p className="text-xs text-muted-foreground">{delivery.company_legal_name}</p>
+            )}
             <p className="text-sm text-muted-foreground">
               {delivery?.delivery_label ?? delivery?.title ?? delivery?.project_name ?? 'Ready to view'}
             </p>
+            {(delivery?.company_phone || delivery?.company_email || delivery?.company_website) && (
+              <p className="text-[11px] text-muted-foreground">
+                {[delivery.company_phone, delivery.company_email, delivery.company_website]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            )}
           </div>
           {delivery?.delivery_type && <StatusBadge>{delivery.delivery_type}</StatusBadge>}
         </div>
@@ -123,7 +133,7 @@ export function DeliveryPage() {
                     Shared via {[delivery.channel, ...(delivery.sent_via ?? [])].filter(Boolean).join(' · ')}
                   </p>
                 )}
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="no-print mt-3 flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" asChild>
                     <a href={buildWhatsAppUrl(null, shareText)} target="_blank" rel="noreferrer noopener">
                       <MessageCircle className="mr-1 size-4" /> WhatsApp
@@ -138,6 +148,11 @@ export function DeliveryPage() {
                     <Copy className="mr-1 size-4" /> Copy
                   </Button>
                 </div>
+                {delivery.document_footer_note && (
+                  <p className="mt-4 whitespace-pre-line border-t border-border pt-3 text-[11px] text-muted-foreground">
+                    {delivery.document_footer_note}
+                  </p>
+                )}
               </>
             )}
           </CardContent>

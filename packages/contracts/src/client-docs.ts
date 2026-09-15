@@ -136,6 +136,25 @@ export const publicQuotation = z.object({
   total_received: money.nullish(),
   balance_due: money.nullish(),
   quotation_id: z.string().nullish(),
+  /**
+   * Letterhead. A document a client keeps has to say who issued it and how to
+   * reach them; these come from the studio's branding settings.
+   */
+  company_legal_name: z.string().nullable().nullish(),
+  company_website: z.string().nullable().nullish(),
+  document_footer_note: z.string().nullable().nullish(),
+  client_phone: z.string().nullable().nullish(),
+  client_email: z.string().nullable().nullish(),
+  client_address: z.string().nullable().nullish(),
+  project_status: z.string().nullable().nullish(),
+  /** Shown on the document and quoted back in any conversation about it. */
+  quotation_number: z.string().nullable().nullish(),
+  issued_at: isoDateTime.nullable().nullish(),
+  /**
+   * The real deliverable rows, so the document can show an estimated date and
+   * mark which items carry an extra charge instead of a flat "Included".
+   */
+  deliverables: z.array(z.record(z.string(), z.unknown())).nullish(),
 })
 export type PublicQuotation = z.infer<typeof publicQuotation>
 
@@ -167,6 +186,19 @@ export const publicReceipt = z.object({
   access_count: z.number().nullish(),
   revoked: z.boolean().nullish(),
   expires_at: isoDateTime.nullable().nullish(),
+  /**
+   * Letterhead. A document a client keeps has to say who issued it and how to
+   * reach them; these come from the studio's branding settings.
+   */
+  company_legal_name: z.string().nullable().nullish(),
+  company_website: z.string().nullable().nullish(),
+  document_footer_note: z.string().nullable().nullish(),
+  client_phone: z.string().nullable().nullish(),
+  client_email: z.string().nullable().nullish(),
+  client_address: z.string().nullable().nullish(),
+  receipt_number: z.string().nullable().nullish(),
+  is_gst: z.boolean().nullish(),
+  payment_gst_number: z.string().nullable().nullish(),
   // Lovable parity round 2: line-items table (invoice lines snapshot).
   line_items: z
     .array(
@@ -203,5 +235,14 @@ export const publicDelivery = z.object({
   link_label: z.string().nullable().nullish(),
   channel: z.string().nullable().nullish(),
   sent_via: z.array(z.string()).nullish(),
+  /**
+   * Letterhead. A document a client keeps has to say who issued it and how to
+   * reach them; these come from the studio's branding settings.
+   */
+  company_legal_name: z.string().nullable().nullish(),
+  company_website: z.string().nullable().nullish(),
+  document_footer_note: z.string().nullable().nullish(),
+  company_phone: z.string().nullable().nullish(),
+  company_email: z.string().nullable().nullish(),
 })
 export type PublicDelivery = z.infer<typeof publicDelivery>

@@ -71,20 +71,34 @@ export function ReceiptPage() {
                     Payment received
                   </p>
                   <p className="text-lg font-semibold">{receipt.company_name}</p>
+                  {receipt.company_legal_name && receipt.company_legal_name !== receipt.company_name && (
+                    <p className="text-xs text-muted-foreground">{receipt.company_legal_name}</p>
+                  )}
                   {(receipt.company_phone || receipt.company_email || receipt.company_address) && (
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {[receipt.company_phone, receipt.company_email, receipt.company_address].filter(Boolean).join(' · ')}
                     </p>
                   )}
+                  {receipt.company_website && (
+                    <p className="text-xs text-muted-foreground">{receipt.company_website}</p>
+                  )}
                   {receipt.gstin && (
                     <p className="text-xs text-muted-foreground">GSTIN: {receipt.gstin}</p>
                   )}
                 </div>
-                <span className="flex flex-col items-end gap-2">
+                <span className="flex flex-col items-end gap-2 text-right">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
                     <IndianRupee className="size-5" />
                   </span>
                   {receipt.status && <StatusBadge tone="success">{receipt.status}</StatusBadge>}
+                  {receipt.receipt_number && (
+                    <span className="font-mono text-xs text-muted-foreground">{receipt.receipt_number}</span>
+                  )}
+                  {receipt.is_gst && (
+                    <span className="text-[11px] text-muted-foreground">
+                      GST{receipt.payment_gst_number ? ` · ${receipt.payment_gst_number}` : ''}
+                    </span>
+                  )}
                 </span>
               </div>
 
@@ -131,6 +145,21 @@ export function ReceiptPage() {
                 </div>
               )}
 
+              {(receipt.client_phone || receipt.client_email || receipt.client_address) && (
+                <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Received from
+                  </p>
+                  <p className="mt-1 font-medium">{receipt.client_name ?? '—'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[receipt.client_phone, receipt.client_email].filter(Boolean).join(' · ')}
+                  </p>
+                  {receipt.client_address && (
+                    <p className="whitespace-pre-line text-xs text-muted-foreground">{receipt.client_address}</p>
+                  )}
+                </div>
+              )}
+
               <dl className="mt-5 flex flex-col gap-1.5 border-t border-border pt-4 text-sm">
                 <Row label="Project" value={receipt.project_name ?? '—'} />
                 <Row label="Client" value={receipt.client_name ?? '—'} />
@@ -138,6 +167,12 @@ export function ReceiptPage() {
                 <Row label="Paid so far" value={formatINR(receipt.received_total)} />
                 <Row label="Balance" value={formatINR(balance)} strong />
               </dl>
+
+              {receipt.document_footer_note && (
+                <p className="mt-4 whitespace-pre-line border-t border-border pt-3 text-[11px] text-muted-foreground">
+                  {receipt.document_footer_note}
+                </p>
+              )}
 
               <div className="no-print mt-5 flex flex-wrap gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}>

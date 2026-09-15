@@ -39,6 +39,15 @@ const termsPayload = z.object({
   acknowledged_at: z.string().nullable(),
   acknowledged_by_name: z.string().nullable(),
   access_count: z.number().default(0),
+  // Letterhead + bill-to: this is a legal document, so it has to say who issued
+  // it, to whom, and when.
+  company_legal_name: z.string().nullable().nullish(),
+  company_website: z.string().nullable().nullish(),
+  client_email: z.string().nullable().nullish(),
+  client_address: z.string().nullable().nullish(),
+  gstin: z.string().nullable().nullish(),
+  document_number: z.string().nullable().nullish(),
+  issued_at: z.string().nullable().nullish(),
   // Lovable parity round 2: structured payment table + totals + legal/footer.
   payment_terms: z.array(paymentTerm).nullish(),
   total_cost: z.number().nullish(),
@@ -146,15 +155,36 @@ export function TermsAcknowledgePage() {
             <FileText className="size-5" />
           </span>
         )}
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-semibold">{doc?.title ?? 'Terms & agreement'}</h1>
           {(doc?.project_name || doc?.client_name || doc?.company_name) && (
             <p className="text-xs text-muted-foreground">
               {[doc.project_name, doc.client_name, doc.company_name].filter(Boolean).join(' · ')}
             </p>
           )}
+          {doc?.company_legal_name && doc.company_legal_name !== doc.company_name && (
+            <p className="text-xs text-muted-foreground">{doc.company_legal_name}</p>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            {[doc?.company_phone, doc?.company_email, doc?.company_website, doc?.gstin ? `GSTIN: ${doc.gstin}` : null]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+          {doc?.company_address && (
+            <p className="whitespace-pre-line text-[11px] text-muted-foreground">{doc.company_address}</p>
+          )}
         </div>
-        {done && <StatusBadge tone="success">Agreed</StatusBadge>}
+        <div className="text-right">
+          {doc?.document_number && (
+            <p className="font-mono text-xs text-muted-foreground">{doc.document_number}</p>
+          )}
+          {doc?.issued_at && (
+            <p className="text-[11px] text-muted-foreground">
+              Issued {new Date(doc.issued_at).toLocaleDateString('en-IN')}
+            </p>
+          )}
+          {done && <StatusBadge tone="success">Agreed</StatusBadge>}
+        </div>
       </div>
 
       {loadError ? (
