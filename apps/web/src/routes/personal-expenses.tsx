@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -25,6 +25,8 @@ import {
   useAddPersonalExpenseAttachment,
   useDeletePersonalExpenseAttachment,
 } from '@/features/personal-expenses/api'
+import { toast } from 'sonner'
+import { uploadFile } from '@/shared/api/client'
 import { useParties, useCreateParty, useUpdateParty, useDeleteParty } from '@/features/parties/api'
 import { PERSONAL_EXPENSE_CATEGORIES, type CreatePersonalExpenseRequest, type PersonalExpense } from '@ipc/contracts'
 import { PartyPicker } from '@/features/parties/PartyPicker'
@@ -483,6 +485,27 @@ function AttachmentsPanel({ expenseId }: { expenseId: string }) {
   const remove = useDeletePersonalExpenseAttachment()
   const [fileName, setFileName] = useState('')
   const [fileUrl, setFileUrl] = useState('')
+  const [uploading, setUploading] = useState(false)
+
+  /**
+   * Bills are uploaded, not linked. The panel keeps the URL pair underneath for
+   * a receipt that genuinely lives somewhere else (a Drive link a client sent),
+   * but the upload is the path people actually use.
+   */
+  function onPick(e: ChangeEvent<HTMLInputElement>) {
+    const input = e.currentTarget
+    const f = input.files?.[0]
+    if (!f) return
+    setUploading(true)
+    uploadFile(f)
+      .then((stored) => add.mutateAsync({ id: expenseId, file_name: stored.name, file_url: stored.url }))
+      .then(() => toast.success('Attachment added'))
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'We could not upload that file.'))
+      .finally(() => {
+        setUploading(false)
+        input.value = ''
+      })
+  }
 
   return (
     <div className="rounded-lg border p-3">
@@ -495,13 +518,30 @@ function AttachmentsPanel({ expenseId }: { expenseId: string }) {
               <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void remove.mutate(a.id)}>Remove</Button>
             </li>
           ))}
-          {(data ?? []).length === 0 && <li className="text-sm text-muted-foreground">No attachments yet. Paste a file link to attach a bill scan.</li>}
+          {(data ?? []).length === 0 && <li className="text-sm text-muted-foreground">No attachments yet. Upload the bill scan below.</li>}
         </ul>
       )}
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        <Input placeholder="File name (bill.pdf)" value={fileName} onChange={(e) => setFileName(e.target.value)} />
-        <Input placeholder="File URL (https://…)" value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} />
+      <div className="mt-3">
+        <Label htmlFor={`att-${expenseId}`}>Upload a bill</Label>
+        <Input
+          id={`att-${expenseId}`}
+          type="file"
+          className="mt-1"
+          accept="image/png,image/jpeg,image/webp,application/pdf,text/csv,text/plain"
+          disabled={uploading || add.isPending}
+          onChange={onPick}
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          {uploading ? 'Uploading…' : 'PDF, PNG, JPG, WEBP, CSV or TXT. Max 10 MB.'}
+        </p>
       </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-muted-foreground">Or link a file hosted elsewhere</summary>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <Input placeholder="File name (bill.pdf)" value={fileName} onChange={(e) => setFileName(e.target.value)} />
+          <Input placeholder="File URL (https://…)" value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} />
+        </div>
+      </details>
       <div className="mt-2 flex justify-end">
         <Button size="sm" variant="outline" disabled={!fileName.trim() || !fileUrl.trim() || add.isPending} onClick={() => { void add.mutateAsync({ id: expenseId, file_name: fileName.trim(), file_url: fileUrl.trim() }).then(() => { setFileName(''); setFileUrl('') }) }}>
           Attach link

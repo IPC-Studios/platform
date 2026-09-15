@@ -15,7 +15,7 @@ import { presetFor } from '@/shared/theme/presets'
 import { fontOr } from '@/shared/theme/fonts'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
 import { useChangePassword } from '@/features/settings/api'
-import { callApi } from '@/shared/api/client'
+import { callApi, uploadFile } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -371,6 +371,7 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
   })
 
   const [form, setForm] = useState<UpdateCompanyRequest>({})
+  const [uploadingLogo, setUploadingLogo] = useState(false)
   useEffect(() => {
     if (!data) return
     setForm({
@@ -457,22 +458,38 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
           </Field>
           {!readOnly && (
             <div className="sm:col-span-2">
-              <Field label="Upload logo (stub)" hint="PNG, JPG, WEBP or SVG. Max 5 MB. Stored as a URL — pick a file to fill the fields above.">
+              <Field
+                label="Upload logo"
+                hint="PNG, JPG, WEBP or SVG. Max 5 MB. Stored on the server and filled into the Logo URL above."
+              >
                 <Input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  disabled={uploadingLogo}
                   onChange={(e) => {
-                    const f = e.target.files?.[0]
+                    const input = e.currentTarget
+                    const f = input.files?.[0]
                     if (!f) return
                     if (f.size > 5 * 1024 * 1024) {
-                      toast.error('File exceeds 5 MB limit.')
+                      toast.error('That file is larger than 5 MB.')
+                      input.value = ''
                       return
                     }
-                    // Stub: no storage bucket wired yet — record the file name as a
-                    // placeholder URL so the flow is exercised end to end.
-                    const stub = `upload://${f.name}`
-                    set({ avatar_url: stub } as UpdateCompanyRequest)
-                    toast.message('Upload stub: logo URL filled — wire storage to persist the file.')
+                    setUploadingLogo(true)
+                    // Public: a client opening an emailed quotation has no session,
+                    // so the logo has to load without one.
+                    uploadFile(f, { isPublic: true })
+                      .then((stored) => {
+                        set({ avatar_url: stored.url })
+                        toast.success('Logo uploaded — remember to save.')
+                      })
+                      .catch((err: unknown) =>
+                        toast.error(err instanceof Error ? err.message : 'We could not upload that file.'),
+                      )
+                      .finally(() => {
+                        setUploadingLogo(false)
+                        input.value = ''
+                      })
                   }}
                 />
               </Field>

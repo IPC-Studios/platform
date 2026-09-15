@@ -1,4 +1,4 @@
-import { authToken, type z } from '@ipc/contracts'
+import { authToken, storedFile, type StoredFile, type z } from '@ipc/contracts'
 import { config } from '../config'
 import { getToken, getRefreshToken, setTokens, clearToken } from '../auth/token'
 import { MOCK_ENABLED, mockResponse, NOT_MOCKED } from '../dev/mock'
@@ -224,4 +224,38 @@ export async function downloadFile(path: string, filename: string): Promise<void
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+/**
+ * Upload one file to /files and get back the URL to store.
+ *
+ * Separate from `callApi` because that one sets `Content-Type: application/json`
+ * and stringifies the body; a multipart upload needs the browser to set the
+ * header itself so it can add the boundary. `isPublic` is for branding assets
+ * that a client's browser has to load with no session — the server only honours
+ * it for image types.
+ */
+export async function uploadFile(file: File, opts: { isPublic?: boolean } = {}): Promise<StoredFile> {
+  const send = () => {
+    const token = getToken()
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${config.apiBaseUrl}/files${opts.isPublic ? '?public=1' : ''}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+  }
+  let res = await send()
+  if (res.status === 401 && (await rotateTokens())) res = await send()
+  const json: unknown = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const msg =
+      typeof json === 'object' && json && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : 'We could not upload that file.'
+    throw new ApiError(res.status, msg, res.headers.get('X-Correlation-Id'))
+  }
+  return storedFile.parse(json)
 }

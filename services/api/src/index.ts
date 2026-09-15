@@ -29,6 +29,7 @@ import { termsRouter, publicTermsRouter } from './modules/terms/router'
 import { publicQuotesRouter } from './modules/crm/quotes'
 import { teamTermsRouter, publicTeamTermsRouter } from './modules/team-terms/router'
 import { documentsRouter, publicDocumentsRouter } from './modules/documents/router'
+import { filesRouter, publicFilesRouter } from './modules/files/router'
 import { enquiriesRouter } from './modules/enquiries/router'
 import { personalExpensesRouter } from './modules/personal-expenses/router'
 import { partiesRouter } from './modules/parties/router'
@@ -139,12 +140,14 @@ app.route('/terms', termsRouter)
 app.route('/team-terms', teamTermsRouter)
 app.route('/public', publicTermsRouter)
 app.route('/documents', documentsRouter)
+app.route('/files', filesRouter)
 app.route('/enquiries', enquiriesRouter)
 app.route('/personal-expenses', personalExpensesRouter)
 app.route('/parties', partiesRouter)
 app.route('/public', publicQuotesRouter)
 app.route('/public', publicTeamTermsRouter)
 app.route('/public', publicDocumentsRouter)
+app.route('/public', publicFilesRouter)
 app.route('/settings', settingsRouter)
 app.route('/platform', platformRouter)
 app.route('/referrals', referralsRouter)
