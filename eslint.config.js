@@ -21,7 +21,7 @@ export default tseslint.config(
     // Browser snippets pasted into a page's console, not modules we build.
     files: ['docs/**/*.js'],
     languageOptions: {
-      globals: { window: 'readonly', document: 'readonly', CSS: 'readonly', location: 'readonly' },
+      globals: { window: 'readonly', document: 'readonly', CSS: 'readonly', location: 'readonly', getComputedStyle: 'readonly' },
     },
   },
   {

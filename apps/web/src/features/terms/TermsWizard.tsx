@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, FileText, Printer, Sparkles, Send } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileText, Link2, Mail, MessageCircle, Printer, RefreshCw, Sparkles, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -13,9 +13,13 @@ import {
   useIssueTerms,
   useSaveTermsTemplate,
   useSeedTermsTemplates,
+  useTermsEmailLogs,
   useTermsTemplates,
   type PaymentTermDraft,
 } from './api'
+import { useClient } from '@/features/clients/api'
+import { callApi } from '@/shared/api/client'
+import { z } from '@ipc/contracts'
 
 const TEXTAREA =
   'w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -97,9 +101,17 @@ export function TermsWizard({
   const [parts, setParts] = useState<PaymentTermDraft[]>([])
   const [legalNote, setLegalNote] = useState('')
   const [expiryDays, setExpiryDays] = useState('30')
+  /** Set once the document exists; everything on step 3 hangs off it. */
+  const [issued, setIssued] = useState<{ documentId: string; link: string } | null>(null)
+  const [emailTo, setEmailTo] = useState('')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [sending, setSending] = useState(false)
 
   const total = project.data?.total_cost ?? 0
   const client = project.data?.client_name ?? null
+  const clientRecord = useClient(project.data?.client_id ?? '')
+  const emailLogs = useTermsEmailLogs(issued?.documentId ?? null)
 
   /** What the studio has filled in against what a document needs to look real. */
   const brandingGaps = useMemo(() => {
@@ -155,8 +167,62 @@ export function TermsWizard({
         legal_note: legalNote.trim() || undefined,
         expiry_days: Number(expiryDays) || undefined,
       })
-      .then(() => onIssued?.())
+      .then((res) => {
+        const link = `${window.location.origin}/terms/acknowledge?token=${res.token}`
+        setIssued({ documentId: res.document_id, link })
+        const to = clientRecord.data?.email ?? ''
+        setEmailTo(to)
+        setEmailSubject(`${title.trim() || 'Terms & Conditions'} — ${project.data?.name ?? 'your project'}`)
+        setEmailBody(
+          `Hi ${client ?? 'there'},\n\nPlease review and acknowledge the terms for ${
+            project.data?.name ?? 'your project'
+          } here:\n${link}\n\nYou can view it, save a PDF, and acknowledge from that link.`,
+        )
+      })
       .catch(() => undefined)
+  }
+
+  const shareText = issued
+    ? `Hi ${client ?? 'there'}, please review and acknowledge the Terms & Conditions for ${
+        project.data?.name ?? 'your project'
+      } here: ${issued.link}. You can view, print/save a PDF, and acknowledge it from the link.`
+    : ''
+
+  /**
+   * Records the send against the document. The provider may not be configured,
+   * which is why the manual share sits beside this rather than behind it.
+   */
+  async function sendEmail() {
+    if (!issued) return
+    setSending(true)
+    try {
+      await callApi('/terms/email-log', {
+        method: 'POST',
+        body: {
+          document_id: issued.documentId,
+          to: emailTo.trim(),
+          subject: emailSubject.trim(),
+          body: emailBody,
+          status: 'sent',
+        },
+        responseSchema: z.object({ id: z.string() }),
+      })
+      toast.success('Email recorded')
+      void emailLogs.refetch()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'We could not record that email.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function copyText(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`${what} copied`)
+    } catch {
+      toast.error(`Could not copy the ${what.toLowerCase()}.`)
+    }
   }
 
   return (
@@ -378,24 +444,208 @@ export function TermsWizard({
             )}
 
             {step === 3 && (
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="terms-expiry">Link expires after</Label>
-                  <Select id="terms-expiry" value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)}>
-                    <option value="7">7 days</option>
-                    <option value="14">14 days</option>
-                    <option value="30">30 days</option>
-                    <option value="90">90 days</option>
-                    <option value="365">A year</option>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Issuing creates a fresh link for this project and replaces any active one. The client reads the
-                  document and types their name to agree; that acknowledgement is recorded with their IP and the time.
-                </p>
-                <Button onClick={onIssue} disabled={issue.isPending || !terms.trim()}>
-                  <Send /> {issue.isPending ? 'Issuing…' : 'Issue terms link'}
-                </Button>
+              <div className="flex flex-col gap-4">
+                {/* 1. The link itself. Everything below needs it to exist. */}
+                <section className="rounded-lg border border-border p-3">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <Link2 className="size-4" /> Client approval link
+                  </h3>
+                  {!issued ? (
+                    <>
+                      <p className="mt-1 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+                        Issue the document first to generate a client link.
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-end gap-2">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor="terms-expiry">Link expires after</Label>
+                          <Select
+                            id="terms-expiry"
+                            value={expiryDays}
+                            onChange={(e) => setExpiryDays(e.target.value)}
+                            className="w-40"
+                          >
+                            <option value="7">7 days</option>
+                            <option value="14">14 days</option>
+                            <option value="30">30 days</option>
+                            <option value="90">90 days</option>
+                            <option value="365">A year</option>
+                          </Select>
+                        </div>
+                        <Button onClick={onIssue} disabled={issue.isPending || !terms.trim()}>
+                          <Send /> {issue.isPending ? 'Issuing…' : 'Generate client link'}
+                        </Button>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Issuing replaces any active link for this project. The client reads the document and types
+                        their name to agree; that is recorded with their IP address and the time.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate rounded-md bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                        {issued.link}
+                      </code>
+                      <Button size="sm" variant="outline" onClick={() => void copyText(issued.link, 'Link')}>
+                        <Copy /> Copy
+                      </Button>
+                    </div>
+                  )}
+                </section>
+
+                {/* 2. Email, with the draft pre-filled from the client record. */}
+                <section className="rounded-lg border border-border p-3">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <Mail className="size-4" /> Email draft
+                  </h3>
+                  {!issued && (
+                    <p className="mt-1 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+                      Generate the client link first to enable email actions.
+                    </p>
+                  )}
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="terms-to">To</Label>
+                      <Input
+                        id="terms-to"
+                        value={emailTo}
+                        onChange={(e) => setEmailTo(e.target.value)}
+                        placeholder="client@example.com"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="terms-subject">Subject</Label>
+                      <Input
+                        id="terms-subject"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <Label htmlFor="terms-body-email">Body</Label>
+                    <textarea
+                      id="terms-body-email"
+                      rows={5}
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                      className={TEXTAREA}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    The email carries the secure link. The client can view it, save a PDF, and acknowledge from there.
+                  </p>
+                  <div className="mt-2 flex flex-wrap justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!issued}
+                      asChild={!!issued}
+                    >
+                      {issued ? (
+                        <a
+                          href={`mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(
+                            emailSubject,
+                          )}&body=${encodeURIComponent(emailBody)}`}
+                        >
+                          Open in email app
+                        </a>
+                      ) : (
+                        <span>Open in email app</span>
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!issued || sending || !emailTo.trim()}
+                      onClick={() => void sendEmail()}
+                    >
+                      <Send /> {sending ? 'Recording…' : 'Send email'}
+                    </Button>
+                  </div>
+                </section>
+
+                {/* 3. The path that always works, even with no mail provider. */}
+                <section className="rounded-lg border border-border p-3">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <MessageCircle className="size-4" /> Share manually
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Send the secure link yourself over WhatsApp or email.
+                  </p>
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <Label htmlFor="terms-msg">Message text</Label>
+                    <textarea
+                      id="terms-msg"
+                      rows={3}
+                      readOnly
+                      value={shareText || 'Generate the client link to build the message.'}
+                      className={TEXTAREA}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!issued}
+                      onClick={() => void copyText(shareText, 'Message')}
+                    >
+                      <Copy /> Copy message
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={!issued} asChild={!!issued}>
+                      {issued ? (
+                        <a
+                          href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          <MessageCircle /> Open WhatsApp
+                        </a>
+                      ) : (
+                        <span>Open WhatsApp</span>
+                      )}
+                    </Button>
+                  </div>
+                </section>
+
+                {/* 4. What has actually gone out. */}
+                <section className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="flex items-center gap-2 text-sm font-medium">
+                      <Mail className="size-4" /> Email history
+                    </h3>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label="Refresh email history"
+                      disabled={!issued}
+                      onClick={() => void emailLogs.refetch()}
+                    >
+                      <RefreshCw />
+                    </Button>
+                  </div>
+                  {!issued || !emailLogs.data || emailLogs.data.length === 0 ? (
+                    <p className="mt-1 text-sm text-muted-foreground">No emails yet.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-border text-sm">
+                      {emailLogs.data.map((row) => (
+                        <li key={row.id} className="flex flex-wrap items-center gap-2 py-1.5">
+                          <span className="min-w-0 flex-1 truncate">{row.to_email ?? 'No address'}</span>
+                          <StatusBadge tone={row.status === 'sent' ? 'success' : row.status === 'failed' ? 'danger' : 'neutral'}>
+                            {row.status}
+                          </StatusBadge>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(row.created_at).toLocaleString('en-IN')}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {issued && (
+                  <Button variant="outline" onClick={() => onIssued?.()}>
+                    Done
+                  </Button>
+                )}
               </div>
             )}
 
