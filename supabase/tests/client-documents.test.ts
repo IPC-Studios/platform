@@ -30,6 +30,9 @@ const PROJECT = '44444444-4444-4444-4444-444444444444'
 const QUOTE = '55555555-5555-5555-5555-555555555555'
 const PAYMENT = '66666666-6666-6666-6666-666666666666'
 const TERMS = '77777777-7777-7777-7777-777777777777'
+const LEAD = '88888888-8888-8888-8888-888888888888'
+const CRM_QUOTE = '99999999-9999-9999-9999-999999999999'
+const SUBMISSION = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 let db: PGlite
 
@@ -76,6 +79,15 @@ beforeAll(async () => {
     values ('${PAYMENT}', '${COMPANY}', '${PROJECT}', 25000, current_date, 'upi', 'REF1', 'Advance');
     insert into project_terms_documents (id, company_id, project_id, rendered_body, title)
     values ('${TERMS}', '${COMPANY}', '${PROJECT}', 'Body text', 'Terms');
+    insert into crm_leads (id, company_id, name) values ('${LEAD}', '${COMPANY}', 'A Lead');
+    insert into crm_quotes (id, company_id, lead_id, quote_number, status)
+    values ('${CRM_QUOTE}', '${COMPANY}', '${LEAD}', 'Q-1', 'sent');
+    insert into team_work_submissions (id, company_id, project_id, status, title,
+                                       submission_link, delivery_type, delivery_label, ready_at)
+    -- 'approved', not 'sent': the status check allows only submitted/approved/
+    -- rejected, so get_delivery_for_token's 'sent' branch can never match.
+    values ('${SUBMISSION}', '${COMPANY}', '${PROJECT}', 'approved', 'Final films',
+            'https://example.test/gallery', 'link', 'Open your gallery', now());
   `)
 
   const mint = (purpose: string, subject: string, raw: string) =>
@@ -85,6 +97,8 @@ beforeAll(async () => {
   await mint('quotation', QUOTE, 'qtok')
   await mint('receipt', PAYMENT, 'rtok')
   await mint('terms_ack', TERMS, 'ttok')
+  await mint('quote_accept', CRM_QUOTE, 'qatok')
+  await mint('work_delivery', SUBMISSION, 'dtok')
 }, 120_000)
 
 const one = async (sql: string): Promise<Record<string, unknown>> => {
@@ -151,6 +165,25 @@ describe('client-facing document readers', () => {
     await db.query(`select * from get_quotation_for_token('qtok')`)
     const after = await one(`select access_count from project_quotations where id = '${QUOTE}'`)
     expect(Number(after['access_count'])).toBe(Number(before['access_count']) + 1)
+  })
+
+  it('the delivery reader returns the handover note, not an error', async () => {
+    const row = await one(`select * from get_delivery_for_token('dtok')`)
+    expect(row['submission_link']).toBe('https://example.test/gallery')
+    expect(row['delivery_label']).toBe('Open your gallery')
+    expect(row['company_name']).toBe('Studio Ltd')
+    expect(row['company_legal_name']).toBe('Studio Private Ltd')
+    expect(row['client_name']).toBe('A Client')
+  })
+
+  it('the quote checkout reader returns the quote', async () => {
+    // Client-facing and money-carrying, so it is covered here even though it
+    // reads through a different helper than the four document readers.
+    const row = await one(`select get_quote_for_token('qatok') as q`)
+    const q = row['q'] as Record<string, unknown>
+    expect(q['quote_number']).toBe('Q-1')
+    expect(q['studio']).toBe('Studio')
+    expect(q['client_name']).toBe('A Lead')
   })
 
   it('refuses an unknown token without raising', async () => {
