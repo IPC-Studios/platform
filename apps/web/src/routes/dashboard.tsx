@@ -57,17 +57,23 @@ const STATUS_TONE = {
   on_hold: 'warning',
 } as const
 
+/**
+ * Lovable parity: employees get their own day view (my tasks/shoots/
+ * attendance/schedule), everyone else gets the studio command center.
+ *
+ * The two bodies are separate components rather than two branches of one,
+ * because the command center opens with nine hooks. Branching inside a single
+ * component meant an employee whose session resolved after the first paint
+ * rendered the owner half once and the employee half next — different hook
+ * counts, and React throws.
+ */
 function DashboardInner() {
   const { session } = useAuth()
-  const access = useAccess()
-
-  // Lovable parity: employees get their own day view (my tasks/shoots/
-  // attendance/schedule), everyone else gets the studio command center below.
   if (session?.role && EMPLOYEE_ROLES.has(session.role)) {
     return (
       <>
         <PageHeader
-          title={`Welcome, ${session?.display_name ?? ''}`}
+          title={`Welcome, ${session.display_name ?? ''}`}
           description="Your tasks, shoots and attendance at a glance."
         />
         <div className="mt-4">
@@ -76,6 +82,12 @@ function DashboardInner() {
       </>
     )
   }
+  return <StudioCommandCenter />
+}
+
+function StudioCommandCenter() {
+  const { session } = useAuth()
+  const access = useAccess()
 
   const projects = useProjects()
   const clients = useClients()

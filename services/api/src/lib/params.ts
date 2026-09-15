@@ -40,3 +40,23 @@ export function uuidQuery(c: Context<AppEnv>, key: string): string | null {
   if (!UUID_RE.test(v)) fail(422, 'That filter is not a valid id.')
   return v
 }
+
+/**
+ * An optional numeric query filter, absent when the caller did not send one.
+ *
+ * `Number('')` is 0, not NaN. Reading a missing `max_amount` that way turned
+ * the company-expenses list into `amount <= 0` and it returned nothing, for
+ * every studio, for as long as the filter existed — while the summary tiles
+ * above it counted the same rows correctly. A blank or unparseable value is
+ * "no filter"; an explicit 0 still means 0.
+ */
+export function numberQuery(c: Context<AppEnv>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const v = c.req.query(key)
+    if (v === undefined || v.trim() === '') continue
+    const n = Number(v)
+    if (!Number.isFinite(n)) fail(422, 'That filter is not a valid number.')
+    return n
+  }
+  return null
+}

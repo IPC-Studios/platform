@@ -56,6 +56,27 @@ function Profit() {
   })
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
+  // Monthly Team Cost — 5 named buckets (Lovable parity). The API returns
+  // dynamic employment_type buckets; normalize to the five studio buckets.
+  //
+  // This has to stay ABOVE the loading and error guards. It used to sit below
+  // them, so the hook count changed the instant the query resolved and React
+  // threw #310 — the whole screen was a white "Something went wrong".
+  const buckets = data?.salary_buckets
+  const bucketTotals = useMemo(() => {
+    const acc: Record<string, number> = { salaried: 0, intern: 0, contractor: 0, commission: 0, other: 0 }
+    for (const b of (buckets as Record<string, unknown>[] | null | undefined) ?? []) {
+      const name = String(b['bucket'] ?? 'other').toLowerCase()
+      const total = Number(b['total'] ?? 0)
+      if (name.includes('intern') || name.includes('stipend')) acc['intern'] = (acc['intern'] ?? 0) + total
+      else if (name.includes('contract')) acc['contractor'] = (acc['contractor'] ?? 0) + total
+      else if (name.includes('commission')) acc['commission'] = (acc['commission'] ?? 0) + total
+      else if (name.includes('salar') || name.includes('full') || name.includes('staff')) acc['salaried'] = (acc['salaried'] ?? 0) + total
+      else acc['other'] = (acc['other'] ?? 0) + total
+    }
+    return acc
+  }, [buckets])
+
   if (isLoading) return <SkeletonTiles count={6} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
@@ -70,22 +91,6 @@ function Profit() {
     if (alloc === 'revenue' && totalPaid > 0) return (fixedTotal * paid) / totalPaid
     return fixedTotal / items.length
   }
-
-  // Monthly Team Cost — 5 named buckets (Lovable parity). The API returns
-  // dynamic employment_type buckets; normalize to the five studio buckets.
-  const bucketTotals = useMemo(() => {
-    const acc: Record<string, number> = { salaried: 0, intern: 0, contractor: 0, commission: 0, other: 0 }
-    for (const b of (data.salary_buckets as Record<string, unknown>[] | null | undefined) ?? []) {
-      const name = String(b['bucket'] ?? 'other').toLowerCase()
-      const total = Number(b['total'] ?? 0)
-      if (name.includes('intern') || name.includes('stipend')) acc['intern'] = (acc['intern'] ?? 0) + total
-      else if (name.includes('contract')) acc['contractor'] = (acc['contractor'] ?? 0) + total
-      else if (name.includes('commission')) acc['commission'] = (acc['commission'] ?? 0) + total
-      else if (name.includes('salar') || name.includes('full') || name.includes('staff')) acc['salaried'] = (acc['salaried'] ?? 0) + total
-      else acc['other'] = (acc['other'] ?? 0) + total
-    }
-    return acc
-  }, [data.salary_buckets])
 
   return (
     <>

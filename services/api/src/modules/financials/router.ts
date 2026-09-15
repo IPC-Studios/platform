@@ -20,7 +20,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam, uuidQuery } from '../../lib/params'
+import { numberQuery, uuidParam, uuidQuery } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { rpcJson } from '../../lib/rpc'
@@ -50,9 +50,8 @@ export const financialsRouter = new Hono<AppEnv>()
     const dateFrom = c.req.query('date_from') || null
     const dateTo = c.req.query('date_to') || null
     const search = (c.req.query('search') ?? '').trim() || null
-    const minAmount = Number(c.req.query('min_amount') ?? c.req.query('amount_min') ?? '')
-    const maxRaw = c.req.query('max_amount') ?? c.req.query('amount_max') ?? ''
-    const maxAmount = Number(maxRaw)
+    const minAmount = numberQuery(c, 'min_amount', 'amount_min')
+    const maxAmount = numberQuery(c, 'max_amount', 'amount_max')
     const sort = c.req.query('sort') === 'amount' ? 'amount' : 'date'
     const dir = c.req.query('dir') === 'asc' ? 'asc' : 'desc'
     const page = Math.max(1, Number(c.req.query('page') ?? 1) || 1)
@@ -72,8 +71,8 @@ export const financialsRouter = new Hono<AppEnv>()
             and (${dateFrom}::date is null or e.expense_date >= ${dateFrom}::date)
             and (${dateTo}::date is null or e.expense_date <= ${dateTo}::date)
             and (${search}::text is null or e.description ilike '%' || ${search} || '%' or e.invoice_number ilike '%' || ${search} || '%')
-            and (${Number.isFinite(minAmount) ? minAmount : null}::numeric is null or e.amount >= ${Number.isFinite(minAmount) ? minAmount : null}::numeric)
-            and (${Number.isFinite(maxAmount) ? maxAmount : null}::numeric is null or e.amount <= ${Number.isFinite(maxAmount) ? maxAmount : null}::numeric)
+            and (${minAmount}::numeric is null or e.amount >= ${minAmount}::numeric)
+            and (${maxAmount}::numeric is null or e.amount <= ${maxAmount}::numeric)
           order by ${sort === 'amount' ? sql`e.amount` : sql`e.expense_date`} ${dir === 'asc' ? sql`asc` : sql`desc`}
           limit ${pageSize} offset ${(page - 1) * pageSize}`,
       ),

@@ -14,6 +14,7 @@ import { humanize } from '@/shared/ui/format'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { FilterTabs } from '@/shared/layout/filter-tabs'
+import { HowToUse } from '@/shared/ui/how-to-use'
 import { toCsv, downloadCsv } from '@/shared/ui/csv'
 import {
   useDataRecords,
@@ -92,6 +93,15 @@ function DataBoard() {
   const [search, setSearch] = useState('')
   const [projectId, setProjectId] = useState('')
   const [dataType, setDataType] = useState('')
+  /**
+   * The chips answer "is this card safe yet". These three answer the other
+   * questions a studio actually asks the screen: where is it in the eight-stage
+   * journey, is the second copy done, and what came off the shoots that week.
+   */
+  const [dataStatus, setDataStatus] = useState('')
+  const [backupStatus, setBackupStatus] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
 
   const counts = useMemo(() => {
     const rows = data ?? []
@@ -116,12 +126,21 @@ function DataBoard() {
       })
       .filter((r) => !projectId || r.project_id === projectId)
       .filter((r) => !dataType || r.data_type === dataType)
+      .filter((r) => !dataStatus || r.data_status === dataStatus)
+      .filter((r) => !backupStatus || r.backup_status === backupStatus)
+      .filter((r) => {
+        // Date received is the date a studio means; a card logged before it
+        // came back has none yet, so fall back to when it was logged.
+        if (!from && !to) return true
+        const d = (r.date_received ?? r.created_at).slice(0, 10)
+        return (!from || d >= from) && (!to || d <= to)
+      })
       .filter((r) => {
         if (!search.trim()) return true
         const q = search.trim().toLowerCase()
         return r.data_label.toLowerCase().includes(q) || (r.project_name ?? '').toLowerCase().includes(q)
       })
-  }, [data, status, projectId, dataType, search])
+  }, [data, status, projectId, dataType, dataStatus, backupStatus, from, to, search])
 
   function onExport() {
     downloadCsv(
@@ -197,6 +216,16 @@ function DataBoard() {
             ))}
           </div>
 
+          <HowToUse
+            title="Track your shoot data"
+            description="Know exactly where every shoot's photos, video and drone footage live."
+            steps={[
+              'Log each card or drive as it comes off a shoot.',
+              'Set who is holding it and which disk the primary copy is on.',
+              'Mark the backup done once it is copied somewhere else.',
+            ]}
+          />
+
           {tab === 'locations' ? (
             <LocationsTab />
           ) : !data || data.length === 0 ? (
@@ -223,12 +252,12 @@ function DataBoard() {
           <div className="flex flex-wrap items-center gap-2">
             <FilterTabs
               tabs={[
-                { value: 'all', label: 'All' },
-                { value: 'missing', label: 'Missing' },
-                { value: 'primary_pending', label: 'Primary pending' },
-                { value: 'backup_pending', label: 'Backup pending' },
-                { value: 'ready', label: 'Ready' },
-                { value: 'at_risk', label: 'At risk' },
+                { value: 'all', label: 'All', count: (data ?? []).length },
+                { value: 'missing', label: 'Missing', count: counts.missing },
+                { value: 'primary_pending', label: 'Primary pending', count: counts.primaryPending },
+                { value: 'backup_pending', label: 'Backup pending', count: counts.backupPending },
+                { value: 'ready', label: 'Ready', count: counts.ready },
+                { value: 'at_risk', label: 'At risk', count: counts.atRisk },
               ]}
               value={status}
               onChange={setStatus}
@@ -249,6 +278,46 @@ function DataBoard() {
                 </option>
               ))}
             </Select>
+            <Select
+              value={dataStatus}
+              onChange={(e) => setDataStatus(e.target.value)}
+              className="w-44"
+              aria-label="Filter by data status"
+            >
+              <option value="">All data statuses</option>
+              {Object.entries(DATA_STATUS_LABELS).map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={backupStatus}
+              onChange={(e) => setBackupStatus(e.target.value)}
+              className="w-44"
+              aria-label="Filter by backup status"
+            >
+              <option value="">All backup statuses</option>
+              {(['pending', 'copied', 'verified'] as const).map((v) => (
+                <option key={v} value={v}>
+                  {humanize(v)}
+                </option>
+              ))}
+            </Select>
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-40"
+              aria-label="Received from"
+            />
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-40"
+              aria-label="Received up to"
+            />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}

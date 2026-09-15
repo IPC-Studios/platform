@@ -10,7 +10,7 @@ import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
-import { uuidParam } from '../../lib/params'
+import { numberQuery, uuidParam } from '../../lib/params'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { rpcJson } from '../../lib/rpc'
@@ -31,8 +31,8 @@ export const personalExpensesRouter = new Hono<AppEnv>()
     // Lovable parity: search/category/party/date_from/date_to/min/max/gst/reverse/has_invoice.
     const dateFrom = c.req.query('date_from') ?? null
     const dateTo = c.req.query('date_to') ?? null
-    const minAmount = Number(c.req.query('min_amount') ?? c.req.query('amount_min') ?? '')
-    const maxAmount = Number(c.req.query('max_amount') ?? c.req.query('amount_max') ?? '')
+    const minAmount = numberQuery(c, 'min_amount', 'amount_min')
+    const maxAmount = numberQuery(c, 'max_amount', 'amount_max')
     const hasInvoice = c.req.query('has_invoice') ?? null
     const partyId = c.req.query('party_id') ?? null
     const gstTreatment = c.req.query('gst_treatment') ?? null
@@ -62,8 +62,8 @@ export const personalExpensesRouter = new Hono<AppEnv>()
               and (${reverseCharge}::boolean is null or pe.reverse_charge is not distinct from ${reverseCharge}::boolean)
               and (${dateFrom}::date is null or pe.expense_date >= ${dateFrom}::date)
               and (${dateTo}::date is null or pe.expense_date <= ${dateTo}::date)
-              and (${Number.isFinite(minAmount) ? minAmount : null}::numeric is null or pe.amount >= ${Number.isFinite(minAmount) ? minAmount : null}::numeric)
-              and (${Number.isFinite(maxAmount) ? maxAmount : null}::numeric is null or pe.amount <= ${Number.isFinite(maxAmount) ? maxAmount : null}::numeric)
+              and (${minAmount}::numeric is null or pe.amount >= ${minAmount}::numeric)
+              and (${maxAmount}::numeric is null or pe.amount <= ${maxAmount}::numeric)
               and (${hasInvoice}::text is null or (${hasInvoice} = 'true' and pe.invoice_number is not null) or (${hasInvoice} = 'false'))
              and (${cursor ? cursor : null}::timestamptz is null or pe.created_at < ${cursor ? cursor : null}::timestamptz)
            order by pe.created_at desc limit ${limit + 1}`

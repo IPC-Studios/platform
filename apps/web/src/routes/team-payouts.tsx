@@ -448,6 +448,14 @@ function ShootPayoutsTracker() {
         </CardContent>
       </Card>
 
+      {/* Two numbers on this screen look like they should agree with the
+          project's cost and they do not. Saying so here is cheaper than the
+          support conversation that follows when nobody does. */}
+      <p className="text-xs text-muted-foreground">
+        The settlement ledger tracks cash actually paid to team members. Project cost and profit still use
+        the assignment payout amount, and are not affected by what has been settled here.
+      </p>
+
       {filtered.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
           Nothing matches these filters.

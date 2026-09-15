@@ -60,7 +60,9 @@ function AttendanceLocation() {
     }
   }, [fence.data])
 
-  async function useMyLocation() {
+  // Not a hook — it reads the browser geolocation once, on a click. The old
+  // name made the hooks lint (rightly) treat it as one.
+  async function captureCurrentLocation() {
     setLocating(true)
     try {
       const pos = await new Promise<GeolocationPosition>((res, rej) =>
@@ -121,7 +123,7 @@ function AttendanceLocation() {
                   <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="e.g. 77.2090" required />
                 </div>
               </div>
-              <Button type="button" variant="outline" onClick={() => void useMyLocation()} disabled={locating} className="w-fit">
+              <Button type="button" variant="outline" onClick={() => void captureCurrentLocation()} disabled={locating} className="w-fit">
                 {locating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <MapPin className="mr-2 size-4" />}
                 Use my current location
               </Button>
