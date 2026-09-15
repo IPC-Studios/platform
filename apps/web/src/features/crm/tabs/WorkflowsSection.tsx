@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, GitBranch, Plus, Send, Square, Timer, Trash2, Workflow as WorkflowIcon, X, Zap } from 'lucide-react'
+import { ArrowDown, ArrowUp, GitBranch, Plus, Send, Sparkles, Square, Timer, Trash2, Workflow as WorkflowIcon, X, Zap } from 'lucide-react'
 import {
   createWorkflowRequest,
   type ConditionOp,
@@ -32,6 +32,7 @@ import {
   useTemplates,
   useUpdateWorkflow,
   useWorkflowEnrollments,
+  useSeedWorkflows,
   useWorkflows,
 } from '../api'
 import { STAGES } from '../leads'
@@ -110,6 +111,7 @@ export function WorkflowsSection() {
   const { data, isLoading, isError, error, refetch } = useWorkflows()
   const update = useUpdateWorkflow()
   const del = useDeleteWorkflow()
+  const seed = useSeedWorkflows()
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
@@ -132,9 +134,14 @@ export function WorkflowsSection() {
           </p>
         </div>
         {canEdit && editing === null && (
-          <Button size="sm" onClick={() => setEditing('new')}>
-            <Plus /> New workflow
-          </Button>
+          <>
+            <Button size="sm" variant="outline" onClick={() => seed.mutate()} disabled={seed.isPending}>
+              <Sparkles /> {seed.isPending ? 'Adding…' : 'Add the 7 defaults'}
+            </Button>
+            <Button size="sm" onClick={() => setEditing('new')}>
+              <Plus /> New workflow
+            </Button>
+          </>
         )}
       </div>
 

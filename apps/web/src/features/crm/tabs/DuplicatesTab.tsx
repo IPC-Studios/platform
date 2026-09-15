@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Merge, Undo2 } from 'lucide-react'
+import { Archive, Merge, Split, Undo2 } from 'lucide-react'
 import type { CrmLead } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
@@ -8,7 +8,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useDuplicateGroups, useMerge, useUnmerge } from '../api'
+import { useDuplicateGroups, useMerge, useResolveDuplicates, useUnmerge } from '../api'
 import { STAGE_LABEL } from '../leads'
 import { STAGE_TONE, prettyDate } from './shared'
 
@@ -22,11 +22,13 @@ import { STAGE_TONE, prettyDate } from './shared'
 export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: readonly CrmLead[]; allLeads: readonly CrmLead[] }) {
   const { data, isLoading, isError, error, refetch } = useDuplicateGroups()
   const merge = useMerge()
+  const resolve = useResolveDuplicates()
   const unmerge = useUnmerge()
   const confirm = useConfirm()
   const access = useAccess()
   const canEdit = access.hasAction('crm', 'edit')
   const [pick, setPick] = useState<Record<string, string>>({})
+  const busy = merge.isPending || resolve.isPending
 
   // Survivors with something merged into them, for the undo list.
   const merged = new Map<string, number>()
@@ -45,6 +47,29 @@ export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: read
       confirmLabel: 'Merge',
     })
     if (yes) merge.mutate({ survivor_id: survivor, duplicate_ids: dups })
+  }
+
+  /**
+   * The two answers that are not a merge. Archiving drops the duplicates
+   * without folding their notes in; "not duplicates" records that they are
+   * genuinely different people, so the group stops being offered.
+   */
+  async function doResolve(groupKey: string, ids: string[], action: 'archive' | 'keep_separate') {
+    const survivor = pick[groupKey]
+    if (!survivor) return
+    const dups = ids.filter((x) => x !== survivor)
+    const yes = await confirm({
+      title:
+        action === 'archive'
+          ? `Archive ${dups.length} lead${dups.length === 1 ? '' : 's'}?`
+          : 'Keep these leads separate?',
+      description:
+        action === 'archive'
+          ? 'They are archived without their notes moving onto the lead you picked.'
+          : 'They stay as they are and this group stops being flagged as a duplicate.',
+      confirmLabel: action === 'archive' ? 'Archive' : 'Keep separate',
+    })
+    if (yes) resolve.mutate({ survivor_id: survivor, duplicate_ids: dups, action })
   }
 
   const groups = data ?? []
@@ -88,9 +113,27 @@ export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: read
                 ))}
               </ul>
               {canEdit && (
-                <Button size="sm" className="mt-3" disabled={!pick[key] || merge.isPending} onClick={() => void doMerge(key, g.lead_ids)}>
-                  <Merge /> Merge into the selected lead
-                </Button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" disabled={!pick[key] || busy} onClick={() => void doMerge(key, g.lead_ids)}>
+                    <Merge /> Merge into the selected lead
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!pick[key] || busy}
+                    onClick={() => void doResolve(key, g.lead_ids, 'archive')}
+                  >
+                    <Archive /> Archive the others
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!pick[key] || busy}
+                    onClick={() => void doResolve(key, g.lead_ids, 'keep_separate')}
+                  >
+                    <Split /> Not duplicates
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>

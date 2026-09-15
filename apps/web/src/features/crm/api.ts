@@ -49,6 +49,10 @@ import {
   pipeline,
   savedView,
   sendTemplateResponse,
+  resolveDuplicateResponse,
+  seedWorkflowsResponse,
+  type SeedWorkflowsResponse,
+  type ResolveDuplicateRequest,
   unmergeLeadsResponse,
   updateLeadRequest,
   z,
@@ -237,6 +241,30 @@ export function useUnmerge() {
         responseSchema: unmergeLeadsResponse,
       }),
     (r) => `Restored ${r.restored} lead${r.restored === 1 ? '' : 's'}`,
+  )
+}
+
+/**
+ * The two non-merge answers to a duplicate group. `keep_separate` records that
+ * these really are different people so the pair stops being offered; `archive`
+ * drops the duplicates without folding their notes into the survivor.
+ */
+/**
+ * Install the 7 default automation rules. The migration that defined them only
+ * seeded companies that existed at the time, so an older studio needs this.
+ */
+export function useSeedWorkflows() {
+  return useCrmMutation<void, SeedWorkflowsResponse>(
+    () => callApi('/crm/workflows/seed', { method: 'POST', responseSchema: seedWorkflowsResponse }),
+    (r) => (r.seeded ? `Added ${r.seeded} automation${r.seeded === 1 ? '' : 's'}` : 'You already have all 7'),
+  )
+}
+
+export function useResolveDuplicates() {
+  return useCrmMutation(
+    (input: ResolveDuplicateRequest) =>
+      callApi('/crm/duplicates/resolve', { method: 'POST', body: input, responseSchema: resolveDuplicateResponse }),
+    (r) => `Resolved ${r.resolved} duplicate${r.resolved === 1 ? '' : 's'}`,
   )
 }
 

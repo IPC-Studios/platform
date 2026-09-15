@@ -6,6 +6,7 @@ import {
   enrollWorkflowRequest,
   enrollWorkflowResponse,
   recomputeScoresResponse,
+  seedWorkflowsResponse,
   scoringRule,
   updateScoringRuleRequest,
   updateWorkflowRequest,
@@ -269,4 +270,27 @@ export const crmWorkflowsRouter = new Hono<AppEnv>()
     const rescored = rows[0]?.n ?? 0
     await audit(c, { action: 'scoring.recompute', entityType: 'crm_scoring_rule', after: { rescored } })
     return c.json(recomputeScoresResponse.parse({ rescored }))
+  })
+
+  /**
+   * Seed the 7 default automation rules.
+   *
+   * 0105 shipped `seed_crm_automation_defaults()` and a comment promising this
+   * route; the route was never written, so a studio whose company predates the
+   * migration had no way to get the defaults. Inserts only what is missing, so
+   * pressing it twice is harmless.
+   */
+  .post('/workflows/seed', edit, async (c) => {
+    const auth = c.get('auth')
+    const rows = await attempt(c, 'crm.workflows_seed', () =>
+      withUser(
+        c.env,
+        auth.userId,
+        (sql) => sql<{ n: number }[]>`select seed_crm_automation_defaults(${auth.companyId}) as n`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not add the default automations.')
+    const seeded = rows[0]?.n ?? 0
+    await audit(c, { action: 'workflow.seed_defaults', entityType: 'crm_workflow', after: { seeded } })
+    return c.json(seedWorkflowsResponse.parse({ seeded }))
   })
