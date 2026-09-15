@@ -25,6 +25,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Migrations apply in order
+        run: bun run test:migrations
+
       - name: Unit tests
         run: bun run test
 
