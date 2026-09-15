@@ -88,6 +88,31 @@ work**:
 
 **At parity or better:** `/my-work`, `/settings/lookups`, `/settings/task-bundles`, `/platform/usage`
 
+## Status: all verified rows are closed
+
+| screen | finding | outcome |
+|---|---|---|
+| Project → Terms | real — whole authoring wizard absent | **closed** (`0129` + `TermsWizard`) |
+| Production board | real — KPI strip, 2 filters | **closed** |
+| Clients | 2 of 13 reported items real | **closed** (Address, Added) |
+| `/financials/profit` | capture artifact — ours has month/basis/allocation, per-project table with expandable variable, allocated and actual cost | no work |
+| `/team-payouts` | capture artifact — settlement, status, member and date filters, search, settlements all present | no work |
+| `/data-management` | capture artifact — status filter tabs, stat cards, CSV export present | no work |
+| `/settings/team-terms` | capture artifact — categories, archived toggle, template library present | no work |
+| `/settings/advanced` | noise — the rows are the settings nav and the dashboard setup-journey steps | no work |
+| `/dashboard` | capture empty on our side; setup journey exists | recheck only |
+
+The pattern holds: once a row is actually looked at, most of it evaporates.
+`/clients` was 13 → 2. Treat any unverified number as an upper bound, not a
+backlog.
+
+### Deliberate divergence found while verifying
+
+The old profitability table carries separate **Booked Revenue**, **Cash
+Profit** and **Booked Profit** columns. Ours has one Profit column driven by
+the cash/booked toggle, which is why the diff saw them as missing. Keeping
+ours: two columns that can never both be relevant at once is a worse table.
+
 ## Verified
 
 ### Production board — real, and the clearest next job
