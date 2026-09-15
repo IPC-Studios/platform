@@ -153,11 +153,20 @@ function Appearance() {
   function startPreview(preset: ThemePreset, font: string | null = null) {
     setPreview({ preset: preset.key, font })
     applyTheme(preset.key, font)
+    // A custom palette overrides the preset's tokens, so previewing one while
+    // custom is on would change nothing on screen. Lift the overlay for the
+    // duration of the preview; cancelling puts it back.
+    if (isCustomOn) applyCustom(null)
   }
 
   function cancelPreview() {
     setPreview(null)
     applyTheme(savedPreset, savedFont)
+    applyCustom(
+      data?.is_custom_theme
+        ? { enabled: true, colors: colorsFromTheme(data), radius: data.border_radius ?? null }
+        : null,
+    )
   }
 
   function toggleCustomTheme(next: boolean) {
@@ -223,7 +232,9 @@ function Appearance() {
           </Button>
           <Button
             disabled={!isOwner || save.isPending}
-            onClick={() => save.mutate({ preset_key: preview.preset, font_key: preview.font })}
+            onClick={() =>
+              save.mutate({ preset_key: preview.preset, font_key: preview.font, is_custom_theme: false })
+            }
           >
             {save.isPending ? 'Saving…' : 'Save this theme'}
           </Button>
@@ -246,7 +257,7 @@ function Appearance() {
         </CardContent>
       </Card>
 
-      {isCustomOn ? (
+      {isCustomOn && (
         <CustomizePanel
           colors={colorDraft}
           radius={radiusDraft}
@@ -256,25 +267,37 @@ function Appearance() {
           canEdit={isOwner}
           busy={save.isPending}
         />
-      ) : (
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      )}
+
+      {/* The gallery stays visible with a custom theme on. Hiding it took away
+          Preview and Apply entirely, and with them the only route back to a
+          preset — the toggle above was the sole way out, which reads as the
+          buttons being broken. Applying a preset turns the custom theme off,
+          which is what the server does with a preset-only PATCH anyway. */}
+      {isCustomOn && (
+        <p className="mt-6 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+          Your custom palette is active, so these presets are not currently in use. Applying one
+          switches the custom theme off.
+        </p>
+      )}
+
+      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Object.values(THEME_PRESETS).map((p) => (
             <ThemeCard
               key={p.key}
               preset={p}
               scheme={scheme}
-              applied={p.key === savedPreset}
+              applied={!isCustomOn && p.key === savedPreset}
               appliedFont={p.key === savedPreset ? savedFont : null}
               canEdit={isOwner}
               busy={save.isPending}
               previewing={preview?.preset === p.key}
               onPreview={() => startPreview(p)}
-              onApply={() => save.mutate({ preset_key: p.key, font_key: null })}
+              onApply={() => save.mutate({ preset_key: p.key, font_key: null, is_custom_theme: false })}
               onCustomizeFont={() => setFontFor(p)}
             />
           ))}
-        </div>
-      )}
+      </div>
 
       {fontFor && (
         <FontDialog

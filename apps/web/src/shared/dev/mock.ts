@@ -325,7 +325,11 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PATCH' && path === '/settings/company') return companyFx
   if (method === 'GET' && path === '/settings/theme') return { ...themeState }
   if (method === 'PATCH' && path === '/settings/theme') {
-    Object.assign(themeState, body as Record<string, unknown>)
+    // Mirror the server, which writes `is_custom_theme ?? false` — a
+    // preset-only PATCH turns the custom palette off. Merging blindly left it
+    // on here, so the preview lied about what applying a preset does.
+    const patch = body as Record<string, unknown>
+    Object.assign(themeState, patch, { is_custom_theme: patch['is_custom_theme'] ?? false })
     return { ...themeState }
   }
   if (method === 'GET' && path === '/allocation') return atStage(slots, 'full')
