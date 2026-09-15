@@ -206,8 +206,6 @@ export const financialsRouter = new Hono<AppEnv>()
   // attention counts + signals. Base RPC stays authoritative; extras merge in.
   .get('/gopo', requireModule('financials'), async (c) => {
     const parsed = gopoQuery.safeParse({
-      start_date: c.req.query('start_date') ?? undefined,
-      end_date: c.req.query('end_date') ?? undefined,
       include_salaries: c.req.query('include_salaries') ?? undefined,
     })
     const data = await attempt(c, 'financials.gopo', () =>

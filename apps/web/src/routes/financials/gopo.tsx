@@ -1,10 +1,10 @@
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { Input, Label } from '@/shared/ui/input'
 import { Switch } from '@/shared/ui/switch'
 import { Button } from '@/shared/ui/button'
 import { humanize } from '@/shared/ui/format'
@@ -35,13 +35,8 @@ function num(v: unknown, fallback = 0): number {
 }
 
 function GopoContent() {
-  // Lovable parity FilterBar: date range + include salaries.
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
   const [includeSalaries, setIncludeSalaries] = useState(true)
   const { data, isLoading, isError, refetch, isFetching } = useGopoSummary({
-    start_date: startDate || undefined,
-    end_date: endDate || undefined,
     include_salaries: includeSalaries,
   })
 
@@ -113,39 +108,20 @@ function GopoContent() {
         }
       />
 
-      {/* FilterBar (Lovable parity) */}
       <Card>
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="min-w-[140px] flex-1">
-            <Label htmlFor="gopo-from">From</Label>
-            <Input id="gopo-from" type="date" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} className="mt-1" />
-          </div>
-          <div className="min-w-[140px] flex-1">
-            <Label htmlFor="gopo-to">To</Label>
-            <Input id="gopo-to" type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} className="mt-1" />
-          </div>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="min-w-[200px]">
             <Switch checked={includeSalaries} onChange={setIncludeSalaries} label="Include salaries" description="Add salary costs" />
           </div>
-          <div className="flex gap-2 sm:ml-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setStartDate('')
-                setEndDate('')
-                setIncludeSalaries(true)
-              }}
-            >
-              Reset
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" asChild className="sm:ml-auto">
+            <Link to="/financials/profit">Pick a month instead</Link>
+          </Button>
         </CardContent>
       </Card>
 
       <div className="rounded-lg border border-muted bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Date range filters payments, expenses, and recent activity. Project value reflects the full project value
-        for projects in the selected range. Personal expenses are treated as overhead, not project-level expenses.
+        This scorecard reads the studio&apos;s whole history. For a single month, or a date range, use Monthly
+        profit or Financials. Personal expenses are treated as overhead here, not project-level expenses.
       </div>
 
       {/* Health Score */}

@@ -80,9 +80,18 @@ export const gopoSummary = z.object({
 })
 export type GopoSummary = z.infer<typeof gopoSummary>
 
+/**
+ * The GOPO scorecard is an all-time read of the studio. It used to accept a
+ * date range that gopo_summary() has no parameters for and the router never
+ * applied to anything — the pickers moved, the numbers did not, and a caption
+ * under them claimed the range filtered payments, expenses and activity.
+ *
+ * A date-scoped read already exists twice over: Financials (/financials) and
+ * Monthly profit (/financials/profit). So the range is gone from here rather
+ * than reimplemented against a different definition of "revenue in a range"
+ * than either of those uses.
+ */
 export const gopoQuery = z.object({
-  start_date: z.string().nullish(),
-  end_date: z.string().nullish(),
   include_salaries: z.coerce.boolean().default(true),
 })
 export type GopoQuery = z.infer<typeof gopoQuery>

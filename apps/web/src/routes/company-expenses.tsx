@@ -8,6 +8,7 @@ const PAGE_SIZE = 20
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { HowToUse } from '@/shared/ui/how-to-use'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
@@ -218,6 +219,17 @@ function Expenses() {
             <AddExpenseDialog />
           </div>
         }
+      />
+
+      <HowToUse
+        className="mt-4"
+        title="Track studio expenses"
+        description="What the studio spends on itself — team payments, travel, rent, equipment, editing and operations."
+        steps={[
+          'Add the category and amount.',
+          'Link it to a project when the cost belongs to one.',
+          'Read it back on Monthly profit and the project’s margin.',
+        ]}
       />
 
       {/* SummaryCards. Money comes from the server, over the whole date range —

@@ -6,6 +6,7 @@ import { buildMailtoUrl, friendlyInvoiceError, type ReceivedPayment } from '@ipc
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { HowToUse } from '@/shared/ui/how-to-use'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
@@ -83,6 +84,16 @@ function Billing() {
           <InvoicesSection />
         </TabsContent>
         <TabsContent value="payments">
+          <HowToUse
+            className="mb-4"
+            title="Track client payments"
+            description="Money actually received, what is still pending, and the balance on each project."
+            steps={[
+              'Add the payment details as they come in.',
+              'Link the payment to its project or client.',
+              'Watch the pending balance close.',
+            ]}
+          />
           <PaymentsSection />
         </TabsContent>
       </Tabs>

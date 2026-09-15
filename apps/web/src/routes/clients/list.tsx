@@ -3,6 +3,7 @@ import { Check, Download, Eye, Search, Trash2, Users, X } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { HowToUse } from '@/shared/ui/how-to-use'
 import { Input, Select } from '@/shared/ui/input'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { SkeletonList } from '@/shared/ui/skeleton'
@@ -122,6 +123,17 @@ function ClientsList() {
             <ClientFormDialog />
           </div>
         }
+      />
+
+      <HowToUse
+        className="mt-4"
+        title="Clients"
+        description="Your booked clients and customer records — saved once, reused by every project."
+        steps={[
+          'Add the client’s name and contact details.',
+          'Open the profile to see their history and documents.',
+          'Create their wedding or event project from there.',
+        ]}
       />
 
       <div className="mt-4 grid grid-cols-1 gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-6">
