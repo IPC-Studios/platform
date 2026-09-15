@@ -88,6 +88,25 @@ work**:
 
 **At parity or better:** `/my-work`, `/settings/lookups`, `/settings/task-bundles`, `/platform/usage`
 
+## Multi-step pass: the wizards
+
+The deepest level — walking each multi-step flow step by step on both apps.
+
+| Flow | Old | Ours | Outcome |
+|---|---|---|---|
+| Create project | 5 steps: Project & Client, Shoots, Deliverables, Billing, Review | same 5, same order | parity, plus Discard, per-shoot remove and status |
+| Add team member | 6 steps: Engagement, Login, Contact, Role, Details, Review | same 6, same order | parity |
+| Invoice | Save Draft / Save & Send, qty, tax %, line presets, bank/UPI | Status select (Draft/Sent), qty, gst_rate, line presets, bank details, terms, print layout, GSTIN | parity, plus import package/deliverables/balance from a project |
+
+The shoot chips (Engagement, Haldi, Mehendi, Wedding Day, Reception, Couple
+Shoot), the deliverable presets (Raw Photos, Edited Photos, Highlight Film,
+Full Wedding Film, Reel, Teaser, Full Ceremony Video, Data Sorting, Quality
+Check) and the three wedding packages all match name for name.
+
+One shape difference kept: their invoice has **Save Draft** and **Save & Send**
+as two buttons; ours has one Status select with the same two values. Same
+capability, one fewer way to be confused about what was saved.
+
 ## Dialog pass: the add/edit forms
 
 The level below tabs. Opening each app's primary "add" modal and comparing the
