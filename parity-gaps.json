@@ -1,0 +1,831 @@
+[
+ {
+  "path": "/production-board",
+  "ours": "/production-board",
+  "old_items": 35,
+  "missing": 25,
+  "pct": 71,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "All1",
+    "Overdue0",
+    "Due Today0",
+    "Pending Review0",
+    "In Progress0",
+    "Completed0",
+    "Needs Attention0"
+   ],
+   "actions": [
+    "Status view",
+    "People view",
+    "Data Copy view",
+    "Any data",
+    "Completed0Done & delivered",
+    "Needs Attention0All clear",
+    "Change lane color",
+    "Drag to move",
+    "Details"
+   ],
+   "tags": [
+    "2026-11-16",
+    "1 linked",
+    "No data yet"
+   ],
+   "stats": [
+    "Unassigned",
+    "Assigned / Not Started",
+    "Pending Review",
+    "Revision Required",
+    "Completed / Approved",
+    "Sent to Client"
+   ]
+  }
+ },
+ {
+  "path": "/financials/profit",
+  "ours": "/financials/profit",
+  "old_items": 23,
+  "missing": 23,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "cols": [
+    "Booked Revenue",
+    "Payments",
+    "Variable Cost",
+    "Allocated Fixed",
+    "Actual Cost",
+    "Cash Profit",
+    "Booked Profit",
+    "Margin",
+    "Date",
+    "Category",
+    "Expense",
+    "Amount",
+    "Allocation",
+    "Actions"
+   ],
+   "actions": [
+    "September 2026",
+    "Cash Basis",
+    "Equal by Project Count"
+   ],
+   "stats": [
+    "Salaried Staff",
+    "Intern Stipends",
+    "Contractor Retainers",
+    "Commission Base",
+    "Total Fixed Team Cost",
+    "Total Fixed Overhead"
+   ]
+  }
+ },
+ {
+  "path": "/settings/project-templates",
+  "ours": "/project-templates",
+  "old_items": 23,
+  "missing": 23,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Import to company templates",
+    "Keep only on this device",
+    "Dismiss",
+    "All shoot types",
+    "Archive"
+   ],
+   "tags": [
+    "Birthday",
+    "Engagement",
+    "Haldi",
+    "Haldi Bride",
+    "Haldi Groom",
+    "Kirtan",
+    "Mahuratam",
+    "Mehendi",
+    "Wedding Day",
+    "Reception",
+    "Couple Shoot",
+    "Sangeet",
+    "Cocktail",
+    "Ring Ceremony",
+    "Roka",
+    "Tilak",
+    "Pre-Wedding Shoot",
+    "used 1\u00d7"
+   ]
+  }
+ },
+ {
+  "path": "/settings/company",
+  "ours": "/settings",
+  "old_items": 22,
+  "missing": 22,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Company name *",
+    "Your name *",
+    "Email",
+    "Phone",
+    "Photo URL",
+    "IPC Studios",
+    "IPC Studios Pvt. Ltd.",
+    "https://example.com",
+    "Upload",
+    "22AAAAA0000A1Z5",
+    "hello@example.com",
+    "+91 98765 43210",
+    "India",
+    "Thank you for choosing us.",
+    "Your role",
+    "Plan",
+    "Plan expiry",
+    "Days remaining",
+    "Plan active"
+   ],
+   "actions": [
+    "Cancel",
+    "Save changes"
+   ],
+   "tags": [
+    "admin"
+   ]
+  }
+ },
+ {
+  "path": "/follow-ups",
+  "ours": "/follow-ups",
+  "old_items": 26,
+  "missing": 20,
+  "pct": 77,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "Uncontacted",
+    "Follow-ups (today)",
+    "Recently Active"
+   ],
+   "actions": [
+    "See what needs action today.",
+    "See overdue, today, and upcoming follow-ups.",
+    "Track leads by sales stage.",
+    "Saved WhatsApp / message scripts.",
+    "Team performance and assigned leads.",
+    "Auto-assign new leads.",
+    "Find and clean repeated enquiries.",
+    "Save Current View",
+    "Apply Due Today filter",
+    "More Filters",
+    "Source: Any source",
+    "Stage: Any stage",
+    "Quality: Any quality",
+    "Follow-up: Any follow-up",
+    "Assigned: Anyone",
+    "Import CSV",
+    "Connect Source / Webhook"
+   ]
+  }
+ },
+ {
+  "path": "/team-payouts",
+  "ours": "/team-payouts",
+  "old_items": 18,
+  "missing": 18,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "cols": [
+    "Date",
+    "Project / Shoot",
+    "Role",
+    "Due",
+    "Paid",
+    "Settlement",
+    "Actions"
+   ],
+   "actions": [
+    "Billing",
+    "All time",
+    "Payment history",
+    "Mark Paid"
+   ],
+   "tags": [
+    "Due \u20b90",
+    "Paid \u20b90",
+    "Pending \u20b90",
+    "Unpaid"
+   ],
+   "stats": [
+    "Total Due",
+    "Partially Paid",
+    "Members"
+   ]
+  }
+ },
+ {
+  "path": "/settings/advanced",
+  "ours": "/settings/advanced",
+  "old_items": 19,
+  "missing": 18,
+  "pct": 95,
+  "ours_empty": false,
+  "detail": {
+   "steps": [
+    "Step 1 \u2014 Set up your team",
+    "Step 2 \u2014 Add your first client",
+    "Step 3 \u2014 Create your first project",
+    "Step 4 \u2014 Book team for shoots",
+    "Step 5 \u2014 Track data and backup",
+    "Step 6 \u2014 Track payments / invoices",
+    "Step 7 \u2014 Track project health"
+   ],
+   "actions": [
+    "Team Directory",
+    "Clients",
+    "Create Project",
+    "Team Booking",
+    "Data Management",
+    "Payments",
+    "Project Tracking",
+    "Studio AccessPlatform-level studio management.",
+    "Source LogsRaw lead source log entries."
+   ],
+   "tags": [
+    "Done",
+    "Current step"
+   ]
+  }
+ },
+ {
+  "path": "/dashboard",
+  "ours": "/dashboard",
+  "old_items": 18,
+  "missing": 14,
+  "pct": 78,
+  "ours_empty": false,
+  "detail": {
+   "steps": [
+    "Step 1 \u2014 Set up your team",
+    "Step 2 \u2014 Add your first client",
+    "Step 3 \u2014 Create your first project",
+    "Step 4 \u2014 Book team for shoots",
+    "Step 5 \u2014 Track data and backup",
+    "Step 6 \u2014 Track payments / invoices",
+    "Step 7 \u2014 Track project health"
+   ],
+   "actions": [
+    "Team Directory",
+    "Clients",
+    "Payments"
+   ],
+   "tags": [
+    "Done",
+    "Current step",
+    "Critical",
+    "Completion below 50% (0%)"
+   ]
+  }
+ },
+ {
+  "path": "/shoots",
+  "ours": "/shoots",
+  "old_items": 15,
+  "missing": 13,
+  "pct": 87,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Team Booking",
+    "Create from Project",
+    "All months",
+    "All assignments",
+    "All projects",
+    "All roles",
+    "Team"
+   ],
+   "tags": [
+    "Partially assigned",
+    "Thu, Sep 17 \u00b7 15:00",
+    "Candid Photographer",
+    "Traditional Videographer",
+    "Drone Shooter",
+    "Traditional Photographer"
+   ]
+  }
+ },
+ {
+  "path": "/settings/subscription",
+  "ours": "/subscription",
+  "old_items": 12,
+  "missing": 12,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Plan",
+    "Plan expiry",
+    "Days remaining",
+    "Subscription source"
+   ],
+   "actions": [
+    "Free Trial Included",
+    "Renew \u00b7 Monthly",
+    "Renew \u00b7 Yearly",
+    "Renew \u00b7 2-Year Plan"
+   ],
+   "tags": [
+    "Trial",
+    "Most Popular",
+    "Save \u20b95,988/year vs monthly",
+    "Maximum Savings"
+   ]
+  }
+ },
+ {
+  "path": "/project-tracking",
+  "ours": "/project-tracking",
+  "old_items": 24,
+  "missing": 12,
+  "pct": 50,
+  "ours_empty": false,
+  "detail": {
+   "cols": [
+    "Project / Client",
+    "Tasks",
+    "Deliverables",
+    "Data",
+    "Overdue",
+    "Review",
+    "Risk"
+   ],
+   "tags": [
+    "High Risk\u00b7 50",
+    "Data missing",
+    "Completion below 50% (0%)",
+    "Missing"
+   ],
+   "stats": [
+    "Delivery Progress"
+   ]
+  }
+ },
+ {
+  "path": "/data-management",
+  "ours": "/data-management",
+  "old_items": 13,
+  "missing": 11,
+  "pct": 85,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "All0",
+    "Data Missing0",
+    "Primary Pending0",
+    "Backup Pending0",
+    "Ready0",
+    "At Risk0"
+   ],
+   "actions": [
+    "Home",
+    "Records",
+    "Storage Locations",
+    "All data statuses",
+    "All backup statuses"
+   ]
+  }
+ },
+ {
+  "path": "/team-allocation",
+  "ours": "/team-allocation",
+  "old_items": 15,
+  "missing": 11,
+  "pct": 73,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Name, email, phone, service\u2026"
+   ],
+   "actions": [
+    "Book slot",
+    "All roles"
+   ],
+   "stats": [
+    "Shoots",
+    "Required",
+    "Assigned",
+    "Unassigned shoots",
+    "Active members",
+    "Booked",
+    "Available",
+    "Released"
+   ]
+  }
+ },
+ {
+  "path": "/attendance",
+  "ours": "/attendance",
+  "old_items": 15,
+  "missing": 8,
+  "pct": 53,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Date",
+    "Type"
+   ],
+   "cols": [
+    "Employee",
+    "In",
+    "Out",
+    "Duration",
+    "Actions"
+   ],
+   "opts": [
+    "Manager"
+   ]
+  }
+ },
+ {
+  "path": "/employees",
+  "ours": "/employees",
+  "old_items": 22,
+  "missing": 8,
+  "pct": 36,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "Freelance / Non-salaried"
+   ],
+   "fields": [
+    "Min salary",
+    "Max salary"
+   ],
+   "cols": [
+    "Type",
+    "Work Type"
+   ],
+   "actions": [
+    "Manage Access",
+    "Share login",
+    "Reset password"
+   ]
+  }
+ },
+ {
+  "path": "/reminders",
+  "ours": "/reminders",
+  "old_items": 6,
+  "missing": 6,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Due from",
+    "Due to",
+    "Overdue only"
+   ],
+   "actions": [
+    "Any status",
+    "Any priority",
+    "Any entity"
+   ]
+  }
+ },
+ {
+  "path": "/settings/roles",
+  "ours": "/settings/roles",
+  "old_items": 6,
+  "missing": 6,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "cols": [
+    "Team Member",
+    "Type",
+    "Action"
+   ],
+   "actions": [
+    "Remove Photographer",
+    "Assign role"
+   ],
+   "tags": [
+    "Default"
+   ]
+  }
+ },
+ {
+  "path": "/settings/team-terms",
+  "ours": "/settings/team-terms",
+  "old_items": 11,
+  "missing": 6,
+  "pct": 55,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Production",
+    "Archived",
+    "Blank template",
+    "Preview",
+    "Use Template"
+   ],
+   "tags": [
+    "Acknowledgement required"
+   ]
+  }
+ },
+ {
+  "path": "/clients",
+  "ours": "/clients",
+  "old_items": 11,
+  "missing": 5,
+  "pct": 45,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Name, phone, email, relation, notes\u2026",
+    "e.g. referral, repeat"
+   ],
+   "actions": [
+    "Date added",
+    "Newest first",
+    "Harsh Solanki"
+   ]
+  }
+ },
+ {
+  "path": "/facebook",
+  "ours": "/lead-sources",
+  "old_items": 4,
+  "missing": 4,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Connect Facebook",
+    "Copy"
+   ],
+   "tags": [
+    "Built",
+    "Needs Setup"
+   ]
+  }
+ },
+ {
+  "path": "/notifications",
+  "ours": "/notifications",
+  "old_items": 7,
+  "missing": 4,
+  "pct": 57,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "e.g. reminder_due"
+   ],
+   "actions": [
+    "Mark all read",
+    "All severities",
+    "Include dismissed"
+   ]
+  }
+ },
+ {
+  "path": "/enquiries",
+  "ours": "/enquiries",
+  "old_items": 8,
+  "missing": 4,
+  "pct": 50,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "From date",
+    "To date"
+   ],
+   "actions": [
+    "Any source",
+    "Newest first"
+   ]
+  }
+ },
+ {
+  "path": "/settings/attendance-location",
+  "ours": "/settings/attendance-location",
+  "old_items": 5,
+  "missing": 3,
+  "pct": 60,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Latitude",
+    "Longitude",
+    "Radius (meters)"
+   ]
+  }
+ },
+ {
+  "path": "/billing",
+  "ours": "/billing",
+  "old_items": 6,
+  "missing": 3,
+  "pct": 50,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "GST"
+   ],
+   "actions": [
+    "Settings",
+    "Clear"
+   ]
+  }
+ },
+ {
+  "path": "/financials/gopo",
+  "ours": "/financials/gopo",
+  "old_items": 6,
+  "missing": 3,
+  "pct": 50,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Financial Overview",
+    "Include salaries"
+   ],
+   "tags": [
+    "GOPO Score \u00b7 Strong"
+   ]
+  }
+ },
+ {
+  "path": "/settings/theme",
+  "ours": "/settings/appearance",
+  "old_items": 6,
+  "missing": 3,
+  "pct": 50,
+  "ours_empty": false,
+  "detail": {
+   "tabs": [
+    "Templates",
+    "Customize"
+   ],
+   "actions": [
+    "Reset to Default IPC Theme"
+   ]
+  }
+ },
+ {
+  "path": "/personal-expenses",
+  "ours": "/personal-expenses",
+  "old_items": 7,
+  "missing": 3,
+  "pct": 43,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "e.g. Travel"
+   ],
+   "actions": [
+    "Manage Parties",
+    "All treatments"
+   ]
+  }
+ },
+ {
+  "path": "/referrals",
+  "ours": "/referrals",
+  "old_items": 2,
+  "missing": 2,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "fields": [
+    "Name, phone, or email"
+   ],
+   "actions": [
+    "All projects"
+   ]
+  }
+ },
+ {
+  "path": "/tasks",
+  "ours": "/tasks",
+  "old_items": 12,
+  "missing": 2,
+  "pct": 17,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Full Wedding Film",
+    "Complete"
+   ]
+  }
+ },
+ {
+  "path": "/financials",
+  "ours": "/financials",
+  "old_items": 1,
+  "missing": 1,
+  "pct": 100,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "ExpensesTrack project and business expenses."
+   ]
+  }
+ },
+ {
+  "path": "/platform/studios",
+  "ours": "/platform/studios",
+  "old_items": 1,
+  "missing": 1,
+  "pct": 100,
+  "ours_empty": true,
+  "detail": {
+   "actions": [
+    "Back to dashboard"
+   ]
+  }
+ },
+ {
+  "path": "/project-documents",
+  "ours": "/project-documents",
+  "old_items": 3,
+  "missing": 1,
+  "pct": 33,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Home"
+   ]
+  }
+ },
+ {
+  "path": "/company-expenses",
+  "ours": "/company-expenses",
+  "old_items": 4,
+  "missing": 1,
+  "pct": 25,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "Manage Categories"
+   ]
+  }
+ },
+ {
+  "path": "/my-work",
+  "ours": "/my-work",
+  "old_items": 6,
+  "missing": 1,
+  "pct": 17,
+  "ours_empty": false,
+  "detail": {
+   "stats": [
+    "Revision / Overdue"
+   ]
+  }
+ },
+ {
+  "path": "/projects",
+  "ours": "/projects",
+  "old_items": 10,
+  "missing": 1,
+  "pct": 10,
+  "ours_empty": false,
+  "detail": {
+   "actions": [
+    "My weddingHarsh Solanki \u00b7 14 Sept 2026"
+   ]
+  }
+ },
+ {
+  "path": "/settings/lookups",
+  "ours": "/settings/lookups",
+  "old_items": 1,
+  "missing": 0,
+  "pct": 0,
+  "ours_empty": false,
+  "detail": {}
+ },
+ {
+  "path": "/settings/task-bundles",
+  "ours": "/settings/task-bundles",
+  "old_items": 0,
+  "missing": 0,
+  "pct": 0,
+  "ours_empty": false,
+  "detail": {}
+ },
+ {
+  "path": "/platform/usage",
+  "ours": "/platform/usage",
+  "old_items": 0,
+  "missing": 0,
+  "pct": 0,
+  "ours_empty": true,
+  "detail": {}
+ }
+]

@@ -88,11 +88,35 @@ work**:
 
 **At parity or better:** `/my-work`, `/settings/lookups`, `/settings/task-bundles`, `/platform/usage`
 
+## Deep pass: fields, tags and cards
+
+A third sweep extended the fingerprint past controls into the things a list
+screen is mostly *made* of — status tags, the stat tiles across the top, and
+the `<dt>` captions inside cards. It found four candidates. Three were the
+harness again:
+
+| Claimed | Reality |
+|---|---|
+| `/financials/profit` — Salaried Staff, Intern Stipends, Contractor Retainers, Commission Base tiles | All four render. Capture artifact. |
+| `/team-payouts` — Mark Paid, Payment history, Due/Paid/Settlement | Mark paid and a settlement-history dialog both exist; ours renders cards where theirs renders a table. |
+| `/shoots` — filters | Ours filters by search, status, date and sort; theirs by month, assignment, project and role. Different axes, not fewer. |
+
+**Genuinely still missing, all on the production board:**
+
+- **Change lane colour** — per-lane customisation
+- **Card details panel** — expanding a card in place
+- **"Any data" filter** — needs a data-custody flag on tasks, which the schema
+  does not carry. Building it would mean matching everything, so it stays out
+  until the flag exists.
+
+Everything else on both apps now matches or is a deliberate divergence.
+
 ## Status: all verified rows are closed
 
 | screen | finding | outcome |
 |---|---|---|
 | Project → Terms | real — whole authoring wizard absent | **closed** (`0129` + `TermsWizard`) |
+| Project → Terms, step 3 | real — send screen was one button | **closed** (link, email draft, manual share, history) |
 | Production board | real — KPI strip, 2 filters | **closed** |
 | Clients | 2 of 13 reported items real | **closed** (Address, Added) |
 | `/financials/profit` | capture artifact — ours has month/basis/allocation, per-project table with expandable variable, allocated and actual cost | no work |

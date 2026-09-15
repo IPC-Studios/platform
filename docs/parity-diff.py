@@ -11,7 +11,7 @@ import json
 import re
 import sys
 
-KINDS = ['tabs', 'steps', 'fields', 'cols', 'actions', 'opts']
+KINDS = ['tabs', 'steps', 'fields', 'cols', 'actions', 'tags', 'stats', 'opts']
 
 # An accessible name often carries the row's subject: "Delete Priya Sharma".
 # The old app labels the same control just "Delete". Reduce both to the verb so
