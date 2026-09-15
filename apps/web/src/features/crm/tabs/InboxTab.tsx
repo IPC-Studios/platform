@@ -394,6 +394,16 @@ export function InboxTab({
             </option>
           ))}
         </Select>
+        <Select
+          value={query.quality}
+          onChange={(e) => onQuery({ ...query, quality: e.target.value as LeadQuery['quality'] })}
+          aria-label="Quality"
+        >
+          <option value="all">Any quality</option>
+          <option value="hot">Hot</option>
+          <option value="warm">Warm</option>
+          <option value="cold">Cold</option>
+        </Select>
       </div>
 
       {selected.size > 0 && (

@@ -1,4 +1,4 @@
-import type { CrmLead, LeadStatus } from '@ipc/contracts'
+import type { CrmLead, LeadQuality, LeadStatus } from '@ipc/contracts'
 import { LEGACY_STAGES, LEGACY_STAGE_LABEL } from '@ipc/domain'
 
 /**
@@ -110,9 +110,21 @@ export interface LeadQuery {
   filters: readonly QuickFilter[]
   status: LeadStatus | 'all'
   assignee: string | 'all'
+  /**
+   * Hot / warm / cold. The Hot chip only ever matched the binary is_hot flag,
+   * so there was no way to ask for warm leads — or to exclude cold ones —
+   * even though every lead carries a three-state quality.
+   */
+  quality: LeadQuality | 'all'
 }
 
-export const EMPTY_QUERY: LeadQuery = { search: '', filters: [], status: 'all', assignee: 'all' }
+export const EMPTY_QUERY: LeadQuery = {
+  search: '',
+  filters: [],
+  status: 'all',
+  assignee: 'all',
+  quality: 'all',
+}
 
 function matchesSearch(l: CrmLead, search: string): boolean {
   const needle = search.trim().toLowerCase()
@@ -135,6 +147,7 @@ export function applyQuery(
   return leads
     .filter((l) => query.filters.every((f) => PREDICATES[f]!(l, now)))
     .filter((l) => (query.status === 'all' ? true : l.status === query.status))
+    .filter((l) => (query.quality === 'all' ? true : l.quality === query.quality))
     .filter((l) =>
       query.assignee === 'all'
         ? true

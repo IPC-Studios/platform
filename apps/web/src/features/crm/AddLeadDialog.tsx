@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Plus } from 'lucide-react'
-import { createLeadRequest, type CreateLeadRequest } from '@ipc/contracts'
+import { createLeadRequest, type CreateLeadRequest, type LeadQuality } from '@ipc/contracts'
 import { fieldErrors, type FieldErrors } from '@/shared/forms/field-errors'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
@@ -65,6 +65,13 @@ export function AddLeadDialog({
   const [followUpAt, setFollowUpAt] = useState('')
   const [groupName, setGroupName] = useState('')
   const [stageId, setStageId] = useState('')
+  /**
+   * Hot / warm / cold. createLeadRequest, the leads filter and the update
+   * patch have all carried `quality` from the start, and a trigger keeps it
+   * consistent with the is_hot flag the Hot chip reads — but no screen ever
+   * offered it, so every lead was created without one.
+   */
+  const [quality, setQuality] = useState<LeadQuality | ''>('')
   const [errors, setErrors] = useState<FieldErrors<Field>>({})
 
   function reset() {
@@ -84,6 +91,7 @@ export function AddLeadDialog({
     setFollowUpAt('')
     setGroupName('')
     setStageId('')
+    setQuality('')
     setErrors({})
   }
 
@@ -103,6 +111,7 @@ export function AddLeadDialog({
       ...(alternatePhone.trim() ? { alternate_phone: alternatePhone.trim() } : {}),
       ...(city.trim() ? { city: city.trim() } : {}),
       ...(assignedTo ? { assigned_to: assignedTo } : {}),
+      ...(quality ? { quality } : {}),
       ...(followUpAt ? { follow_up_at: new Date(followUpAt).toISOString() } : {}),
       ...(groupName.trim() ? { group_name: groupName.trim() } : {}),
       ...(stageId ? { stage_id: stageId } : {}),
@@ -281,6 +290,15 @@ export function AddLeadDialog({
                 onChange={(e) => setGroupName(e.target.value)}
                 placeholder="Wedding 2027, Corporate…"
               />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Quality</Label>
+              <Select value={quality} onChange={(e) => setQuality(e.target.value as LeadQuality | '')}>
+                <option value="">Not rated yet</option>
+                <option value="hot">Hot — ready to book</option>
+                <option value="warm">Warm — interested, no date</option>
+                <option value="cold">Cold — just looking</option>
+              </Select>
             </div>
           </div>
 

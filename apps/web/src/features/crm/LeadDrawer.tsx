@@ -16,7 +16,7 @@ import {
   Square,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CrmLead, CrmQuote } from '@ipc/contracts'
+import type { CrmLead, CrmQuote, LeadQuality } from '@ipc/contracts'
 import { REQUIRED_FIELD_LABEL, missingForStage, sortStages } from '@ipc/domain'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
@@ -274,6 +274,23 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                     {m.name}
                   </option>
                 ))}
+              </Select>
+            </div>
+            {/* Hot / warm / cold. The Mark hot button above only ever set the
+                binary flag; a trigger keeps the two consistent either way, so
+                picking "hot" here lights that button up too. */}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="lead-quality">Quality</Label>
+              <Select
+                id="lead-quality"
+                value={lead.quality ?? ''}
+                onChange={(e) => patch({ quality: (e.target.value || null) as LeadQuality | null })}
+                disabled={update.isPending || !canEdit}
+              >
+                <option value="">Not rated yet</option>
+                <option value="hot">Hot — ready to book</option>
+                <option value="warm">Warm — interested, no date</option>
+                <option value="cold">Cold — just looking</option>
               </Select>
             </div>
           </div>
