@@ -27,6 +27,8 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
+import { MetaConnectionCard } from '@/features/facebook/MetaConnectionCard'
+import { ImportLogPanel } from '@/features/facebook/ImportLogPanel'
 
 const list = leadSourceRow.array()
 const noContent = z.any()
@@ -86,6 +88,10 @@ function LeadSources() {
       />
 
       <div className="mt-6">
+        <MetaConnectionCard />
+      </div>
+
+      <div className="mt-6">
         {isLoading ? (
           <SkeletonCards count={3} />
         ) : isError ? (
@@ -131,6 +137,7 @@ function useSourceMutation<TInput>(fn: (input: TInput) => Promise<unknown>, succ
 
 function SourceCard({ source }: { source: LeadSourceRow }) {
   const [showSetup, setShowSetup] = useState(false)
+  const [showLog, setShowLog] = useState(false)
   const [copied, setCopied] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [label, setLabel] = useState(source.label ?? '')
@@ -251,6 +258,17 @@ function SourceCard({ source }: { source: LeadSourceRow }) {
         </button>
 
         {showSetup && <SetupHelp kind={source.kind} url={url} />}
+
+        <button
+          type="button"
+          onClick={() => setShowLog((v) => !v)}
+          className="mt-3 flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+        >
+          <ChevronDown className={cn('size-4 transition-transform', showLog && 'rotate-180')} />
+          Import log
+        </button>
+
+        {showLog && <ImportLogPanel sourceId={source.id} sourceLabel={source.label ?? source.source_key} />}
       </CardContent>
     </Card>
   )
