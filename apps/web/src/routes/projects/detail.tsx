@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   ArrowRight,
   Briefcase,
@@ -15,12 +16,16 @@ import {
   IndianRupee,
   LayoutGrid,
   Link2,
+  Mail,
+  MessageCircle,
   Package,
   PauseCircle,
   Pencil,
   Phone,
   Plus,
+  Printer,
   Receipt,
+  Eye,
   FileCheck,
   Trash2,
   Users,
@@ -51,8 +56,12 @@ import {
   useSetDeliverableSources,
   useDeleteDeliverable,
   useAddPayment,
+  useDeletePayment,
   useDeleteProject,
 } from '@/features/projects/api'
+import { useReferralCampaigns } from '@/features/referrals/api'
+import { useProjectFinancials } from '@/features/financials/api'
+import { EntityReminders } from '@/features/reminders/EntityReminders'
 import { ShootsTab } from '@/features/projects/tabs/ShootsTab'
 import { CompletedWorkTab } from '@/features/projects/tabs/CompletedWorkTab'
 import { TermsTab } from '@/features/projects/tabs/TermsTab'
@@ -71,6 +80,7 @@ const TABS = [
   { value: 'expenses', label: 'Expenses', icon: Receipt },
   { value: 'tasks', label: 'Tasks', icon: CheckSquare },
   { value: 'data', label: 'Data', icon: Database },
+  { value: 'referrals', label: 'Referrals', icon: Gift },
 ] as const
 type Tab = (typeof TABS)[number]['value']
 
@@ -128,6 +138,7 @@ function ProjectDetail() {
   const removeProject = useDeleteProject()
   const confirm = useConfirm()
   const [tab, setTab] = useState<Tab>('overview')
+  const [groupByShoot, setGroupByShoot] = useState(false)
 
   if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
@@ -198,7 +209,13 @@ function ProjectDetail() {
               status={data.status}
               packageCost={data.package_cost}
               showQuotation={data.show_quotation}
+              received={received}
             />
+            <Button variant="outline" size="sm" asChild title="Open the full-page editor with live shoot planning">
+              <Link to="/projects/$id/edit" params={{ id }}>
+                <Pencil /> Full editor
+              </Link>
+            </Button>
             <Button
               variant="outline"
               className="text-destructive hover:bg-destructive/10"
@@ -244,6 +261,11 @@ function ProjectDetail() {
             Quick actions:
           </span>
           <QuotationLinkDialog projectId={id} />
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/projects/$id/quotation" params={{ id }}>
+              <FileText /> Staff quotation
+            </Link>
+          </Button>
           <Button variant="ghost" size="sm" asChild>
             <Link to="/team-allocation">
               <Users /> Allocation
@@ -297,34 +319,81 @@ function ProjectDetail() {
             </Card>
           </div>
 
-          <Card className="self-start">
-            <CardHeader className="pb-3">
-              <CardTitle>Client</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="font-medium">{data.client_name ?? 'No client on file'}</p>
-              {data.client_phone && (
-                <a
-                  href={`tel:${data.client_phone}`}
-                  className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          <div className="flex flex-col gap-4">
+            <Card className="self-start">
+              <CardHeader className="pb-3">
+                <CardTitle>Client</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="font-medium">{data.client_name ?? 'No client on file'}</p>
+                {data.client_phone && (
+                  <a
+                    href={`tel:${data.client_phone}`}
+                    className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    <Phone className="size-3.5" aria-hidden />
+                    {data.client_phone}
+                  </a>
+                )}
+                <Link
+                  to="/clients"
+                  className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                 >
-                  <Phone className="size-3.5" aria-hidden />
-                  {data.client_phone}
-                </a>
-              )}
-              <Link
-                to="/clients"
-                className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-              >
-                View client <ArrowRight className="size-3.5" aria-hidden />
-              </Link>
-            </CardContent>
-          </Card>
+                  View client <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+              </CardContent>
+            </Card>
+
+            <EntityReminders entityType="project" entityId={id} title="Reminders" />
+          </div>
         </div>
       )}
 
       {tab === 'deliverables' && (
       <div className="mt-4 flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs" role="tablist" aria-label="Deliverables view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!groupByShoot}
+              onClick={() => setGroupByShoot(false)}
+              className={cn(
+                'rounded-md px-3 py-1.5 font-medium transition-colors',
+                !groupByShoot ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              By scope
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={groupByShoot}
+              onClick={() => setGroupByShoot(true)}
+              className={cn(
+                'rounded-md px-3 py-1.5 font-medium transition-colors',
+                groupByShoot ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+              title="Group every deliverable under its shoot"
+            >
+              Grouped by shoot
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {groupByShoot ? 'Client + internal together under each shoot.' : 'Client vs internal lists.'}
+          </p>
+        </div>
+        {groupByShoot ? (
+          <DeliverablesByShoot
+            projectId={id}
+            items={data.deliverables}
+            canEdit={canEdit}
+            updateDeliverable={updateDeliverable}
+            setDeliverableSources={setDeliverableSources}
+            onRemove={removeDeliverable}
+          />
+        ) : (
+        <>
         <DeliverableGroup
           projectId={id}
           title="Client Deliverables"
@@ -347,11 +416,21 @@ function ProjectDetail() {
           setDeliverableSources={setDeliverableSources}
           onRemove={removeDeliverable}
         />
+        </>
+        )}
       </div>
       )}
 
       {tab === 'billing' && (
-      <div className="mt-4">
+      <div className="mt-4 flex flex-col gap-4">
+        <ProfitabilityPanel
+          projectId={id}
+          packageCost={data.package_cost}
+          addOns={data.additional_deliverables_cost}
+          total={data.total_cost}
+          received={received}
+          balance={balance}
+        />
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Payments</CardTitle>
@@ -364,14 +443,17 @@ function ProjectDetail() {
                 description="Record an advance or an instalment and the balance updates here."
               />
             ) : (
-              <ul className="divide-y divide-border">
+              <ul className="flex flex-col gap-2">
                 {data.payments.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-muted-foreground">
-                      {p.paid_on} · {p.mode ?? '—'}
-                    </span>
-                    <span className="font-medium">{formatINR(p.amount)}</span>
-                  </li>
+                  <PaymentRow
+                    key={p.id}
+                    projectId={id}
+                    projectName={data.name}
+                    clientName={data.client_name}
+                    clientPhone={data.client_phone}
+                    payment={p}
+                    canEdit={canEdit}
+                  />
                 ))}
               </ul>
             )}
@@ -386,7 +468,434 @@ function ProjectDetail() {
       {tab === 'expenses' && <ExpensesTab projectId={id} />}
       {tab === 'tasks' && <TasksTab projectId={id} canEdit={canEditTasks} />}
       {tab === 'data' && <DataTab projectId={id} canEdit={canEdit} />}
+      {tab === 'referrals' && <ReferralsTab projectId={id} projectName={data.name} clientName={data.client_name} />}
     </>
+  )
+}
+
+/** Project value vs money in: collection progress and what's still out. */
+function ProfitabilityPanel({
+  projectId,
+  packageCost,
+  addOns,
+  total,
+  received,
+  balance,
+}: {
+  projectId: string
+  packageCost: number
+  addOns: number
+  total: number
+  received: number
+  balance: number
+}) {
+  const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0
+  // True margin once team payouts and company expenses are booked: the
+  // project_financials view's cost summary for this project, when the
+  // financials module is available to this user.
+  const { data: financials } = useProjectFinancials()
+  const costs = financials?.find((f) => f.project_id === projectId)
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Profitability</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="flex flex-col gap-2 text-sm">
+          <Money label="Package cost" value={packageCost} />
+          <Money label="Additional deliverables" value={addOns} />
+          <Money label="Total project value" value={total} accent />
+          <Money label="Total received" value={received} accent />
+          <Money label="Balance pending" value={balance} />
+        </dl>
+        {costs && (
+          <>
+            <p className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Cost summary
+            </p>
+            <dl className="flex flex-col gap-2 text-sm">
+              <Money label="Revenue" value={costs.revenue} />
+              <Money label="Direct team cost" value={costs.direct_team_cost} />
+              <Money label="Project expenses" value={costs.project_expenses} />
+              <Money label="Gross profit" value={costs.gross_profit} accent />
+            </dl>
+          </>
+        )}
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Collected</span>
+            <span className="font-medium tabular-nums">{pct}%</span>
+          </div>
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Collection progress">
+            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Gross margin before team payouts and company expenses. Price team work in the Shoots tab so payouts stay inside this total.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+type DetailPayment = {
+  id: string
+  amount: number
+  paid_on: string
+  mode: string | null
+  reference: string | null
+  status: string | null
+  description: string | null
+  is_gst: boolean
+  gst_number: string | null
+}
+
+function receiptText(projectName: string, clientName: string | null, p: DetailPayment): string {
+  const lines = [
+    `Payment receipt — ${projectName}`,
+    clientName ? `Client: ${clientName}` : null,
+    `Amount: ${formatINR(p.amount)}`,
+    `Date: ${p.paid_on}`,
+    p.mode ? `Mode: ${p.mode}` : null,
+    p.reference ? `Reference: ${p.reference}` : null,
+    p.status ? `Status: ${p.status}` : null,
+    p.is_gst ? `GST invoice${p.gst_number ? ` (${p.gst_number})` : ''}` : null,
+    p.description ? `Note: ${p.description}` : null,
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+/** One payment with receipt actions: view, print, email, WhatsApp, delete. */
+function PaymentRow({
+  projectId,
+  projectName,
+  clientName,
+  clientPhone,
+  payment: p,
+  canEdit,
+}: {
+  projectId: string
+  projectName: string
+  clientName: string | null
+  clientPhone: string | null
+  payment: DetailPayment
+  canEdit: boolean
+}) {
+  const del = useDeletePayment(projectId)
+  const confirm = useConfirm()
+  const [viewOpen, setViewOpen] = useState(false)
+  const digits = (clientPhone ?? '').replace(/\D/g, '')
+
+  async function onDelete() {
+    const yes = await confirm({
+      title: `Delete this ${formatINR(p.amount)} payment?`,
+      description: 'The balance updates immediately. This cannot be undone.',
+      destructive: true,
+      confirmLabel: 'Delete payment',
+    })
+    if (yes) del.mutate(p.id)
+  }
+
+  function onWhatsApp() {
+    if (!digits) {
+      toast.error('Add a client phone number to send this receipt on WhatsApp.')
+      return
+    }
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(receiptText(projectName, clientName, p))}`, '_blank', 'noopener,noreferrer')
+  }
+
+  function onEmail() {
+    const body = encodeURIComponent(receiptText(projectName, clientName, p))
+    const subject = encodeURIComponent(`Payment receipt — ${projectName} — ${formatINR(p.amount)}`)
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{formatINR(p.amount)}</p>
+        <p className="text-xs text-muted-foreground">
+          {p.paid_on}
+          {p.mode ? ` · ${p.mode}` : ''}
+          {p.reference ? ` · ${p.reference}` : ''}
+          {p.description ? ` · ${p.description}` : ''}
+        </p>
+        <div className="mt-1 flex flex-wrap gap-1">
+          <StatusBadge tone={p.status === 'pending' ? 'warning' : 'success'}>
+            {p.status === 'pending' ? 'Pending' : 'Paid'}
+          </StatusBadge>
+          {p.is_gst && <StatusBadge tone="info">GST{p.gst_number ? ` ${p.gst_number}` : ''}</StatusBadge>}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button variant="ghost" size="icon" title="View receipt" aria-label="View receipt" onClick={() => setViewOpen(true)}>
+          <Eye />
+        </Button>
+        <Button variant="ghost" size="icon" title="Print receipt" aria-label="Print receipt" onClick={() => setViewOpen(true)}>
+          <Printer />
+        </Button>
+        <Button variant="ghost" size="icon" title="Email receipt" aria-label="Email receipt" onClick={onEmail}>
+          <Mail />
+        </Button>
+        <Button variant="ghost" size="icon" title="WhatsApp receipt" aria-label="WhatsApp receipt" onClick={onWhatsApp} className="text-success">
+          <MessageCircle />
+        </Button>
+        {canEdit && (
+          <Button variant="ghost" size="icon" title="Delete payment" aria-label="Delete payment" className="text-destructive" onClick={() => void onDelete()}>
+            <Trash2 />
+          </Button>
+        )}
+      </div>
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent title={`Receipt — ${formatINR(p.amount)}`} description={`${projectName}${clientName ? ` · ${clientName}` : ''}`}>
+          <dl className="flex flex-col gap-2 text-sm">
+            <Money label="Amount" value={p.amount} accent />
+            <Fact label="Date" value={p.paid_on} />
+            <Fact label="Mode" value={p.mode ?? '—'} />
+            <Fact label="Reference" value={p.reference ?? '—'} />
+            <Fact label="Status" value={p.status === 'pending' ? 'Pending' : 'Paid'} />
+            <Fact label="GST" value={p.is_gst ? `Yes${p.gst_number ? ` (${p.gst_number})` : ''}` : 'No'} />
+            {p.description && <Fact label="Note" value={p.description} />}
+          </dl>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={onEmail}>
+              <Mail /> Email
+            </Button>
+            <Button variant="outline" size="sm" onClick={onWhatsApp}>
+              <MessageCircle /> WhatsApp
+            </Button>
+            <Button size="sm" onClick={() => window.print()}>
+              <Printer /> Print
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </li>
+  )
+}
+
+/** Deliverables grouped under their shoot instead of split by scope. */
+function DeliverablesByShoot({
+  projectId,
+  items,
+  canEdit,
+  updateDeliverable,
+  setDeliverableSources,
+  onRemove,
+}: {
+  projectId: string
+  items: Deliverable[]
+  canEdit: boolean
+  updateDeliverable: ReturnType<typeof useUpdateDeliverable>
+  setDeliverableSources: ReturnType<typeof useSetDeliverableSources>
+  onRemove: (deliverableId: string, title: string) => void
+}) {
+  const groups = new Map<string, { name: string; items: Deliverable[] }>()
+  const unlinked: Deliverable[] = []
+  for (const d of items) {
+    const first = d.source_shoots[0]
+    if (!first) {
+      unlinked.push(d)
+      continue
+    }
+    const g = groups.get(first.id) ?? { name: first.name, items: [] }
+    g.items.push(d)
+    groups.set(first.id, g)
+  }
+  if (items.length === 0) {
+    return <EmptyState title="No deliverables yet" description="Add what the client receives and what the team must produce." />
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      {[...groups.values()].map((g) => (
+        <Card key={g.name}>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Camera className="size-4" aria-hidden /> {g.name}
+                <StatusBadge tone="neutral">{g.items.length}</StatusBadge>
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-col gap-3">
+              {g.items.map((d) => (
+                <ShootGroupedRow
+                  key={d.id}
+                  projectId={projectId}
+                  d={d}
+                  canEdit={canEdit}
+                  updateDeliverable={updateDeliverable}
+                  setDeliverableSources={setDeliverableSources}
+                  onRemove={onRemove}
+                />
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ))}
+      {unlinked.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="size-4" aria-hidden /> Project-level (unlinked)
+              <StatusBadge tone="neutral">{unlinked.length}</StatusBadge>
+            </CardTitle>
+            <p className="mt-0.5 text-sm text-muted-foreground">Not waiting on any specific shoot.</p>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-col gap-3">
+              {unlinked.map((d) => (
+                <ShootGroupedRow
+                  key={d.id}
+                  projectId={projectId}
+                  d={d}
+                  canEdit={canEdit}
+                  updateDeliverable={updateDeliverable}
+                  setDeliverableSources={setDeliverableSources}
+                  onRemove={onRemove}
+                />
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function ShootGroupedRow({
+  projectId,
+  d,
+  canEdit,
+  updateDeliverable,
+  setDeliverableSources,
+  onRemove,
+}: {
+  projectId: string
+  d: Deliverable
+  canEdit: boolean
+  updateDeliverable: ReturnType<typeof useUpdateDeliverable>
+  setDeliverableSources: ReturnType<typeof useSetDeliverableSources>
+  onRemove: (deliverableId: string, title: string) => void
+}) {
+  return (
+    <li className="rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-medium">{d.title}</p>
+        <StatusBadge tone={DELIVERABLE_STATUS_TONE[d.status] ?? 'neutral'}>{humanize(d.status)}</StatusBadge>
+        <StatusBadge tone={d.visibility_scope === 'client' ? 'info' : 'neutral'}>
+          {d.visibility_scope === 'client' ? 'Client deliverable' : 'Internal work'}
+        </StatusBadge>
+        <StatusBadge tone={d.show_on_quotation ? 'success' : 'neutral'}>
+          {d.show_on_quotation ? 'Shown on quotation' : 'Internal only'}
+        </StatusBadge>
+        {d.is_additional_charge && <span className="text-sm font-medium">{formatINR(d.additional_charge_amount)}</span>}
+      </div>
+      {d.source_shoots.length > 1 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="font-medium uppercase tracking-wide">Sources:</span>
+          {d.source_shoots.map((s) => (
+            <StatusBadge key={s.id} tone="neutral">{s.name}</StatusBadge>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Input
+          type="date"
+          value={d.estimated_date ?? ''}
+          disabled={!canEdit}
+          onChange={(e) => updateDeliverable.mutate({ deliverableId: d.id, patch: { estimated_date: e.target.value || null } })}
+          className="w-40"
+          aria-label={`Estimated delivery for ${d.title}`}
+        />
+        <Select
+          value={d.status}
+          disabled={!canEdit}
+          onChange={(e) => updateDeliverable.mutate({ deliverableId: d.id, patch: { status: e.target.value as DeliverableStatus } })}
+          className="w-36"
+          aria-label={`Status for ${d.title}`}
+        >
+          <option value="pending">Pending</option>
+          <option value="in_progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </Select>
+        {canEdit && <EditDeliverableDialog id={projectId} deliverable={d} />}
+        {canEdit && <LinkedShootsDialog projectId={projectId} deliverable={d} setDeliverableSources={setDeliverableSources} />}
+        {canEdit && (
+          <Button variant="ghost" size="icon" onClick={() => onRemove(d.id, d.title)}>
+            <Trash2 />
+          </Button>
+        )}
+      </div>
+    </li>
+  )
+}
+
+/** Referrals for this project: active campaigns plus a share-ready message. */
+function ReferralsTab({ projectId, projectName, clientName }: { projectId: string; projectName: string; clientName: string | null }) {
+  void projectId
+  const { data, isLoading } = useReferralCampaigns()
+  const campaigns = data?.campaigns ?? []
+  const first = campaigns[0]
+  const shareText = `Hi ${clientName ?? 'there'}! Loved working on ${projectName} with you. If anyone you know is looking for a photo/video team, please share this link: ${typeof window !== 'undefined' ? `${window.location.origin}/refer/` : '/refer/'}${first ? '' : ''}`
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Gift className="size-4" aria-hidden /> Refer &amp; earn
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Ask {clientName ?? 'the client'} to send new bookings your way after {projectName}.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard?.writeText(shareText)
+                toast.success('Referral message copied')
+              }}
+            >
+              <Link2 /> Copy referral message
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/referrals">
+                <Gift /> Open referrals
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Active campaigns ({isLoading ? '…' : campaigns.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading campaigns…</p>
+          ) : campaigns.length === 0 ? (
+            <EmptyState title="No referral campaigns yet" description="Create one on the referrals page, then share it from here." />
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {campaigns.slice(0, 5).map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3 text-sm">
+                  <span className="font-medium">{c.name}</span>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link to="/referrals">Open</Link>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 
@@ -453,34 +962,70 @@ function EditProjectDialog({
   status,
   packageCost,
   showQuotation,
+  received,
 }: {
   id: string
   name: string
   status: ProjectStatus
   packageCost: number
   showQuotation: boolean
+  received: number
 }) {
   const update = useUpdateProject(id)
+  const confirm = useConfirm()
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState<UpdateProjectRequest>({
-    name,
-    status,
-    package_cost: packageCost,
-    show_quotation: showQuotation,
-  })
+  const initial = { name, status, package_cost: packageCost, show_quotation: showQuotation }
+  const [form, setForm] = useState<UpdateProjectRequest>({ ...initial })
   // Kept separate from `form.package_cost` (a number, for the request body) so
   // the field displays exactly what was typed instead of fighting a
   // type="number" input's leading-zero quirks.
   const [packageCostText, setPackageCostText] = useState(String(packageCost))
 
+  const dirty =
+    (form.name ?? '') !== initial.name ||
+    form.status !== initial.status ||
+    Number(form.package_cost ?? 0) !== initial.package_cost ||
+    (form.show_quotation ?? false) !== initial.show_quotation
+  const belowReceived = Number(form.package_cost ?? 0) < received
+
+  function reset() {
+    setForm({ ...initial })
+    setPackageCostText(String(packageCost))
+  }
+
+  async function onOpenChange(next: boolean) {
+    if (!next && dirty && !update.isPending) {
+      const leave = await confirm({
+        title: 'Discard unsaved changes?',
+        description: 'Your edits to this project have not been saved.',
+        confirmLabel: 'Discard',
+      })
+      if (!leave) return
+      reset()
+    }
+    if (next) {
+      setForm({ ...initial })
+      setPackageCostText(String(packageCost))
+    }
+    setOpen(next)
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
+    if (belowReceived) {
+      const yes = await confirm({
+        title: `New total is below ${formatINR(received)} already received?`,
+        description: 'The package no longer covers the money recorded. Continue anyway?',
+        confirmLabel: 'Save anyway',
+      })
+      if (!yes) return
+    }
     await update.mutateAsync(form)
     setOpen(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => void onOpenChange(v)}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Pencil /> Edit
@@ -514,6 +1059,11 @@ function EditProjectDialog({
               />
             </div>
           </div>
+          {belowReceived && (
+            <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning">
+              Received {formatINR(received)} already exceeds this package. Review the Billing tab after saving.
+            </p>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -954,11 +1504,26 @@ function AddPaymentDialog({ id, balance }: { id: string; balance: number }) {
   const add = useAddPayment(id)
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState(String(balance))
+  const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [mode, setMode] = useState('upi')
+  const [reference, setReference] = useState('')
+  const [status, setStatus] = useState<'paid' | 'pending'>('paid')
+  const [description, setDescription] = useState('')
+  const [isGst, setIsGst] = useState(false)
+  const [gstNumber, setGstNumber] = useState('')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    const body: PaymentInput = { amount: Number(amount) || 0, mode }
+    const body: PaymentInput = {
+      amount: Number(amount) || 0,
+      paid_on: paidOn || undefined,
+      ...(mode.trim() ? { mode: mode.trim() } : {}),
+      ...(reference.trim() ? { reference: reference.trim() } : {}),
+      ...(status !== 'paid' ? { status } : {}),
+      ...(description.trim() ? { description: description.trim() } : {}),
+      ...(isGst ? { is_gst: true } : {}),
+      ...(gstNumber.trim() ? { gst_number: gstNumber.trim() } : {}),
+    }
     await add.mutateAsync(body)
     setOpen(false)
   }
@@ -972,14 +1537,47 @@ function AddPaymentDialog({ id, balance }: { id: string; balance: number }) {
       </DialogTrigger>
       <DialogContent title="Record payment" description={`Balance ${formatINR(balance)}`}>
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label>Amount</Label>
-            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Amount</Label>
+              <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Date</Label>
+              <Input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Mode</Label>
+              <Input value={mode} onChange={(e) => setMode(e.target.value)} placeholder="upi / cash / bank" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Status</Label>
+              <Select value={status} onChange={(e) => setStatus(e.target.value as 'paid' | 'pending')}>
+                <option value="paid">Paid</option>
+                <option value="pending">Pending</option>
+              </Select>
+            </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Mode</Label>
-            <Input value={mode} onChange={(e) => setMode(e.target.value)} placeholder="upi / cash / bank" />
+            <Label>Reference (optional)</Label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="UTR / cheque no." />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Description (optional)</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Advance, final settlement…" />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={isGst} onChange={(e) => setIsGst(e.target.checked)} />
+            GST invoice
+          </label>
+          {isGst && (
+            <div className="flex flex-col gap-1.5">
+              <Label>GST number</Label>
+              <Input value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 27ABCDE1234F1Z5" />
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">

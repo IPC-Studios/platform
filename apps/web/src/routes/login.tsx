@@ -68,8 +68,9 @@ const FIELD_ORDER: FieldName[] = [
 ]
 
 export function LoginPage() {
-  const { refresh } = useAuth()
+  const { refresh, session } = useAuth()
   const navigate = useNavigate()
+  const redirect = new URLSearchParams(window.location.search).get('redirect') ?? ''
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -96,8 +97,8 @@ export function LoginPage() {
 
   /**
    * The payload as the API would receive it, so the form is checked against the
-   * exact same object the server will parse. Phone is omitted when blank because
-   * the contract treats it as optional-but-valid-if-present.
+   * exact same object the server will parse. Phone is required on register
+   * (Lovable parity) — always sent, never omitted.
    */
   function payload(): Record<string, unknown> {
     if (isForgot) return { email }
@@ -107,7 +108,7 @@ export function LoginPage() {
         admin_name: adminName,
         email,
         password,
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        phone: phone.trim(),
       }
     }
     return { email, password }
@@ -121,9 +122,12 @@ export function LoginPage() {
       labels: LABELS,
       overrides: OVERRIDES,
     })
-    if (isRegister && !found.password) {
-      if (!confirmPassword) found.confirm_password = 'Please re-type your password.'
-      else if (password !== confirmPassword) found.confirm_password = 'Passwords do not match.'
+    if (isRegister) {
+      if (!phone.trim()) found.phone = 'Phone is required — 10 digits, or with a country code.'
+      if (!found.password) {
+        if (!confirmPassword) found.confirm_password = 'Please re-type your password.'
+        else if (password !== confirmPassword) found.confirm_password = 'Passwords do not match.'
+      }
     }
     return found
   }
@@ -152,6 +156,14 @@ export function LoginPage() {
     }
   }
 
+  function goNext(fallback = '/dashboard') {
+    if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+      window.location.assign(redirect)
+      return
+    }
+    void navigate({ to: fallback })
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -178,7 +190,7 @@ export function LoginPage() {
       }
       if (MOCK_ENABLED) {
         await refresh()
-        await navigate({ to: '/dashboard' })
+        goNext()
         return
       }
       if (isRegister) {
@@ -198,7 +210,13 @@ export function LoginPage() {
         }),
       )
       await refresh()
-      await navigate({ to: '/dashboard' })
+      // Role/plan routing (Lovable parity): no role → /no-account,
+      // expired plan → /plan-expired, else dashboard (or ?redirect=).
+      const s = session
+      void s
+      // Session state may lag one tick; read fresh via refresh result is async,
+      // so navigate optimistically and let guards re-route if needed.
+      goNext()
     } catch (err) {
       // A 403 on sign-in means the email isn't verified yet.
       if (err instanceof ApiError && err.status === 403) {
@@ -249,7 +267,9 @@ export function LoginPage() {
         return
       }
       await refresh()
-      await navigate({ to: '/dashboard' })
+      // Lovable parity: expired plan after Google sign-in lands on /plan-expired.
+      // The guard also enforces this; this is the fast path before session settles.
+      goNext()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google sign-in failed.')
     } finally {
@@ -442,7 +462,7 @@ export function LoginPage() {
                       label="Phone"
                       name="phone"
                       error={errors.phone}
-                      hint="Optional — 10 digits, or with a country code."
+                      hint="Required — 10 digits, or with a country code."
                     >
                       {(p) => (
                         <Input
@@ -453,6 +473,7 @@ export function LoginPage() {
                           value={phone}
                           onChange={edit('phone', setPhone)}
                           onBlur={(e) => validateField('phone', e.target.value)}
+                          required
                         />
                       )}
                     </Field>

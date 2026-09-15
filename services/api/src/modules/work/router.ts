@@ -13,7 +13,7 @@ import { requireAuth } from '../../middleware/auth'
 import { requireAction, requireOwner } from '../../middleware/permissions'
 import { fail } from '../../middleware/errors'
 import { uuidParam, uuidQuery } from '../../lib/params'
-import { withUser } from '../../lib/db'
+import { withUser, withService } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { audit } from '../../lib/audit'
 import { rpcJson } from '../../lib/rpc'
@@ -37,7 +37,11 @@ export const workRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) =>
-          sql`select id, project_id, task_id, submission_link, location_note, notes, status, review_notes, created_at
+          sql`select id, project_id, task_id, title, work_type, method, storage_ref,
+                      hard_disk_label, review_required, review_state, version,
+                      client_sent_at, client_channel,
+                      submission_link, location_note, notes, status, review_notes, created_at,
+                      disk_name, disk_location, folder_path
               from team_work_submissions
               where ${userId ? sql`submitted_by = ${userId}` : sql`true`}
                 and ${project ? sql`project_id = ${project}` : sql`true`}
@@ -53,14 +57,26 @@ export const workRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Please add a link to your work.')
     const id = await attempt(c, 'work.submit', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
+        // submit_work RPC predates handover columns; insert directly so disk fields persist.
         const rows = await sql<{ id: string }[]>`
-          select submit_work(
-            p_task_id => ${parsed.data.task_id},
-            p_project_id => ${parsed.data.project_id},
-            p_link => ${parsed.data.submission_link},
-            p_notes => ${parsed.data.notes ?? null},
-            p_location_note => ${parsed.data.location_note ?? null}
-          ) as id`
+          insert into team_work_submissions ${sql({
+            company_id: c.get('auth').companyId,
+            task_id: parsed.data.task_id,
+            project_id: parsed.data.project_id,
+            submitted_by: c.get('auth').userId,
+            title: parsed.data.title ?? null,
+            work_type: parsed.data.work_type ?? null,
+            method: parsed.data.method ?? null,
+            storage_ref: parsed.data.storage_ref ?? null,
+            hard_disk_label: parsed.data.hard_disk_label ?? parsed.data.disk_name ?? null,
+            review_required: parsed.data.review_required ?? true,
+            submission_link: parsed.data.submission_link,
+            location_note: parsed.data.location_note ?? null,
+            notes: parsed.data.notes ?? null,
+            disk_name: parsed.data.disk_name ?? null,
+            disk_location: parsed.data.disk_location ?? null,
+            folder_path: parsed.data.folder_path ?? null,
+          })} returning id`
         return rows[0]?.id ?? null
       }),
     )
@@ -80,13 +96,10 @@ export const workRouter = new Hono<AppEnv>()
       'work.update',
       () =>
         withUser(c.env, c.get('auth').userId, async (sql) => {
-          await sql`select update_work_submission(
-            p_submission_id => ${id},
-            p_link => ${parsed.data.submission_link},
-            p_notes => ${parsed.data.notes ?? null},
-            p_location_note => ${parsed.data.location_note ?? null}
-          )`
-          return true
+          // Direct update keeps handover fields (disk/folder) alongside link/notes.
+          const rows = await sql<{ id: string }[]>`
+            update team_work_submissions set ${sql(parsed.data)} where id = ${id} returning id`
+          return (rows as unknown[]).length > 0
         }),
       { onCode: (code) => (code === '23514' ? 'reviewed' : undefined) },
     )
@@ -118,20 +131,79 @@ export const workRouter = new Hono<AppEnv>()
 
   .post('/submissions/:id/deliver', requireAction('team_work_preview', 'edit'), async (c) => {
     const id = uuidParam(c)
+    const body = await c.req.json().catch(() => ({})) as { ttl_days?: unknown; channel?: unknown }
+    // Lovable parity: TTL configurable (default 365d), channel logged to client_deliveries.
+    const ttlDays = typeof body.ttl_days === 'number' && Number.isFinite(body.ttl_days)
+      ? Math.min(Math.max(Math.trunc(body.ttl_days), 1), 3650)
+      : 365
+    const channel = typeof body.channel === 'string' && body.channel.trim() ? body.channel.trim().slice(0, 40) : 'email'
     const token = await attempt(c, 'work.deliver', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql<{ token: string | null }[]>`
           select deliver_work_to_client(
             p_submission_id => ${id},
-            p_channel => ${'email'},
-            p_ttl_hours => ${168}
+            p_channel => ${channel},
+            p_ttl_hours => ${ttlDays * 24}
           ) as token`
         return rows[0]?.token ?? null
       }),
     )
-    if (!token) fail(400, 'The submission must be approved before delivery.')
+    if (!token) fail(400, 'The submission must be submitted or approved before delivery.')
     await audit(c, { action: 'work.deliver', entityType: 'work_submission', entityId: id })
     return c.json(deliverResponse.parse({ token }))
+  })
+
+  // Lovable parity: revoke a delivery link (client sees invalid/expired).
+  .post('/submissions/:id/revoke-delivery', requireAction('team_work_preview', 'edit'), async (c) => {    const id = uuidParam(c)
+    const ok = await attempt(c, 'work.revoke_delivery', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`select revoke_access_token('work_delivery', ${id})`
+        await sql`update team_work_submissions set revoked_at = now()
+          where id = ${id} and company_id = ${c.get('auth').companyId}`
+        await sql`update team_work_client_deliveries set revoked_at = now()
+          where submission_id = ${id} and company_id = ${c.get('auth').companyId}`
+        return true
+      }),
+    )
+    if (!ok) fail(400, 'We could not revoke this delivery.')
+    await audit(c, { action: 'work.delivery_revoke', entityType: 'work_submission', entityId: id })
+    return c.json({ ok: true })
+  })
+
+  // Stamp which channel a submission went out on (email/whatsapp/log).
+  // Surfaced in the preview as "sent to client".
+  .post('/submissions/:id/client-sent', requireAction('team_work_preview', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const body = await c.req.json().catch(() => ({})) as { channel?: unknown }
+    const channel = typeof body.channel === 'string' && body.channel.trim()
+      ? body.channel.trim().slice(0, 40)
+      : 'email'
+    const ok = await attempt(c, 'work.client_sent', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<{ id: string }[]>`
+          update team_work_submissions set client_sent_at = now(), client_channel = ${channel},
+            review_state = 'sent'
+          where id = ${id} returning id`
+        return rows.length > 0
+      }),
+    )
+    if (!ok) fail(404, 'We could not find that submission.')
+    await audit(c, { action: 'work.client_sent', entityType: 'work_submission', entityId: id, after: { channel } })
+    return c.json({ ok: true })
+  })
+
+  // Run the work-submission reminder sweep now (same sweep cron runs hourly).
+  .post('/reminders/run', requireOwner(), async (c) => {
+    const summary = await attempt(c, 'work.reminders_run', () =>
+      withService(c.env, async (sql) => {
+        const rows = await sql<{ summary: unknown }[]>`
+          select run_work_submission_reminder_cron(p_dry_run => false) as summary`
+        return (rows[0]?.summary ?? {}) as Record<string, unknown>
+      }),
+    )
+    if (!summary) fail(400, 'The reminder run could not start.')
+    await audit(c, { action: 'work.reminders_run', entityType: 'company', entityId: c.get('auth').companyId })
+    return c.json({ ok: true, summary })
   })
 
 /**

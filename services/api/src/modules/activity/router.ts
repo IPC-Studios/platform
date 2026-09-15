@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { z } from '@ipc/contracts'
+import { usageTrackRequest, z } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { fail } from '../../middleware/errors'
@@ -98,4 +98,28 @@ export const activityRouter = new Hono<AppEnv>()
 
     if (!rows?.[0]) fail(400, 'We could not log this activity.')
     return c.json({ id: rows[0].id }, 201)
+  })
+
+  // Lovable parity: usage heartbeat (POST /activity/track {route}).
+  // Separate table (usage_events), deliberately NOT activity_log: product
+  // analytics must never pollute the user-facing audit trail.
+  .post('/track', async (c) => {
+    const parsed = usageTrackRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'route is required.')
+    const auth = c.get('auth')
+    const d = parsed.data
+    const sessionId = d.session_id?.slice(0, 80) || `srv-${Date.now().toString(36)}`
+    const ok = await attempt(c, 'activity.track', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        await sql`insert into usage_events
+            (company_id, user_id, session_id, route, module, event_name, user_agent, device_type)
+          values (${auth.companyId}, ${auth.userId}, ${sessionId},
+                  ${d.route.slice(0, 200)}, ${d.module.slice(0, 60)},
+                  ${(d.heartbeat ? 'heartbeat' : d.event_name).slice(0, 60)},
+                  ${d.user_agent?.slice(0, 400) ?? null}, ${d.device_type?.slice(0, 20) ?? null})`
+        return true
+      }),
+    )
+    if (!ok) fail(400, 'We could not record usage.')
+    return c.json({ ok: true })
   })

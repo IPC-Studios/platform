@@ -6,10 +6,14 @@ import { cn } from '@/shared/ui/cn'
 const TABS: ReadonlyArray<{ to: string; label: string; module: ModuleKey }> = [
   { to: '/settings/company', label: 'Company', module: 'settings' },
   { to: '/settings/roles', label: 'Roles & Access', module: 'team_roles' },
-  { to: '/settings/team-terms', label: 'Team Terms', module: 'projects' },
+  { to: '/settings/task-bundles', label: 'Task Bundles', module: 'settings' },
+  { to: '/settings/team-terms', label: 'Team Terms', module: 'team_terms' },
   { to: '/settings/appearance', label: 'Theme & Branding', module: 'settings' },
+  { to: '/settings/lookups', label: 'Lookups', module: 'settings' },
+  { to: '/settings/attendance-location', label: 'Attendance Location', module: 'settings' },
   { to: '/settings/subscription', label: 'Subscription', module: 'settings_subscription' },
   { to: '/settings/system', label: 'System', module: 'settings' },
+  { to: '/settings/advanced', label: 'Advanced', module: 'settings' },
 ]
 
 /**

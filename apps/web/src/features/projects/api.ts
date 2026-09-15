@@ -7,6 +7,7 @@ import {
   issuedLink,
   projectDetail,
   projectListItem,
+  projectListPage,
   type CreateProjectRequest,
   type DeliverableInput,
   type IssueQuotationRequest,
@@ -23,12 +24,44 @@ import { useAccess } from '@/shared/auth/useAccess'
 const projectsList = projectListItem.array()
 const createResponse = z.object({ id: z.string().uuid() })
 
-export function useProjects() {
+export type ProjectsQuery = { page?: number; page_size?: number; status?: string; search?: string; sort?: string }
+
+export function useProjects(query?: ProjectsQuery) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const hasParams = !!query && Object.keys(query).length > 0
+  return useQuery({
+    queryKey: ['projects', query ?? {}],
+    queryFn: async () => {
+      if (!hasParams) return callApi('/projects', { responseSchema: projectsList })
+      const params = new URLSearchParams()
+      if (query.page) params.set('page', String(query.page))
+      if (query.page_size) params.set('page_size', String(query.page_size))
+      if (query.status) params.set('status', query.status)
+      if (query.search) params.set('search', query.search)
+      if (query.sort) params.set('sort', query.sort)
+      const page = await callApi(`/projects?${params.toString()}`, { responseSchema: projectListPage })
+      return page.items
+    },
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 30_000,
+  })
+}
+
+export function useProjectsPage(query: Required<Pick<ProjectsQuery, 'page' | 'page_size'>> & ProjectsQuery) {
   const { session } = useAuth()
   const access = useAccess()
   return useQuery({
-    queryKey: ['projects'],
-    queryFn: () => callApi('/projects', { responseSchema: projectsList }),
+    queryKey: ['projects', 'page', query],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      params.set('page', String(query.page))
+      params.set('page_size', String(query.page_size))
+      if (query.status) params.set('status', query.status)
+      if (query.search) params.set('search', query.search)
+      if (query.sort) params.set('sort', query.sort)
+      return callApi(`/projects?${params.toString()}`, { responseSchema: projectListPage })
+    },
     enabled: !!session && access.hasModule('projects'),
     staleTime: 30_000,
   })
@@ -123,6 +156,93 @@ export function useAddPayment(id: string) {
     mutationFn: (input: PaymentInput) =>
       callApi(`/projects/${id}/payments`, { method: 'POST', body: input, responseSchema: anySchema }),
     onSuccess: useProjectMutation(id, 'Payment recorded'),
+  })
+}
+
+export function useDeletePayment(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (paymentId: string) =>
+      callApi(`/projects/${id}/payments/${paymentId}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Payment removed')
+      void qc.invalidateQueries({ queryKey: ['projects', id] })
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useUpdateQuotation(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { quotation_terms?: string | null; quotation_display_prefs?: Record<string, boolean>; show_quotation?: boolean }) =>
+      callApi(`/projects/${id}/quotation`, { method: 'PATCH', body: input, responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Quotation saved')
+      void qc.invalidateQueries({ queryKey: ['projects', id] })
+    },
+  })
+}
+
+const boardDeliverable = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  status: z.string(),
+  board_status: z.string().nullable().default(null),
+  project_id: z.string().uuid().nullable(),
+  project_name: z.string().nullable(),
+  due_date: z.string().nullable().default(null),
+  shoot_name: z.string().nullable().default(null),
+})
+export type BoardDeliverable = z.infer<typeof boardDeliverable>
+
+export function useBoardDeliverables() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['projects', 'board-deliverables'],
+    queryFn: () => callApi('/projects/board/deliverables', { responseSchema: boardDeliverable.array() }),
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 30_000,
+  })
+}
+
+// ── Granular catalog (shoot types / deliverable templates / workflow presets) ──
+const shootTypeItem = z.object({ id: z.string().uuid(), name: z.string(), category: z.string().nullable().default(null), usage_count: z.number().int().default(0), is_archived: z.boolean().default(false) })
+const deliverableTemplateItem = z.object({ id: z.string().uuid(), title: z.string(), shoot_type: z.string().nullable().default(null), delivery_days: z.number().int().nullable().default(null), due_basis: z.string().nullable().default(null), brief: z.string().nullable().default(null), is_combined: z.boolean().default(false), usage_count: z.number().int().default(0), is_archived: z.boolean().default(false) })
+const workflowPresetItem = z.object({ id: z.string().uuid(), name: z.string(), shoot_type: z.string().nullable().default(null), shoot_time: z.string().nullable().default(null), shoot_city: z.string().nullable().default(null), requirements: z.array(z.string()).default([]), deliverables: z.array(z.string()).default([]), usage_count: z.number().int().default(0), is_archived: z.boolean().default(false) })
+
+export function useShootTypes() {
+  const { session } = useAuth()
+  return useQuery({ queryKey: ['catalog', 'shoot-types'], queryFn: () => callApi('/projects/catalog/shoot-types', { responseSchema: shootTypeItem.array() }), enabled: !!session, staleTime: 60_000 })
+}
+export function useCreateShootType() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; category?: string }) => callApi('/projects/catalog/shoot-types', { method: 'POST', body: input, responseSchema: shootTypeItem }),
+    onSuccess: () => { toast.success('Shoot type added'); void qc.invalidateQueries({ queryKey: ['catalog', 'shoot-types'] }) },
+  })
+}
+export function useDeliverableTemplates() {
+  const { session } = useAuth()
+  return useQuery({ queryKey: ['catalog', 'deliverable-templates'], queryFn: () => callApi('/projects/catalog/deliverable-templates', { responseSchema: deliverableTemplateItem.array() }), enabled: !!session, staleTime: 60_000 })
+}
+export function useCreateDeliverableTemplate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { title: string; shoot_type?: string; delivery_days?: number; due_basis?: string; brief?: string; is_combined?: boolean }) => callApi('/projects/catalog/deliverable-templates', { method: 'POST', body: input, responseSchema: deliverableTemplateItem }),
+    onSuccess: () => { toast.success('Deliverable template added'); void qc.invalidateQueries({ queryKey: ['catalog', 'deliverable-templates'] }) },
+  })
+}
+export function useWorkflowPresets() {
+  const { session } = useAuth()
+  return useQuery({ queryKey: ['catalog', 'workflow-presets'], queryFn: () => callApi('/projects/catalog/workflow-presets', { responseSchema: workflowPresetItem.array() }), enabled: !!session, staleTime: 60_000 })
+}
+export function useCreateWorkflowPreset() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; shoot_type?: string; shoot_time?: string; shoot_city?: string; requirements?: string[]; deliverables?: string[] }) => callApi('/projects/catalog/workflow-presets', { method: 'POST', body: input, responseSchema: workflowPresetItem }),
+    onSuccess: () => { toast.success('Workflow preset added'); void qc.invalidateQueries({ queryKey: ['catalog', 'workflow-presets'] }) },
   })
 }
 

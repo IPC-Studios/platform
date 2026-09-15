@@ -35,6 +35,35 @@ const shootsList = shootListItem.array()
 
 const TONE = { pending: 'neutral', copied: 'warning', verified: 'success' } as const
 
+/** Eight-stage journey a card travels, plus flags — mirrors the Lovable model. */
+const DATA_STATUS_LABELS: Record<string, string> = {
+  pending: 'Pending',
+  with_shooter: 'With shooter',
+  received: 'Received',
+  copied: 'Copied',
+  backup_done: 'Backup done',
+  ready_for_edit: 'Ready for edit',
+  handed_to_editor: 'Handed to editor',
+  archived: 'Archived',
+}
+
+const DATA_STATUS_TONE: Record<string, 'neutral' | 'warning' | 'info' | 'success'> = {
+  pending: 'neutral',
+  with_shooter: 'warning',
+  received: 'info',
+  copied: 'info',
+  backup_done: 'success',
+  ready_for_edit: 'success',
+  handed_to_editor: 'success',
+  archived: 'neutral',
+}
+
+function dataStatusLabel(s: string): string {
+  return DATA_STATUS_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+type DmTab = 'records' | 'locations'
+
 type StatusFilter = 'all' | 'missing' | 'primary_pending' | 'backup_pending' | 'ready' | 'at_risk'
 
 /** Only one track verified while the other has no copy at all — a single point of failure. */
@@ -55,8 +84,10 @@ function DataBoard() {
   const { data, isLoading, isError, refetch } = useDataRecords()
   const { data: projects } = useProjects()
   const verify = useVerifyData()
+  const updateRecord = useUpdateDataRecord()
   const del = useDeleteDataRecord()
   const confirm = useConfirm()
+  const [tab, setTab] = useState<DmTab>('records')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -123,6 +154,13 @@ function DataBoard() {
     if (yes) del.mutate(r.id)
   }
 
+  function markReceived(r: DataRecord) {
+    updateRecord.mutate({
+      id: r.id,
+      patch: { data_status: 'received', date_received: new Date().toISOString().slice(0, 10) },
+    })
+  }
+
   return (
     <>
       <PageHeader
@@ -142,9 +180,37 @@ function DataBoard() {
         <SkeletonList rows={5} columns={6} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
-      ) : !data || data.length === 0 ? (
-        <EmptyState title="No data logged" description="Log memory cards as they come off a shoot." action={<AddRecordDialog />} />
       ) : (
+        <>
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs" role="tablist" aria-label="Data views">
+            {(['records', 'locations'] as DmTab[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={t === tab ? 'rounded-md bg-primary px-3 py-1.5 font-medium capitalize text-primary-foreground' : 'rounded-md px-3 py-1.5 font-medium capitalize text-muted-foreground hover:text-foreground'}
+              >
+                {t === 'records' ? `Records (${(data ?? []).length})` : 'Locations'}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'locations' ? (
+            <LocationsTab />
+          ) : !data || data.length === 0 ? (
+            <EmptyState title="No data logged" description="Log memory cards as they come off a shoot." action={<AddRecordDialog />} />
+          ) : (
+            <RecordsView />
+          )}
+        </>
+      )}
+    </>
+  )
+
+  function RecordsView() {
+    return (
         <div className="flex flex-col gap-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard label="Missing" value={String(counts.missing)} icon={HardDrive} />
@@ -202,6 +268,7 @@ function DataBoard() {
                     <th className="px-4 py-2 font-medium">Card / drive</th>
                     <th className="px-4 py-2 font-medium">Project</th>
                     <th className="px-4 py-2 font-medium">Size</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
                     <th className="px-4 py-2 font-medium">Primary</th>
                     <th className="px-4 py-2 font-medium">Backup</th>
                     <th className="px-4 py-2 font-medium"></th>
@@ -216,10 +283,18 @@ function DataBoard() {
                           {r.data_label}
                         </span>
                         {r.data_type && <span className="ml-6 text-xs text-muted-foreground">{r.data_type}</span>}
+                        {r.team_member_name && <span className="ml-6 block text-xs text-muted-foreground">{r.team_member_name}{r.requirement_name ? ` · ${r.requirement_name}` : ''}</span>}
                       </td>
                       <td className="px-4 py-2 text-muted-foreground">{r.project_name ?? '—'}</td>
                       <td className="px-4 py-2 text-muted-foreground">
                         {r.size_gb} GB · {r.card_count} card(s)
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex flex-col items-start gap-1">
+                          <StatusBadge tone={DATA_STATUS_TONE[r.data_status] ?? 'neutral'}>{dataStatusLabel(r.data_status)}</StatusBadge>
+                          {r.issue_found && <StatusBadge tone="danger">Issue found</StatusBadge>}
+                          {r.is_not_required && <StatusBadge tone="neutral">Not required</StatusBadge>}
+                        </div>
                       </td>
                       <td className="px-4 py-2">
                         <StatusBadge tone={TONE[r.primary_status]}>{humanize(r.primary_status)}</StatusBadge>
@@ -235,14 +310,14 @@ function DataBoard() {
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          {r.primary_status !== 'verified' && (
-                            <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'primary' })}>
-                              <Check /> Primary
+                          {r.data_status === 'pending' && !r.is_not_required && (
+                            <Button size="sm" variant="outline" disabled={updateRecord.isPending} onClick={() => markReceived(r)}>
+                              Mark Received
                             </Button>
                           )}
                           {r.backup_status !== 'verified' && (
                             <Button size="sm" variant="outline" onClick={() => verify.mutate({ id: r.id, track: 'backup' })}>
-                              <Check /> Backup
+                              <Check /> Backup Done
                             </Button>
                           )}
                           <AddRecordDialog
@@ -267,9 +342,8 @@ function DataBoard() {
             </div>
           )}
         </div>
-      )}
-    </>
-  )
+    )
+  }
 }
 
 const LOCATION_KINDS: { value: StorageLocationKind; label: string }[] = [
@@ -279,6 +353,127 @@ const LOCATION_KINDS: { value: StorageLocationKind; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
+/** Storage locations: capacity, holder and archive state at a glance. */
+function LocationsTab() {
+  const { data: locations, isLoading } = useStorageLocations()
+  const update = useUpdateStorageLocation()
+  const del = useDeleteStorageLocation()
+  const confirm = useConfirm()
+  const [editing, setEditing] = useState<string | null>(null)
+
+  async function onArchive(id: string, name: string, active: boolean) {
+    if (active) {
+      const yes = await confirm({
+        title: `Archive "${name}"?`,
+        description: 'It stays on old records but leaves the pickers.',
+        confirmLabel: 'Archive',
+      })
+      if (!yes) return
+      update.mutate({ id, patch: { is_active: false } })
+    } else {
+      update.mutate({ id, patch: { is_active: true } })
+    }
+  }
+
+  async function onDelete(id: string, name: string) {
+    const yes = await confirm({
+      title: `Remove "${name}"?`,
+      description: 'Records pointing at it will show no location instead.',
+      destructive: true,
+      confirmLabel: 'Remove',
+    })
+    if (yes) del.mutate(id)
+  }
+
+  if (isLoading) return <SkeletonList rows={3} columns={4} />
+  if (!locations || locations.length === 0) {
+    return <EmptyState title="No storage locations yet" description="Add drives, NAS shares and cloud destinations." action={<ManageLocationsDialog />} />
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-muted-foreground">
+          <tr>
+            <th className="px-4 py-2 font-medium">Name</th>
+            <th className="px-4 py-2 font-medium">Kind</th>
+            <th className="px-4 py-2 font-medium">Capacity</th>
+            <th className="px-4 py-2 font-medium">Holder</th>
+            <th className="px-4 py-2 font-medium">Status</th>
+            <th className="px-4 py-2 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {locations.map((loc) => (
+            <tr key={loc.id} className="border-t border-border">
+              <td className="px-4 py-2 font-medium">{loc.name}</td>
+              <td className="px-4 py-2 text-muted-foreground">{humanize(loc.kind)}</td>
+              <td className="px-4 py-2 text-muted-foreground">{loc.capacity_gb != null ? `${loc.capacity_gb} GB` : '—'}</td>
+              <td className="px-4 py-2 text-muted-foreground">{loc.owner ?? '—'}</td>
+              <td className="px-4 py-2">
+                <StatusBadge tone={loc.is_active ? 'success' : 'neutral'}>{loc.is_active ? 'Active' : 'Archived'}</StatusBadge>
+              </td>
+              <td className="px-4 py-2">
+                <div className="flex justify-end gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(editing === loc.id ? null : loc.id)}>
+                    <Pencil />
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => void onArchive(loc.id, loc.name, loc.is_active)}>
+                    {loc.is_active ? 'Archive' : 'Restore'}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void onDelete(loc.id, loc.name)}>
+                    <Trash2 />
+                  </Button>
+                </div>
+                {editing === loc.id && <LocationEditor id={loc.id} onDone={() => setEditing(null)} />}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function LocationEditor({ id, onDone }: { id: string; onDone: () => void }) {
+  const { data: locations } = useStorageLocations()
+  const update = useUpdateStorageLocation()
+  const loc = locations?.find((l) => l.id === id)
+  const [capacity, setCapacity] = useState(loc?.capacity_gb != null ? String(loc.capacity_gb) : '')
+  const [owner, setOwner] = useState(loc?.owner ?? '')
+  const [notes, setNotes] = useState(loc?.notes ?? '')
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault()
+    await update.mutateAsync({
+      id,
+      patch: {
+        capacity_gb: capacity.trim() ? Number(capacity) : null,
+        owner: owner.trim() || null,
+        notes: notes.trim() || null,
+      },
+    })
+    onDone()
+  }
+
+  return (
+    <form onSubmit={(e) => void onSave(e)} className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-border bg-muted/20 p-2">
+      <div className="flex flex-col gap-1">
+        <Label>Capacity (GB)</Label>
+        <Input inputMode="decimal" value={capacity} onChange={(e) => setCapacity(e.target.value)} className="w-28" placeholder="2000" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <Label>Holder</Label>
+        <Input value={owner} onChange={(e) => setOwner(e.target.value)} className="w-40" placeholder="Office / editor name" />
+      </div>
+      <div className="flex flex-1 flex-col gap-1">
+        <Label>Notes</Label>
+        <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Shelf, login, anything useful" />
+      </div>
+      <Button size="sm" type="submit" disabled={update.isPending}>Save</Button>
+    </form>
+  )
+}
 /** The named drives/NAS/cloud destinations a card's primary or backup copy points to. */
 function ManageLocationsDialog() {
   const { data: locations, isLoading } = useStorageLocations()
@@ -289,13 +484,22 @@ function ManageLocationsDialog() {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [kind, setKind] = useState<StorageLocationKind>('drive')
+  const [capacity, setCapacity] = useState('')
+  const [owner, setOwner] = useState('')
 
   async function onAdd(e: FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
-    await create.mutateAsync({ name: name.trim(), kind })
+    await create.mutateAsync({
+      name: name.trim(),
+      kind,
+      ...(capacity.trim() ? { capacity_gb: Number(capacity) } : {}),
+      ...(owner.trim() ? { owner: owner.trim() } : {}),
+    })
     setName('')
     setKind('drive')
+    setCapacity('')
+    setOwner('')
   }
 
   async function onDelete(id: string, label: string) {
@@ -317,8 +521,8 @@ function ManageLocationsDialog() {
       </DialogTrigger>
       <DialogContent title="Storage locations" description="The drives, NAS shares and cloud destinations your copies live on.">
         <div className="flex flex-col gap-3">
-          <form onSubmit={onAdd} className="flex items-end gap-2">
-            <div className="flex flex-1 flex-col gap-1.5">
+          <form onSubmit={onAdd} className="flex flex-wrap items-end gap-2">
+            <div className="flex min-w-44 flex-1 flex-col gap-1.5">
               <Label>Name</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="NAS 2, Drive B, Google Drive…" />
             </div>
@@ -331,6 +535,14 @@ function ManageLocationsDialog() {
                   </option>
                 ))}
               </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Capacity (GB)</Label>
+              <Input inputMode="decimal" value={capacity} onChange={(e) => setCapacity(e.target.value)} className="w-28" placeholder="2000" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Holder</Label>
+              <Input value={owner} onChange={(e) => setOwner(e.target.value)} className="w-40" placeholder="Office / editor" />
             </div>
             <Button type="submit" disabled={create.isPending || !name.trim()}>
               <Plus /> Add

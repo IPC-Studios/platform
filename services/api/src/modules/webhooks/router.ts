@@ -1,12 +1,15 @@
 import { Hono } from 'hono'
-import { captureLeadRequest } from '@ipc/contracts'
+import { captureLeadRequest, fbConnectUrlResponse, fbPage, fbPageConnectRequest, fbStatusResponse, fbTokenRequest } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { fail } from '../../middleware/errors'
-import { textParam } from '../../lib/params'
-import { withService } from '../../lib/db'
+import { requireAuth } from '../../middleware/auth'
+import { requireAction } from '../../middleware/permissions'
+import { textParam, uuidParam } from '../../lib/params'
+import { withService, withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
 import { timingSafeEqual } from '../../lib/crypto'
 import { log } from '../../lib/log'
+import { audit } from '../../lib/audit'
 import { fetchMetaLead, isMetaLeadgenPayload, metaLeadgenIds, verifyMetaSignature } from '../../lib/meta'
 import { verifyRazorpaySignature } from '../../lib/razorpay'
 
@@ -59,7 +62,24 @@ export const webhooksRouter = new Hono<AppEnv>()
                 p_email => ${lead.email ?? null},
                 p_meta => ${sql.json((lead.meta ?? {}) as Parameters<typeof sql.json>[0])}
               ) as id`
-            return rows[0]?.id ?? null
+            const id = rows[0]?.id ?? null
+            // The per-source import log: "did the form work" stays answerable.
+            if (id) {
+              const [src] = await sql<{ id: string; company_id: string }[]>`
+                select id, company_id from crm_webhook_sources where source_key = ${sourceKey}`
+              if (src) {
+                const meta = (lead.meta ?? {}) as Record<string, unknown>
+                await sql`
+                  insert into fb_lead_imports (company_id, source_id, page_id, page_name, leadgen_id,
+                                               name, phone, email, status, lead_id)
+                  values (${src.company_id}, ${src.id},
+                          ${String(meta.page_id ?? '') || null}, null,
+                          ${String(meta.leadgen_id ?? '') || null},
+                          ${lead.name ?? null}, ${lead.phone}, ${lead.email ?? null},
+                          'imported', ${id})`
+              }
+            }
+            return id
           }),
         // An unknown or paused key is the one refusal a caller should see as
         // such, not as a generic failure.
@@ -165,4 +185,156 @@ export const webhooksRouter = new Hono<AppEnv>()
       }
     }
     return c.json({ ok: true })
+  })
+
+/**
+ * Meta (Facebook) connection — authenticated studio routes. Minimal viable:
+ * status/pages UI backed by fb_pages, manual token verify, per-page
+ * connect/disconnect + webhook-subscription checklist. OAuth URL is offered
+ * when META_APP_ID is configured; otherwise the manual token flow applies.
+ */
+const metaMissing = (env: AppEnv['Bindings']): string[] => {
+  const missing: string[] = []
+  if (!env.META_APP_SECRET) missing.push('META_APP_SECRET')
+  if (!env.META_VERIFY_TOKEN) missing.push('META_VERIFY_TOKEN')
+  if (!env.META_PAGE_ACCESS_TOKEN) missing.push('META_PAGE_ACCESS_TOKEN')
+  const appId = (env as unknown as Record<string, string | undefined>).META_APP_ID
+  if (!appId) missing.push('META_APP_ID')
+  return missing
+}
+
+export const metaRouter = new Hono<AppEnv>()
+  .use('*', requireAuth)
+
+  .get('/connect-url', async (c) => {
+    const env = c.env
+    const appId = (env as unknown as Record<string, string | undefined>).META_APP_ID ?? null
+    const redirectUri = `${env.APP_URL ?? ''}/lead-sources`
+    const missing = metaMissing(env)
+    const connectUrl =
+      appId && env.APP_URL
+        ? `https://www.facebook.com/v21.0/dialog/oauth?client_id=${encodeURIComponent(appId)}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&scope=${encodeURIComponent('pages_show_list,pages_read_engagement,leads_retrieval')}`
+        : null
+    return c.json(fbConnectUrlResponse.parse({ connect_url: connectUrl, app_id: appId, redirect_uri: redirectUri, missing_config: missing }))
+  })
+
+  .get('/status', async (c) => {
+    const rows = await attempt(c, 'meta.status', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const pages = await sql<{ total: number; connected: number; subscribed: number; last_sync: string | null; last_error: string | null }[]>`
+          select count(*)::int as total,
+                 count(*) filter (where is_connected)::int as connected,
+                 count(*) filter (where webhook_subscribed)::int as subscribed,
+                 max(last_synced_at) as last_sync,
+                 (select last_error from fb_pages where company_id = get_current_company_id() and last_error is not null order by updated_at desc limit 1) as last_error
+          from fb_pages where company_id = get_current_company_id()`
+        return pages[0] ?? null
+      }),
+    )
+    if (!rows) fail(400, 'We could not load the Meta status.')
+    const tokenPresent = !!c.env.META_PAGE_ACCESS_TOKEN
+    return c.json(
+      fbStatusResponse.parse({
+        connected: rows.connected > 0 || tokenPresent,
+        page_count: rows.total,
+        connected_page_count: rows.connected,
+        webhook_subscribed_count: rows.subscribed,
+        missing_config: metaMissing(c.env),
+        last_synced_at: rows.last_sync,
+        last_error: rows.last_error,
+      }),
+    )
+  })
+
+  .get('/pages', async (c) => {
+    const rows = await attempt(c, 'meta.pages', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          select id, page_id, page_name, category, is_connected, webhook_subscribed,
+                 last_synced_at, last_error, created_at
+          from fb_pages order by page_name`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load Meta pages.')
+    return c.json(fbPage.array().parse(rows))
+  })
+
+  .post('/pages/connect', requireAction('crm', 'edit'), async (c) => {
+    const parsed = fbPageConnectRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Pick a page to connect.')
+    const { page_id, page_name } = parsed.data
+    const row = await attempt(c, 'meta.page_connect', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [r] = await sql`
+          insert into fb_pages (company_id, page_id, page_name, is_connected, last_synced_at, last_error)
+          values (get_current_company_id(), ${page_id}, ${page_name ?? page_id}, true, now(), null)
+          on conflict (company_id, page_id) do update
+            set page_name = excluded.page_name, is_connected = true, last_synced_at = now(), last_error = null
+          returning id, page_id, page_name, category, is_connected, webhook_subscribed,
+                    last_synced_at, last_error, created_at`
+        return r ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not connect that page.')
+    await audit(c, { action: 'meta.page_connect', entityType: 'fb_page', entityId: row.id, after: { page_id } })
+    return c.json(fbPage.parse(row), 201)
+  })
+
+  .post('/pages/:id/disconnect', requireAction('crm', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'meta.page_disconnect', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`
+          update fb_pages set is_connected = false, webhook_subscribed = false where id = ${id} returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not disconnect that page.')
+    if (!rows.length) fail(404, 'That page was not found.')
+    await audit(c, { action: 'meta.page_disconnect', entityType: 'fb_page', entityId: id })
+    return c.body(null, 204)
+  })
+
+  // Manual token flow: verify a long-lived token against the Graph API and
+  // import the pages it can see (tokens themselves are never stored).
+  .post('/token', requireAction('crm', 'edit'), async (c) => {
+    const parsed = fbTokenRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Paste a valid token.')
+    const { token } = parsed.data
+    let fbUser: string | null = null
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(token)}`)
+      if (!res.ok) fail(422, 'Meta rejected that token. Check it and try again.')
+      fbUser = ((await res.json()) as { id?: string }).id ?? null
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('Meta rejected')) throw e
+      fail(400, 'Meta could not be reached. Try again in a moment.')
+    }
+    let imported = 0
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name,category&access_token=${encodeURIComponent(token)}`)
+      if (res.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: string; name: string; category?: string }> }
+        const pages = data.data ?? []
+        await withUser(c.env, c.get('auth').userId, async (sql) => {
+          for (const p of pages) {
+            await sql`
+              insert into fb_pages (company_id, page_id, page_name, category, is_connected, last_synced_at, last_error)
+              values (get_current_company_id(), ${p.id}, ${p.name}, ${p.category ?? null}, false, now(), null)
+              on conflict (company_id, page_id) do update
+                set page_name = excluded.page_name, category = excluded.category, last_synced_at = now(), last_error = null`
+            imported += 1
+          }
+        })
+      }
+    } catch {
+      // Token is valid (me worked); page listing is best-effort.
+    }
+    await audit(c, { action: 'meta.token_verify', entityType: 'fb_page', after: { fb_user: fbUser, imported } })
+    return c.json({ ok: true as const, imported })
   })

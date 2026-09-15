@@ -128,10 +128,19 @@ export const publicTeamTerms = z.object({
   shoot_date: isoDate.nullable(),
   project_name: z.string().nullable(),
   company_name: z.string().nullable(),
+  // Lovable parity: branding logo + project context.
+  logo_url: z.string().nullable().nullish(),
+  project_id: uuid.nullable().nullish(),
 })
 export type PublicTeamTerms = z.infer<typeof publicTeamTerms>
 
 export const acknowledgeTeamTermsRequest = z.object({
-  name: z.string().trim().min(2).max(160),
+  name: z.string().trim().min(1).max(160),
+  email: z
+    .string()
+    .trim()
+    .max(160)
+    .nullish()
+    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Email format is invalid.'),
 })
 export type AcknowledgeTeamTermsRequest = z.infer<typeof acknowledgeTeamTermsRequest>

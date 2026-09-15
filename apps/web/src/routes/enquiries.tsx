@@ -188,7 +188,9 @@ function Enquiries() {
   const canEdit = access.hasAction('crm', 'edit')
   const [tab, setTab] = useState<EnquiryStatus | 'all'>('all')
   const [search, setSearch] = useState('')
-  const list = useEnquiries({ status: tab === 'all' ? null : tab, search })
+  const [source, setSource] = useState('')
+  const { data: sources } = useActiveLookups('enquiry_source')
+  const list = useEnquiries({ status: tab === 'all' ? null : tab, search, source: source || null })
 
   const pages = list.data?.pages ?? []
   const summary = pages[0]?.summary
@@ -213,13 +215,14 @@ function Enquiries() {
         ]}
       />
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
         <StatCard label="Total" value={summary?.total_count ?? 0} />
         <StatCard label="Open" value={summary?.open_count ?? 0} />
         <StatCard label="New" value={summary?.new_count ?? 0} />
         <StatCard label="Reviewed" value={summary?.reviewed_count ?? 0} />
         <StatCard label="Contacted" value={summary?.contacted_count ?? 0} />
         <StatCard label="Converted" value={summary?.converted_count ?? 0} />
+        <StatCard label="Closed" value={summary?.closed_count ?? 0} />
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -227,10 +230,23 @@ function Enquiries() {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, phone or email…"
+          placeholder="Search by name, phone, email or message…"
           aria-label="Search enquiries"
           className="sm:max-w-xs"
         />
+        <Select
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          aria-label="Filter by source"
+          className="sm:max-w-44"
+        >
+          <option value="">All sources</option>
+          {(sources ?? []).map((s) => (
+            <option key={s.id} value={s.value}>
+              {humanize(s.value)}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <div className="mt-4">
@@ -240,13 +256,13 @@ function Enquiries() {
           <ErrorState onRetry={() => void list.refetch()} />
         ) : items.length === 0 ? (
           <EmptyState
-            title={search || tab !== 'all' ? 'Nothing matches' : 'No enquiries yet'}
+            title={search || tab !== 'all' || source ? 'Nothing matches' : 'No enquiries yet'}
             description={
-              search || tab !== 'all'
+              search || tab !== 'all' || source
                 ? 'Try a different filter or search.'
                 : 'Log the next call or website form here and it will be waiting when you work the list.'
             }
-            action={canEdit && !search && tab === 'all' ? <EnquiryDialog /> : undefined}
+            action={canEdit && !search && tab === 'all' && !source ? <EnquiryDialog /> : undefined}
           />
         ) : (
           <div className="flex flex-col gap-2">
@@ -466,7 +482,7 @@ function EnquiryDialog({ enquiry }: { enquiry?: Enquiry }) {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={save.isPending || draft.name.trim().length < 2}>
+            <Button type="submit" disabled={save.isPending || draft.name.trim().length < 1}>
               {save.isPending ? 'Saving…' : editing ? 'Save' : 'Log it'}
             </Button>
           </div>

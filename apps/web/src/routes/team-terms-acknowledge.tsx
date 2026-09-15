@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { z, publicTeamTerms, type PublicTeamTerms } from '@ipc/contracts'
-import { CalendarDays, CheckCircle2, ShieldCheck } from 'lucide-react'
+import { CalendarDays, CheckCircle2, Printer, ShieldCheck } from 'lucide-react'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { StatusBadge } from '@/shared/ui/status-badge'
 
 const okResponse = z.object({ ok: z.boolean() })
 
@@ -23,6 +24,7 @@ export function TeamTermsAcknowledgePage() {
   const [terms, setTerms] = useState<PublicTeamTerms | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,11 +49,15 @@ export function TeamTermsAcknowledgePage() {
   async function onAgree(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Email format is invalid.')
+      return
+    }
     setBusy(true)
     try {
       await callApi(`/public/team-terms/${token}/ack`, {
         method: 'POST',
-        body: { name: name.trim() },
+        body: { name: name.trim(), ...(email.trim() ? { email: email.trim() } : {}) },
         responseSchema: okResponse,
       })
       setDone(true)
@@ -70,10 +76,14 @@ export function TeamTermsAcknowledgePage() {
       <CameraBackdrop />
       <div className="relative mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 p-4">
         <div className="flex items-center gap-2">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ShieldCheck className="size-5" />
-          </span>
-          <div>
+          {terms?.logo_url ? (
+            <img src={terms.logo_url} alt={terms.company_name ?? 'Studio logo'} className="size-9 rounded-lg border border-border bg-card object-contain" />
+          ) : (
+            <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <ShieldCheck className="size-5" />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
             <p className="font-semibold leading-tight">{terms?.company_name ?? 'Team terms'}</p>
             {terms?.shoot_name && (
               <p className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -82,7 +92,11 @@ export function TeamTermsAcknowledgePage() {
                 {terms.shoot_date ? ` · ${terms.shoot_date}` : ''}
               </p>
             )}
+            {terms?.project_name && (
+              <p className="text-xs text-muted-foreground">Project: {terms.project_name}</p>
+            )}
           </div>
+          {terms && <StatusPill status={terms.status} requireAck={mustSign} />}
         </div>
 
         <Card>
@@ -106,10 +120,15 @@ export function TeamTermsAcknowledgePage() {
                 </pre>
 
                 {signed ? (
-                  <p className="mt-4 flex items-center gap-2 rounded-lg bg-success/10 p-3 text-sm font-medium text-success">
-                    <CheckCircle2 className="size-4 shrink-0" />
-                    Agreed by {name || terms.acknowledged_by_name} — nothing else to do.
-                  </p>
+                  <div>
+                    <p className="mt-4 flex items-center gap-2 rounded-lg bg-success/10 p-3 text-sm font-medium text-success">
+                      <CheckCircle2 className="size-4 shrink-0" />
+                      Agreed by {name || terms.acknowledged_by_name} — nothing else to do.
+                    </p>
+                    <Button variant="outline" size="sm" className="mt-2" onClick={() => window.print()}>
+                      <Printer className="mr-1 size-4" /> Print
+                    </Button>
+                  </div>
                 ) : mustSign ? (
                   <form onSubmit={onAgree} className="mt-4 flex flex-col gap-3">
                     <div className="flex flex-col gap-1.5">
@@ -119,15 +138,29 @@ export function TeamTermsAcknowledgePage() {
                         onChange={(e) => setName(e.target.value)}
                         placeholder="Rahul Sharma"
                       />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Email (optional)</Label>
+                      <Input
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="rahul@example.com"
+                        inputMode="email"
+                      />
                       <p className="text-xs text-muted-foreground">
                         Typing your name here is your agreement to the terms above. The time and
                         your device are recorded with it.
                       </p>
                     </div>
                     {error && <p className="text-sm text-destructive">{error}</p>}
-                    <Button type="submit" disabled={busy || name.trim().length < 2}>
-                      {busy ? 'Recording…' : 'I agree'}
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="submit" disabled={busy || name.trim().length < 1}>
+                        {busy ? 'Recording…' : 'I agree'}
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => window.print()}>
+                        <Printer className="mr-1 size-4" /> Print
+                      </Button>
+                    </div>
                   </form>
                 ) : (
                   // A briefing has nothing to sign; saying so beats leaving
@@ -143,4 +176,16 @@ export function TeamTermsAcknowledgePage() {
       </div>
     </div>
   )
+}
+
+function StatusPill({ status, requireAck }: { status: string; requireAck: boolean }) {
+  const tone = status === 'acknowledged' ? 'success' : status === 'expired' || status === 'revoked' ? 'danger' : status === 'sent' || status === 'viewed' ? 'info' : 'neutral'
+  const label =
+    status === 'acknowledged' ? 'Acknowledged'
+    : status === 'sent' || status === 'viewed' ? (requireAck ? 'Pending acknowledgement' : 'Shared for reference')
+    : status === 'draft' ? 'Draft'
+    : status === 'expired' ? 'Expired'
+    : status === 'revoked' ? 'Revoked'
+    : status
+  return <StatusBadge tone={tone as 'success' | 'danger' | 'info' | 'neutral'}>{label}</StatusBadge>
 }

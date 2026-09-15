@@ -86,6 +86,23 @@ describe('filterAndSort', () => {
     ])
   })
 
+  it('sorts highest completion first and most pending reviews first', () => {
+    expect(names(filterAndSort(BOARD, 'all', 'completion_desc'))[0]).toBe('Done')
+    expect(names(filterAndSort(BOARD, 'all', 'pending_review')).slice(0, 2)).toEqual(['Waiting', 'Burning'])
+  })
+
+  it('sorts by overdue work and by recent activity', () => {
+    expect(names(filterAndSort(BOARD, 'all', 'overdue')).slice(0, 2)).toEqual(['Burning', 'Late'])
+    const board = track(
+      [
+        row('Old', { last_activity_at: '2026-08-01T10:00:00Z' }),
+        row('New', { last_activity_at: '2026-08-31T10:00:00Z' }),
+      ],
+      TODAY,
+    )
+    expect(names(filterAndSort(board, 'all', 'recent'))).toEqual(['New', 'Old'])
+  })
+
   it('sinks projects with no shoot booked rather than calling them soonest', () => {
     const board = track(
       [

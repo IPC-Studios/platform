@@ -7,22 +7,45 @@ export const workSubmission = z.object({
   id: uuid,
   project_id: uuid.nullable(),
   task_id: uuid.nullable(),
+  title: z.string().nullable().default(null),
+  work_type: z.string().nullable().default(null),
+  method: z.string().nullable().default(null),
+  storage_ref: z.string().nullable().default(null),
+  hard_disk_label: z.string().nullable().default(null),
+  review_required: z.boolean().default(true),
+  review_state: z.string().nullable().default(null),
+  version: z.number().int().default(1),
+  client_sent_at: z.string().nullable().default(null),
+  client_channel: z.string().nullable().default(null),
   submission_link: z.string().nullable(),
   location_note: z.string().nullable(),
   notes: z.string().nullable(),
   status: workStatus,
   review_notes: z.string().nullable(),
   created_at: isoDateTime,
+  // Lovable parity: hard-disk handover (additive, defaulted).
+  disk_name: z.string().nullable().default(null),
+  disk_location: z.string().nullable().default(null),
+  folder_path: z.string().nullable().default(null),
 })
 export type WorkSubmission = z.infer<typeof workSubmission>
 
 export const submitWorkRequest = z.object({
   task_id: uuid.nullable().default(null),
   project_id: uuid.nullable().default(null),
+  title: z.string().trim().min(1).max(200).optional(),
+  work_type: z.string().trim().max(60).optional(),
+  method: z.string().trim().max(60).optional(),
+  storage_ref: z.string().trim().max(200).optional(),
+  hard_disk_label: z.string().trim().max(160).optional(),
+  folder_path: z.string().trim().max(500).optional(),
+  review_required: z.boolean().default(true),
   submission_link: z.string().trim().min(1).max(500),
   /** Which physical drive or folder this actually lives on, if the link alone doesn't say. */
   location_note: z.string().trim().max(200).optional(),
   notes: z.string().max(1000).optional(),
+  disk_name: z.string().trim().max(160).optional(),
+  disk_location: z.string().trim().max(200).optional(),
 })
 export type SubmitWorkRequest = z.infer<typeof submitWorkRequest>
 

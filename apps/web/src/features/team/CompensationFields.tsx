@@ -41,7 +41,12 @@ export interface CompensationDraft {
   payment_type: string
   pay_components: PayComponent[]
   payment_status: PaymentStatus
+  /** Monthly salary / retainer — only for the monthly_salary component. */
   salary: string
+  /** Per-shoot/day rate — only for the freelancer_rate component (split from salary). */
+  freelancer_rate: string
+  /** Whether this person gets dashboard login access (maps to create_login/login_enabled). */
+  has_login_access: boolean
   payout_type: '' | 'salary' | 'per_shoot' | 'per_day' | 'per_project' | 'custom'
   commission_pct: string
   commission_basis: '' | 'revenue' | 'payment' | 'profit' | 'manual'
@@ -51,18 +56,63 @@ export interface CompensationDraft {
   compensation_notes: string
 }
 
+/**
+ * Port of the Lovable compensation validation: every ticked component needs
+ * a valid non-negative figure, commission stays 0–100, and the pay window
+ * must make sense. Returns the first problem, or null when valid.
+ */
+export function validateCompensation(
+  v: Pick<
+    CompensationDraft,
+    | 'payment_type'
+    | 'pay_components'
+    | 'salary'
+    | 'freelancer_rate'
+    | 'commission_pct'
+    | 'stipend_amount'
+    | 'pay_effective_from'
+    | 'pay_effective_to'
+  >,
+  opts?: { effectiveFromRequired?: boolean },
+): string | null {
+  if (!v.payment_type) return 'Payment type is required.'
+  if (v.pay_components.length === 0) return 'Select at least one pay component.'
+  const amounts: Array<[string, string]> = [
+    [v.salary, 'Monthly salary'],
+    [v.freelancer_rate, 'Rate'],
+    [v.stipend_amount, 'Stipend'],
+  ]
+  for (const [raw, label] of amounts) {
+    if (raw.trim() !== '' && (!Number.isFinite(Number(raw)) || Number(raw) < 0))
+      return `${label} must be a non-negative number.`
+  }
+  if (v.commission_pct.trim() !== '') {
+    const n = Number(v.commission_pct)
+    if (!Number.isFinite(n) || n < 0 || n > 100)
+      return 'Commission percentage must be between 0 and 100.'
+  }
+  if (opts?.effectiveFromRequired !== false && v.payment_type && !v.pay_effective_from)
+    return 'Effective from date is required.'
+  if (v.pay_effective_to && v.pay_effective_from && v.pay_effective_to < v.pay_effective_from)
+    return 'Effective to must be on or after effective from.'
+  return null
+}
+
 type Setter = <K extends keyof CompensationDraft>(key: K, value: CompensationDraft[K]) => void
 
 export function CompensationFields({
   value,
   onChange,
   effectiveFromRequired = true,
+  showLoginToggle = false,
   errors = {},
 }: {
   value: CompensationDraft
   onChange: Setter
   /** The add wizard requires it once a type is picked; a plain edit does not. */
   effectiveFromRequired?: boolean
+  /** Show the "create login / account access" switch (Lovable parity). */
+  showLoginToggle?: boolean
   errors?: Partial<Record<keyof CompensationDraft, string>>
 }) {
   const { session } = useAuth()
@@ -148,6 +198,24 @@ export function CompensationFields({
         </div>
       </div>
 
+      {showLoginToggle && (
+        <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/30 p-3">
+          <div className="min-w-0">
+            <Label className="text-sm">Create login / account access for this person</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Freelancers can also be given login access to view assigned shoots, tasks, and data upload.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            aria-label="Create login access"
+            checked={value.has_login_access}
+            onChange={(e) => onChange('has_login_access', e.target.checked)}
+            className="mt-1 size-4"
+          />
+        </div>
+      )}
+
       {value.payment_type && (
         <div className="rounded-lg border border-border p-3">
           <p className="text-sm font-medium">Pay components</p>
@@ -180,6 +248,7 @@ export function CompensationFields({
         <div className="flex flex-col gap-1.5">
           <Label>Monthly Salary / Retainer (₹)</Label>
           <Input inputMode="numeric" value={value.salary} onChange={(e) => onChange('salary', e.target.value)} placeholder="0" />
+          {errors.salary && <p className="text-xs text-destructive">{errors.salary}</p>}
         </div>
       )}
 
@@ -187,7 +256,8 @@ export function CompensationFields({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label>Rate (₹)</Label>
-            <Input inputMode="numeric" value={value.salary} onChange={(e) => onChange('salary', e.target.value)} placeholder="0" />
+            <Input inputMode="numeric" value={value.freelancer_rate} onChange={(e) => onChange('freelancer_rate', e.target.value)} placeholder="0" />
+            {errors.freelancer_rate && <p className="text-xs text-destructive">{errors.freelancer_rate}</p>}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Payout type</Label>

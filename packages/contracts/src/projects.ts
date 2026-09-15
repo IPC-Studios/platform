@@ -42,9 +42,15 @@ export const updateDeliverableRequest = z.object({
   estimated_date: isoDate.nullable().optional(),
   start_rule: deliverableStartRule.optional(),
   delivery_days_after_start: z.number().int().min(0).nullable().optional(),
+  // Lovable parity: post-create due editing. due_days maps to
+  // delivery_days_after_start; due_basis is a UI-level basis resolved to
+  // estimated_date client-side before PATCH (kept here for form binding).
+  due_days: z.number().int().min(0).nullable().optional(),
+  due_basis: z.string().max(40).nullable().optional(),
   work_type: z.string().max(80).nullable().optional(),
   internal_notes: z.string().max(2000).nullable().optional(),
   status: deliverableStatus.optional(),
+  custom_status_code: z.string().max(40).nullable().optional(),
 })
 export type UpdateDeliverableRequest = z.infer<typeof updateDeliverableRequest>
 
@@ -55,12 +61,21 @@ export type DeliverableSourceShoot = z.infer<typeof deliverableSourceShoot>
 export const setDeliverableSourcesRequest = z.object({ shoot_ids: z.array(uuid).max(50) })
 export type SetDeliverableSourcesRequest = z.infer<typeof setDeliverableSourcesRequest>
 
+export const projectPaymentStatus = z.enum(['paid', 'pending'])
+export type ProjectPaymentStatus = z.infer<typeof projectPaymentStatus>
+
 export const paymentInput = z.object({
   amount: money,
   paid_on: isoDate.optional(),
   mode: z.string().max(40).optional(),
   reference: z.string().max(120).optional(),
   notes: z.string().max(500).optional(),
+  // Lovable parity (additive): pending vs paid, client-facing description,
+  // and GST receipt fields. All optional so old callers keep working.
+  status: projectPaymentStatus.optional(),
+  description: z.string().max(500).optional(),
+  is_gst: z.boolean().optional(),
+  gst_number: z.string().trim().max(20).optional(),
 })
 export type PaymentInput = z.infer<typeof paymentInput>
 
@@ -97,8 +112,47 @@ export const projectListItem = z.object({
   /** Summed from received_payments, so the list needs no second request. */
   received: money,
   created_at: isoDateTime,
+  // Lovable parity (additive, nullable so old rows parse): sorting helpers.
+  next_shoot_date: isoDate.nullable().default(null),
+  tasks_overdue: z.number().int().default(0),
 })
 export type ProjectListItem = z.infer<typeof projectListItem>
+
+/** Server pagination envelope for GET /projects (legacy callers still accept a bare array). */
+export const projectListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.string().optional(),
+  search: z.string().max(200).optional(),
+  sort: z.enum(['recent', 'oldest', 'value_desc', 'pending_desc', 'received_desc', 'name', 'risk', 'completion', 'overdue', 'upcoming']).optional(),
+})
+export type ProjectListQuery = z.infer<typeof projectListQuery>
+
+export const projectListPage = z.object({
+  items: z.array(projectListItem),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+export type ProjectListPage = z.infer<typeof projectListPage>
+
+/** Production board card: a task or a deliverable rendered in one lane. */
+export const boardItemKind = z.enum(['task', 'deliverable'])
+export type BoardItemKind = z.infer<typeof boardItemKind>
+
+export const boardItem = z.object({
+  kind: boardItemKind,
+  id: uuid,
+  title: z.string(),
+  status: z.string(),
+  project_id: uuid.nullable(),
+  project_name: z.string().nullable(),
+  assignees: z.array(z.string()).default([]),
+  due_date: isoDate.nullable().default(null),
+  shoot_name: z.string().nullable().default(null),
+  sort_order: z.number().int().default(0),
+})
+export type BoardItem = z.infer<typeof boardItem>
 
 /** Deliverable as returned by the API — DB nulls tolerated (not input's optionals). */
 export const deliverable = z.object({
@@ -119,10 +173,73 @@ export const deliverable = z.object({
   // Tolerant on read: a row could in principle carry a status value from
   // before this enum was tightened, and this must not 500 the whole list.
   status: z.string(),
+  custom_status_code: z.string().nullish(),
   /** Shoots this is waiting on data from — only meaningful when start_rule is 'specific_shoots'. */
   source_shoots: z.array(deliverableSourceShoot),
 })
 export type Deliverable = z.infer<typeof deliverable>
+
+// ── Granular catalog (Lovable parity): separate from generic project_templates ──
+export const shootTypeItem = z.object({
+  id: uuid,
+  name: z.string(),
+  category: z.string().nullable().default(null),
+  usage_count: z.number().int().default(0),
+  is_archived: z.boolean().default(false),
+})
+export type ShootTypeItem = z.infer<typeof shootTypeItem>
+
+export const createShootTypeRequest = z.object({
+  name: z.string().trim().min(1).max(120),
+  category: z.string().trim().max(80).nullish(),
+})
+export type CreateShootTypeRequest = z.infer<typeof createShootTypeRequest>
+
+export const deliverableTemplateItem = z.object({
+  id: uuid,
+  title: z.string(),
+  shoot_type: z.string().nullable().default(null),
+  delivery_days: z.number().int().nullable().default(null),
+  due_basis: z.string().nullable().default(null),
+  brief: z.string().nullable().default(null),
+  is_combined: z.boolean().default(false),
+  usage_count: z.number().int().default(0),
+  is_archived: z.boolean().default(false),
+})
+export type DeliverableTemplateItem = z.infer<typeof deliverableTemplateItem>
+
+export const createDeliverableTemplateRequest = z.object({
+  title: z.string().trim().min(1).max(200),
+  shoot_type: z.string().trim().max(120).nullish(),
+  delivery_days: z.number().int().min(0).nullish(),
+  due_basis: z.string().trim().max(40).nullish(),
+  brief: z.string().trim().max(2000).nullish(),
+  is_combined: z.boolean().default(false),
+})
+export type CreateDeliverableTemplateRequest = z.infer<typeof createDeliverableTemplateRequest>
+
+export const workflowPresetItem = z.object({
+  id: uuid,
+  name: z.string(),
+  shoot_type: z.string().nullable().default(null),
+  shoot_time: z.string().nullable().default(null),
+  shoot_city: z.string().nullable().default(null),
+  requirements: z.array(z.string()).default([]),
+  deliverables: z.array(z.string()).default([]),
+  usage_count: z.number().int().default(0),
+  is_archived: z.boolean().default(false),
+})
+export type WorkflowPresetItem = z.infer<typeof workflowPresetItem>
+
+export const createWorkflowPresetRequest = z.object({
+  name: z.string().trim().min(1).max(160),
+  shoot_type: z.string().trim().max(120).nullish(),
+  shoot_time: z.string().trim().max(40).nullish(),
+  shoot_city: z.string().trim().max(120).nullish(),
+  requirements: z.array(z.string().trim().min(1).max(120)).max(40).default([]),
+  deliverables: z.array(z.string().trim().min(1).max(200)).max(40).default([]),
+})
+export type CreateWorkflowPresetRequest = z.infer<typeof createWorkflowPresetRequest>
 
 export const projectDetail = z.object({
   id: uuid,
@@ -136,6 +253,11 @@ export const projectDetail = z.object({
   total_cost: money,
   show_quotation: z.boolean(),
   created_at: isoDateTime,
+  // Quotation display prefs + terms live on projects (see 0006 migration).
+  // project-quotation (deliverables-based) is the canonical project quote;
+  // the GST quote-accept flow is the CRM-deal quote and stays separate.
+  quotation_terms: z.string().nullable().default(null),
+  quotation_display_prefs: z.record(z.string(), z.boolean()).default({}),
   deliverables: z.array(deliverable),
   payments: z.array(
     z.object({
@@ -144,6 +266,10 @@ export const projectDetail = z.object({
       paid_on: isoDate,
       mode: z.string().nullable(),
       reference: z.string().nullable(),
+      status: z.string().nullable().default(null),
+      description: z.string().nullable().default(null),
+      is_gst: z.boolean().default(false),
+      gst_number: z.string().nullable().default(null),
     }),
   ),
 })

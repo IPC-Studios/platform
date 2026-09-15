@@ -7,8 +7,30 @@ export const plan = z.object({
   name: z.string(),
   price: money,
   billing_interval: z.enum(['monthly', 'yearly']),
+  // Lovable parity: richer plan cards. All optional.
+  description: z.string().nullable().nullish(),
+  currency: z.string().nullish(),
+  duration_days: z.number().int().nullish(),
+  features: z.array(z.string()).nullish(),
+  is_active: z.boolean().nullish(),
 })
 export type Plan = z.infer<typeof plan>
+
+export const subscriptionStatus = z.object({
+  plan_key: z.string().nullable(),
+  plan_name: z.string().nullable(),
+  plan_gate: z.enum(['active', 'grandfathered', 'grace', 'expired']),
+  plan_expiry: z.string().nullable(),
+  can_purchase: z.boolean().default(true),
+  latest_order_id: z.string().nullable().nullish(),
+  latest_order_status: z.string().nullable().nullish(),
+  webhook_configured: z.boolean().nullish(),
+  history: z.array(z.object({
+    id: z.string(), plan_name: z.string().nullable(), amount: z.number().nullable(),
+    status: z.string().nullable(), created_at: z.string().nullable(), expires_at: z.string().nullable(),
+  })).nullish(),
+})
+export type SubscriptionStatus = z.infer<typeof subscriptionStatus>
 
 export const createOrderRequest = z.object({ plan_id: uuid })
 export type CreateOrderRequest = z.infer<typeof createOrderRequest>

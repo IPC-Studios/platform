@@ -266,13 +266,19 @@ function LoginStep({ draft, set }: { draft: MemberDraft; set: Setter }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <ChoiceCard
           selected={draft.create_login}
-          onSelect={() => set('create_login', true)}
+          onSelect={() => {
+            set('create_login', true)
+            set('has_login_access', true)
+          }}
           title="Yes, create login"
           description="They can sign in and see their allowed work."
         />
         <ChoiceCard
           selected={!draft.create_login}
-          onSelect={() => set('create_login', false)}
+          onSelect={() => {
+            set('create_login', false)
+            set('has_login_access', false)
+          }}
           title="No, offline team member"
           description="Saved in Team Directory and can be assigned to shoots."
         />
@@ -608,7 +614,12 @@ function DetailsStep({
 
         <CompensationFields
           value={draft}
-          onChange={(key, value) => set(key as keyof MemberDraft, value as never)}
+          onChange={(key, value) => {
+            set(key as keyof MemberDraft, value as never)
+            // The login toggle mirrors the wizard's login step answer.
+            if (key === 'has_login_access') set('create_login', value as never)
+          }}
+          showLoginToggle
           errors={{
             ...(errors.payment_type ? { payment_type: errors.payment_type } : {}),
             ...(errors.pay_effective_from ? { pay_effective_from: errors.pay_effective_from } : {}),
@@ -650,7 +661,8 @@ function ReviewStep({
       ? ([
           ['Pay components', componentLabels || '—'],
           ['Payment status', humanize(draft.payment_status)],
-          ['Amount', draft.salary.trim() ? formatINR(Number(draft.salary)) : '—'],
+          ['Monthly salary', draft.salary.trim() ? formatINR(Number(draft.salary)) : '—'],
+          ['Rate', draft.freelancer_rate.trim() ? formatINR(Number(draft.freelancer_rate)) : '—'],
           ['Effective from', draft.pay_effective_from || '—'],
         ] as Array<[string, string]>)
       : []),

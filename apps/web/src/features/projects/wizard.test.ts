@@ -55,7 +55,18 @@ describe('stepErrors', () => {
   })
 
   it('accepts a new client typed in place of a picked one', () => {
-    expect(stepErrors(draft({ name: 'X', new_client_name: 'Verma Family' })).client).toBeUndefined()
+    expect(
+      stepErrors(draft({ name: 'X', new_client_name: 'Verma Family', new_client_phone: '9876543210' })).client,
+    ).toBeUndefined()
+  })
+
+  it('requires a phone number for a new client', () => {
+    expect(stepErrors(draft({ name: 'X', new_client_name: 'Verma Family' })).client).toBe(
+      'New client needs a phone number.',
+    )
+    expect(
+      stepErrors(draft({ name: 'X', new_client_name: 'Verma Family', new_client_phone: '123' })).client,
+    ).toBe('That phone number looks too short.')
   })
 
   it('catches half-filled rows in each section', () => {

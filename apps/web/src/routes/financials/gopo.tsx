@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { Input, Label } from '@/shared/ui/input'
+import { Switch } from '@/shared/ui/switch'
+import { Button } from '@/shared/ui/button'
 import { humanize } from '@/shared/ui/format'
 import { ErrorState } from '@/shared/ui/states'
 import { useGopoSummary } from '@/features/gopo/api'
@@ -15,10 +19,31 @@ import {
   BarChart3,
   ArrowUpRight,
   ArrowDownRight,
+  Briefcase,
+  Clock4,
+  Receipt,
+  Percent,
+  Gauge,
+  Banknote,
+  Building2,
+  Users,
+  ShieldAlert,
 } from 'lucide-react'
 
+function num(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
 function GopoContent() {
-  const { data, isLoading, isError, refetch } = useGopoSummary()
+  // Lovable parity FilterBar: date range + include salaries.
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [includeSalaries, setIncludeSalaries] = useState(true)
+  const { data, isLoading, isError, refetch, isFetching } = useGopoSummary({
+    start_date: startDate || undefined,
+    end_date: endDate || undefined,
+    include_salaries: includeSalaries,
+  })
 
   if (isLoading) {
     return (
@@ -49,6 +74,18 @@ function GopoContent() {
   }
 
   const { score_card, expense_breakdown, project_performance, attention_items, recent_activity } = data
+  const cashReceived = num(data.cash_received, score_card.total_received)
+  const pendingReceivable = num(data.pending_receivable, score_card.outstanding_balance)
+  const salaryCost = num(data.salary_cost)
+  const companyExpenses = num(data.company_expenses)
+  const personalExpenses = num(data.personal_expenses)
+  const top = data.top_projects ?? [...project_performance].sort((a, b) => b.gross_profit - a.gross_profit).slice(0, 5)
+  const bottom = data.bottom_projects ?? [...project_performance].sort((a, b) => a.gross_profit - b.gross_profit).slice(0, 5)
+  const signals = data.signals ?? []
+  const attentionCount = data.attention_count ?? attention_items.length
+  const cashOutflow = score_card.total_expenses + (includeSalaries ? 0 : 0)
+  const netCash = cashReceived - cashOutflow
+  const cashPosition = netCash
 
   const healthTone: Record<string, 'success' | 'info' | 'warning' | 'danger'> = {
     excellent: 'success',
@@ -66,7 +103,50 @@ function GopoContent() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="GOPO Dashboard" description="Cash flow health analysis" />
+      <PageHeader
+        title="GOPO Dashboard"
+        description="Cash flow health analysis"
+        actions={
+          <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+            Refresh
+          </Button>
+        }
+      />
+
+      {/* FilterBar (Lovable parity) */}
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-[140px] flex-1">
+            <Label htmlFor="gopo-from">From</Label>
+            <Input id="gopo-from" type="date" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} className="mt-1" />
+          </div>
+          <div className="min-w-[140px] flex-1">
+            <Label htmlFor="gopo-to">To</Label>
+            <Input id="gopo-to" type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} className="mt-1" />
+          </div>
+          <div className="min-w-[200px]">
+            <Switch checked={includeSalaries} onChange={setIncludeSalaries} label="Include salaries" description="Add salary costs" />
+          </div>
+          <div className="flex gap-2 sm:ml-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStartDate('')
+                setEndDate('')
+                setIncludeSalaries(true)
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="rounded-lg border border-muted bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        Date range filters payments, expenses, and recent activity. Project value reflects the full project value
+        for projects in the selected range. Personal expenses are treated as overhead, not project-level expenses.
+      </div>
 
       {/* Health Score */}
       <Card>
@@ -79,8 +159,8 @@ function GopoContent() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-6">
-            <div className="relative h-24 w-24">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+            <div className="relative h-24 w-24 shrink-0">
               <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
                 <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted" />
                 <circle
@@ -125,8 +205,69 @@ function GopoContent() {
               </div>
             </div>
           </div>
+          {signals.length > 0 && (
+            <ul className="mt-4 flex flex-col gap-1.5 border-t border-border pt-3 text-sm">
+              {signals.map((s) => (
+                <li key={s} className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+                  <span>{s}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
+
+      {/* Overall Health — 9 cards (Lovable parity) */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold tracking-tight">Overall Financial Health</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StatCard label="Project value" value={`₹${score_card.total_revenue.toLocaleString()}`} icon={Briefcase} />
+          <StatCard label="Paid income" value={`₹${score_card.total_received.toLocaleString()}`} icon={TrendingUp} />
+          <StatCard label="Pending income" value={`₹${pendingReceivable.toLocaleString()}`} icon={Clock4} />
+          <StatCard label="Total expenses" value={`₹${score_card.total_expenses.toLocaleString()}`} icon={Receipt} />
+          <StatCard label="Net profit" value={`₹${score_card.net_profit.toLocaleString()}`} icon={DollarSign} />
+          <StatCard label="Profit margin" value={`${score_card.profit_margin}%`} icon={Percent} />
+          <StatCard label="Receivables" value={`₹${score_card.outstanding_balance.toLocaleString()}`} icon={Wallet} />
+          <StatCard label="Collection rate" value={`${score_card.collection_rate}%`} icon={Gauge} />
+          <StatCard label="Cash position" value={`₹${cashPosition.toLocaleString()}`} icon={Banknote} hint="Cash received minus outflow" />
+        </div>
+      </section>
+
+      {/* Cash Flow — 4 cards (Lovable parity) */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold tracking-tight">Cash Flow Health</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Cash received" value={`₹${cashReceived.toLocaleString()}`} icon={ArrowDownRight} />
+          <StatCard label="Cash outflow" value={`₹${cashOutflow.toLocaleString()}`} icon={ArrowUpRight} />
+          <StatCard label="Net cash position" value={`₹${netCash.toLocaleString()}`} icon={Banknote} />
+          <StatCard label="Pending receivables" value={`₹${pendingReceivable.toLocaleString()}`} icon={Wallet} />
+        </div>
+      </section>
+
+      {/* Expense company/personal split (Lovable parity) */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold tracking-tight">Expense Breakdown</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Company expenses" value={`₹${companyExpenses.toLocaleString()}`} icon={Building2} />
+          <StatCard label="Personal expenses" value={`₹${personalExpenses.toLocaleString()}`} icon={Wallet} />
+          {includeSalaries ? (
+            <StatCard label="Salary expenses" value={`₹${salaryCost.toLocaleString()}`} icon={Users} />
+          ) : (
+            <Card>
+              <CardContent className="p-5 text-sm text-muted-foreground">
+                Salaries excluded. Turn on Include salaries to include them.
+              </CardContent>
+            </Card>
+          )}
+          <StatCard label="Team cost (projects)" value={`₹${score_card.total_direct_team_cost.toLocaleString()}`} icon={DollarSign} />
+        </div>
+        {data.rcm_liability != null && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ShieldAlert className="size-3.5" /> Reverse-charge liability ₹{num(data.rcm_liability).toLocaleString()}
+          </p>
+        )}
+      </section>
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -167,10 +308,15 @@ function GopoContent() {
           </CardContent>
         </Card>
 
-        {/* Attention Items */}
+        {/* Attention Items — 11-count header (Lovable parity) */}
         <Card>
           <CardHeader>
-            <CardTitle>Needs Attention</CardTitle>
+            <CardTitle>
+              Needs Attention
+              <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                {attentionCount} items
+              </span>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -203,6 +349,40 @@ function GopoContent() {
                 </div>
               )}
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top / Bottom projects (Lovable parity) */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>Top Projects (by profit)</CardTitle></CardHeader>
+          <CardContent>
+            {top.length === 0 ? <p className="text-sm text-muted-foreground">No project activity.</p> : (
+              <ul className="divide-y divide-border">
+                {top.map((p) => (
+                  <li key={p.project_id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="min-w-0"><span className="block truncate font-medium">{p.project_name}</span><span className="text-xs text-muted-foreground">{humanize(p.status)}</span></span>
+                    <span className={`shrink-0 font-semibold ${p.gross_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>₹{p.gross_profit.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Bottom Projects (by profit)</CardTitle></CardHeader>
+          <CardContent>
+            {bottom.length === 0 ? <p className="text-sm text-muted-foreground">No project activity.</p> : (
+              <ul className="divide-y divide-border">
+                {bottom.map((p) => (
+                  <li key={p.project_id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="min-w-0"><span className="block truncate font-medium">{p.project_name}</span><span className="text-xs text-muted-foreground">{humanize(p.status)}</span></span>
+                    <span className={`shrink-0 font-semibold ${p.gross_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>₹{p.gross_profit.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </div>

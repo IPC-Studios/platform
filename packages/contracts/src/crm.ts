@@ -26,6 +26,12 @@ export const leadSource = z.enum([
 ])
 export type LeadSource = z.infer<typeof leadSource>
 
+export const leadQuality = z.enum(['hot', 'warm', 'cold'])
+export type LeadQuality = z.infer<typeof leadQuality>
+
+export const contactedStatus = z.enum(['uncontacted', 'contacted', 'unreachable'])
+export type ContactedStatus = z.infer<typeof contactedStatus>
+
 export const crmLead = z.object({
   id: uuid,
   name: z.string().nullable(),
@@ -41,6 +47,10 @@ export const crmLead = z.object({
   last_contacted_at: isoDateTime.nullable(),
   converted_at: isoDateTime.nullable(),
   is_hot: z.boolean(),
+  /** Lovable parity: lead temperature. 'hot' mirrors is_hot (kept in sync by trigger). */
+  quality: leadQuality.nullable().default(null),
+  /** Lovable parity: whether anyone has reached them (derived, but explicit). */
+  contacted_status: contactedStatus.default('uncontacted'),
   /** Hidden from the working lists; still counted in history and reports. */
   is_archived: z.boolean().default(false),
   /** Set when this row was folded into another by a merge. */
@@ -76,7 +86,7 @@ export const crmLead = z.object({
 })
 export type CrmLead = z.infer<typeof crmLead>
 
-/** GET /crm/leads query. */
+/** GET /crm/leads query. Server filters are additive — unknown/absent params are ignored. */
 export const leadsQuery = z.object({
   include_archived: z
     .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
@@ -89,6 +99,27 @@ export const leadsQuery = z.object({
   crm_company_id: uuid.optional(),
   /** Free text over name, phone, email and title. */
   q: z.string().trim().max(200).optional(),
+  /** Lovable inbox parity filters (all optional, all ignored when absent). */
+  source: leadSource.optional(),
+  stage: z.string().trim().max(60).optional(),
+  quality: leadQuality.optional(),
+  contacted: contactedStatus.optional(),
+  group: z.string().trim().max(120).optional(),
+  budget_min: z.coerce.number().min(0).optional(),
+  budget_max: z.coerce.number().min(0).optional(),
+  city: z.string().trim().max(120).optional(),
+  event_date: isoDate.optional(),
+  event_date_from: isoDate.optional(),
+  event_date_to: isoDate.optional(),
+  date_created: z.enum(['today', 'last7', 'this_month']).optional(),
+  date_from: isoDate.optional(),
+  date_to: isoDate.optional(),
+  follow_up: z.enum(['today', 'upcoming', 'overdue', 'none']).optional(),
+  assigned: uuid.optional(),
+  unassigned: z
+    .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
 })
 export type LeadsQuery = z.infer<typeof leadsQuery>
 
@@ -106,6 +137,9 @@ export const updateLeadRequest = z
     notes: z.string().max(4000).nullable().optional(),
     follow_up_at: isoDateTime.nullable().optional(),
     is_hot: z.boolean().optional(),
+    /** Lovable parity: explicit temperature + reach state (trigger keeps is_hot/last_contacted_at consistent). */
+    quality: leadQuality.nullable().optional(),
+    contacted_status: contactedStatus.optional(),
     is_archived: z.boolean().optional(),
     deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
     probability: z.number().int().min(0).max(100).nullable().optional(),
@@ -171,10 +205,17 @@ export const createLeadRequest = z.object({
   stage_id: uuid.optional(),
   crm_company_id: uuid.optional(),
   group_name: z.string().trim().max(120).optional(),
+  /** Lovable parity: temperature + reach state at creation. */
+  quality: leadQuality.optional(),
+  contacted_status: contactedStatus.optional(),
+  lost_reason: z.string().trim().min(3).max(500).optional(),
 })
 export type CreateLeadRequest = z.infer<typeof createLeadRequest>
 
 /** One member of the round-robin rota new leads are handed to. */
+export const distributionStrategy = z.enum(['round_robin', 'specific', 'least_loaded'])
+export type DistributionStrategy = z.infer<typeof distributionStrategy>
+
 export const distributionRule = z.object({
   id: uuid,
   user_id: uuid,
@@ -182,18 +223,30 @@ export const distributionRule = z.object({
   priority: z.number().int(),
   is_active: z.boolean(),
   lead_count: z.number().int(),
+  /** Lovable parity: named rule, source filter, strategy, rotation state. */
+  name: z.string().nullable().default(null),
+  source_filter: z.array(z.string().max(40)).default([]),
+  strategy: distributionStrategy.default('round_robin'),
+  last_assigned_at: isoDateTime.nullable().default(null),
+  assigned_count: z.number().int().default(0),
 })
 export type DistributionRule = z.infer<typeof distributionRule>
 
 export const updateDistributionRequest = z.object({
   priority: z.number().int().min(0).max(100).optional(),
   is_active: z.boolean().optional(),
+  name: z.string().trim().min(2).max(80).nullable().optional(),
+  source_filter: z.array(z.string().trim().max(40)).max(20).optional(),
+  strategy: distributionStrategy.optional(),
 })
 export type UpdateDistributionRequest = z.infer<typeof updateDistributionRequest>
 
 export const createDistributionRequest = z.object({
   user_id: uuid,
   priority: z.number().int().min(0).max(100).default(0),
+  name: z.string().trim().min(2).max(80).optional(),
+  source_filter: z.array(z.string().trim().max(40)).max(20).default([]),
+  strategy: distributionStrategy.default('round_robin'),
 })
 export type CreateDistributionRequest = z.infer<typeof createDistributionRequest>
 
@@ -204,6 +257,10 @@ export type CreateDistributionRequest = z.infer<typeof createDistributionRequest
 export const leadSourceKind = z.enum(['webform', 'meta'])
 export type LeadSourceKind = z.infer<typeof leadSourceKind>
 
+/** Lovable parity: elementor / landing / generic webhook / other source types. */
+export const webhookSourceType = z.enum(['website_form', 'google_form', 'elementor', 'landing_page', 'webhook', 'other'])
+export type WebhookSourceType = z.infer<typeof webhookSourceType>
+
 export const leadSourceRow = z.object({
   id: uuid,
   label: z.string().nullable(),
@@ -213,18 +270,36 @@ export const leadSourceRow = z.object({
   created_at: isoDateTime,
   lead_count: z.number().int(),
   last_lead_at: isoDateTime.nullable(),
+  /** Lovable parity: type, origin guard, per-source defaults, last receipt. */
+  source_type: webhookSourceType.default('webhook'),
+  allowed_origin: z.string().nullable().default(null),
+  default_source: z.string().nullable().default(null),
+  default_stage: z.string().nullable().default(null),
+  default_quality: leadQuality.nullable().default(null),
+  default_assigned_to: uuid.nullable().default(null),
+  last_received_at: isoDateTime.nullable().default(null),
 })
 export type LeadSourceRow = z.infer<typeof leadSourceRow>
 
 export const createLeadSourceRequest = z.object({
   label: z.string().trim().min(2).max(80),
   kind: leadSourceKind.default('webform'),
+  source_type: webhookSourceType.default('webhook'),
+  allowed_origin: z.string().trim().max(200).nullish(),
+  default_source: leadSource.optional(),
+  default_quality: leadQuality.optional(),
+  default_assigned_to: uuid.nullish(),
 })
 export type CreateLeadSourceRequest = z.infer<typeof createLeadSourceRequest>
 
 export const updateLeadSourceRequest = z.object({
   label: z.string().trim().min(2).max(80).optional(),
   is_active: z.boolean().optional(),
+  source_type: webhookSourceType.optional(),
+  allowed_origin: z.string().trim().max(200).nullable().optional(),
+  default_source: leadSource.nullable().optional(),
+  default_quality: leadQuality.nullable().optional(),
+  default_assigned_to: uuid.nullable().optional(),
 })
 export type UpdateLeadSourceRequest = z.infer<typeof updateLeadSourceRequest>
 
@@ -252,6 +327,11 @@ export const bulkLeadPatch = z.object({
       lost_competitor: z.string().trim().max(120).optional(),
       assigned_to: uuid.nullable().optional(),
       is_hot: z.boolean().optional(),
+      /** Lovable bulk parity: temperature, reach state, segment tag, note append. */
+      quality: leadQuality.nullable().optional(),
+      contacted_status: contactedStatus.optional(),
+      group_name: z.string().trim().max(120).nullable().optional(),
+      note: z.string().trim().max(2000).optional(),
       follow_up_at: isoDateTime.nullable().optional(),
       is_archived: z.boolean().optional(),
       deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
@@ -272,6 +352,9 @@ export const leadSnapshot = z.object({
   status: leadStatus,
   assigned_to: uuid.nullable(),
   is_hot: z.boolean(),
+  quality: leadQuality.nullable().default(null),
+  contacted_status: contactedStatus.default('uncontacted'),
+  group_name: z.string().nullable().default(null),
   follow_up_at: isoDateTime.nullable(),
   is_archived: z.boolean(),
   deal_value: z.coerce.number().nullable().default(null),
@@ -300,13 +383,23 @@ export const duplicateLead = z.object({
   id: uuid,
   name: z.string().nullable(),
   phone: z.string().nullable(),
+  /** Lovable parity: masked match value + quality/assignee context for the pick. */
+  email: z.string().nullable().default(null),
+  quality: leadQuality.nullable().default(null),
+  contacted_status: contactedStatus.default('uncontacted'),
+  assigned_to: uuid.nullable().default(null),
+  assignee_name: z.string().nullable().default(null),
   status: leadStatus,
   source: leadSource,
   notes: z.string().nullable(),
   created_at: isoDateTime,
 })
 export const duplicateGroup = z.object({
-  phone_norm: z.string(),
+  /** Null for email-only groups (no shared phone). */
+  phone_norm: z.string().nullable().default(null),
+  /** Lovable parity: phone-only, email-only, or both-fields groups. */
+  match_type: z.enum(['phone', 'email', 'both']).default('phone'),
+  match_value_masked: z.string().default(''),
   lead_ids: z.array(uuid),
   lead_count: z.number().int(),
   leads: z.array(duplicateLead),
@@ -324,6 +417,17 @@ export type MergeLeadsResponse = z.infer<typeof mergeLeadsResponse>
 
 export const unmergeLeadsRequest = z.object({ survivor_id: uuid })
 export const unmergeLeadsResponse = z.object({ restored: z.number().int() })
+
+/** Lovable parity: resolving a group without merging. */
+export const resolveDuplicateRequest = z.object({
+  survivor_id: uuid,
+  duplicate_ids: z.array(uuid).min(1).max(20),
+  action: z.enum(['keep_separate', 'archive']),
+})
+export type ResolveDuplicateRequest = z.infer<typeof resolveDuplicateRequest>
+
+export const resolveDuplicateResponse = z.object({ resolved: z.number().int() })
+export type ResolveDuplicateResponse = z.infer<typeof resolveDuplicateResponse>
 
 // ── CSV import ────────────────────────────────────────────────
 export const csvImportPreviewRequest = z.object({
@@ -363,19 +467,40 @@ export const csvImportCommitRequest = z.object({
         email: z.string().max(200).nullable().optional(),
         source: leadSource.default('manual'),
         notes: z.string().max(2000).nullable().optional(),
+        /** Lovable parity: richer columns + alias-tolerant extras. */
+        city: z.string().max(120).nullable().optional(),
+        event_type: z.string().max(80).nullable().optional(),
+        event_date: isoDate.nullable().optional(),
+        event_location: z.string().max(200).nullable().optional(),
+        deal_value: z.number().min(0).max(1_00_00_000).nullable().optional(),
+        group_name: z.string().max(120).nullable().optional(),
+        alternate_phone: z.string().max(30).nullable().optional(),
+        quality: leadQuality.nullable().optional(),
       }),
     )
     .min(1)
     .max(500),
   skip_duplicates: z.boolean().default(true),
+  /** Lovable parity: skip = ignore known numbers, update = patch them, create = import anyway. */
+  mode: z.enum(['skip', 'update', 'create']).default('skip'),
 })
 export type CsvImportCommitRequest = z.infer<typeof csvImportCommitRequest>
+
+export const csvImportRowError = z.object({
+  row: z.number().int(),
+  error: z.string(),
+})
+export type CsvImportRowError = z.infer<typeof csvImportRowError>
 
 export const csvImportCommitResponse = z.object({
   created: z.number().int(),
   skipped: z.number().int(),
   invalid: z.number().int(),
+  /** Rows patched in place when mode = 'update'. */
+  updated: z.number().int().default(0),
   ids: z.array(uuid),
+  /** Per-row errors so the dialog can show what failed and why. */
+  errors: z.array(csvImportRowError).default([]),
 })
 export type CsvImportCommitResponse = z.infer<typeof csvImportCommitResponse>
 
@@ -389,6 +514,10 @@ export const crmTemplate = z.object({
   body: z.string(),
   kind: templateKind,
   created_at: isoDateTime,
+  /** Lovable parity: grouping, usage telemetry, soft-archive. */
+  category: z.string().nullable().default(null),
+  usage_count: z.number().int().default(0),
+  is_active: z.boolean().default(true),
 })
 export type CrmTemplate = z.infer<typeof crmTemplate>
 
@@ -396,6 +525,7 @@ export const createTemplateRequest = z.object({
   name: z.string().trim().min(2).max(80),
   body: z.string().trim().min(2).max(2000),
   kind: templateKind.default('whatsapp'),
+  category: z.string().trim().max(80).nullish(),
 })
 export type CreateTemplateRequest = z.infer<typeof createTemplateRequest>
 
@@ -403,6 +533,8 @@ export const updateTemplateRequest = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   body: z.string().trim().min(2).max(2000).optional(),
   kind: templateKind.optional(),
+  category: z.string().trim().max(80).nullable().optional(),
+  is_active: z.boolean().optional(),
 })
 export type UpdateTemplateRequest = z.infer<typeof updateTemplateRequest>
 
@@ -448,6 +580,21 @@ export const crmStats = z.object({
   /** Lost in the range, by reason and by who they went to. */
   byLostReason: z.record(z.string(), z.number().int()).default({}),
   byCompetitor: z.record(z.string(), z.number().int()).default({}),
+  /** Lovable parity: pipeline value, quality split, follow-up health, trends. */
+  pipeline_value: z.coerce.number().default(0),
+  quality_breakdown: z.record(z.string(), z.number().int()).default({}),
+  follow_up_health: z.object({
+    overdue: z.number().int().default(0),
+    due_today: z.number().int().default(0),
+    due_tomorrow: z.number().int().default(0),
+    upcoming_7d: z.number().int().default(0),
+    no_follow_up: z.number().int().default(0),
+  }).default({}),
+  activity_trend: z.array(z.object({ day: z.string(), count: z.number().int() })).default([]),
+  won_lost_trend: z.array(z.object({ day: z.string(), won: z.number().int(), lost: z.number().int() })).default([]),
+  proposal_count: z.number().int().default(0),
+  proposal_value: z.coerce.number().default(0),
+  warnings: z.array(z.string()).default([]),
 })
 export type CrmStats = z.infer<typeof crmStats>
 
@@ -466,6 +613,12 @@ export const crmTeamStatsRow = z.object({
   within_sla: z.number().int(),
   sla_hours: z.number().int(),
   avg_first_response_hours: z.number().nullable(),
+  /** Lovable parity: per-member outreach + pipeline warnings. */
+  whatsapp: z.number().int().default(0),
+  messages: z.number().int().default(0),
+  notes: z.number().int().default(0),
+  pipeline_value: z.coerce.number().default(0),
+  warnings: z.array(z.string()).default([]),
 })
 export type CrmTeamStatsRow = z.infer<typeof crmTeamStatsRow>
 
@@ -581,6 +734,12 @@ export const workflow = z.object({
   errored_count: z.number().int().default(0),
   last_enrolled_at: isoDateTime.nullable().default(null),
   created_at: isoDateTime,
+  /** Lovable automation parity: severity, cooldown, notify routing, default-rule key. */
+  severity: z.enum(['info', 'warning', 'critical']).default('info'),
+  cooldown_hours: z.number().int().default(24),
+  notify_assignee: z.boolean().default(true),
+  notify_roles: z.array(z.string()).default([]),
+  rule_key: z.string().nullable().default(null),
 })
 export type Workflow = z.infer<typeof workflow>
 
@@ -592,6 +751,10 @@ export const createWorkflowRequest = z.object({
   is_active: z.boolean().default(true),
   allow_reenroll: z.boolean().default(false),
   exit_on_reply: z.boolean().default(true),
+  severity: z.enum(['info', 'warning', 'critical']).default('info'),
+  cooldown_hours: z.number().int().min(0).max(720).default(24),
+  notify_assignee: z.boolean().default(true),
+  notify_roles: z.array(z.string().trim().max(40)).max(10).default([]),
 })
 export type CreateWorkflowRequest = z.infer<typeof createWorkflowRequest>
 
@@ -748,6 +911,10 @@ export const cadenceStep = z.object({
   template_id: uuid.nullable(),
   template_name: z.string().nullable().default(null),
   note: z.string().nullable(),
+  /** Lovable parity: per-step routing hints for Mark-as-Sent. */
+  recommended_delay_days: z.number().int().nullable().default(null),
+  next_stage: z.string().nullable().default(null),
+  next_follow_up_days: z.number().int().nullable().default(null),
 })
 export type CadenceStep = z.infer<typeof cadenceStep>
 
@@ -759,6 +926,10 @@ export const cadence = z.object({
   /** Leads currently on it. */
   active_leads: z.number().int().default(0),
   created_at: isoDateTime,
+  /** Lovable parity: stage preset the drawer filters on + source scope. */
+  description: z.string().nullable().default(null),
+  stage_filter: z.string().nullable().default(null),
+  source_filter: z.string().nullable().default(null),
 })
 export type Cadence = z.infer<typeof cadence>
 
@@ -766,11 +937,17 @@ export const cadenceStepInput = z.object({
   day_offset: z.number().int().min(0).max(365),
   template_id: uuid.nullable().optional(),
   note: z.string().trim().max(300).nullable().optional(),
+  recommended_delay_days: z.number().int().min(0).max(365).nullable().optional(),
+  next_stage: z.string().trim().max(60).nullable().optional(),
+  next_follow_up_days: z.number().int().min(0).max(365).nullable().optional(),
 })
 export type CadenceStepInput = z.infer<typeof cadenceStepInput>
 
 export const createCadenceRequest = z.object({
   name: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(500).nullish(),
+  stage_filter: z.string().trim().max(60).nullish(),
+  source_filter: z.string().trim().max(40).nullish(),
   steps: z
     .array(cadenceStepInput)
     .min(1)
@@ -784,8 +961,19 @@ export type CreateCadenceRequest = z.infer<typeof createCadenceRequest>
 export const updateCadenceRequest = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   is_active: z.boolean().optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+  stage_filter: z.string().trim().max(60).nullable().optional(),
+  source_filter: z.string().trim().max(40).nullable().optional(),
 })
 export type UpdateCadenceRequest = z.infer<typeof updateCadenceRequest>
+
+/** Lovable parity: Mark-as-Sent — log the send, move follow-up + stage. */
+export const markCadenceSentRequest = z.object({
+  next_follow_up_days: z.number().int().min(0).max(365).nullable().optional(),
+  next_stage_id: uuid.nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+})
+export type MarkCadenceSentRequest = z.infer<typeof markCadenceSentRequest>
 
 export const startCadenceRequest = z.object({ cadence_id: uuid })
 export type StartCadenceRequest = z.infer<typeof startCadenceRequest>
@@ -816,11 +1004,12 @@ export const convertLeadRequest = z
         city: z.string().trim().max(120).optional(),
       })
       .optional(),
+    /** Omit for a client-only convert (no project yet — the project link stays null). */
     project: z.object({
       name: z.string().trim().min(1).max(200),
       package_cost: z.number().finite().nonnegative().default(0),
       status: z.enum(['active', 'on_hold']).default('active'),
-    }),
+    }).optional(),
     /** An accepted quote whose lines become the project's deliverables. */
     quote_id: uuid.optional(),
   })
@@ -829,12 +1018,20 @@ export const convertLeadRequest = z
   })
 export type ConvertLeadRequest = z.infer<typeof convertLeadRequest>
 
-export const convertLeadResponse = z.object({ client_id: uuid, project_id: uuid })
+export const convertLeadResponse = z.object({
+  client_id: uuid,
+  /** Null for a client-only convert — the lead is won, no project yet. */
+  project_id: uuid.nullable(),
+})
 export type ConvertLeadResponse = z.infer<typeof convertLeadResponse>
 
 // ── ad-hoc responses, named ───────────────────────────────────
 export const idResponse = z.object({ id: uuid })
 export type IdResponse = z.infer<typeof idResponse>
+
+/** POST /crm/workflows/seed — installs the 7 default automation workflows. */
+export const seedWorkflowsResponse = z.object({ seeded: z.number().int() })
+export type SeedWorkflowsResponse = z.infer<typeof seedWorkflowsResponse>
 
 export const cadenceStartResponse = z.object({ next_at: isoDateTime.nullable() })
 export type CadenceStartResponse = z.infer<typeof cadenceStartResponse>

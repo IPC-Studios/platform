@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { CalendarClock, ChevronLeft, ChevronRight, IndianRupee, UserPlus, X } from 'lucide-react'
+import { CalendarClock, ChevronLeft, ChevronRight, Download, IndianRupee, Pencil, UserPlus, X } from 'lucide-react'
 import { findConflicts, overlaps } from '@ipc/domain'
 import { shootListItem, type BookSlotRequest, type ShootListItem, type TeamSlot } from '@ipc/contracts'
+import { toast } from 'sonner'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { callApi } from '@/shared/api/client'
@@ -15,11 +16,12 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { downloadCsv } from '@/shared/ui/csv'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { formatINR } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
-import { useSlots, useMembers, useBookSlot, useSetSlotStatus, useSetSlotCost, ApiError } from '@/features/allocation/api'
+import { useSlots, useMembers, useBookSlot, useSetSlotStatus, useSetSlotCost, useUpdateSlot, ApiError } from '@/features/allocation/api'
 
 export function TeamAllocationPage() {
   return (
@@ -124,20 +126,48 @@ function TeamBooking() {
     setMonth(next.getMonth())
   }
 
+  function exportCsv() {
+    const rows = slots.data ?? []
+    if (rows.length === 0) {
+      toast.error('Nothing to export.')
+      return
+    }
+    const lines = rows.map((s) =>
+      [
+        s.user_name ?? '', s.service_name ?? '', s.start_at, s.end_at, s.status,
+        s.estimated_cost ?? '', s.final_cost ?? '', s.cost_status,
+      ]
+        .map((v) => {
+          const str = String(v ?? '')
+          return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
+        })
+        .join(','),
+    )
+    downloadCsv(
+      `team-slots-${year}-${String(month + 1).padStart(2, '0')}.csv`,
+      ['Member,Role,Start,End,Status,Estimated,Final,Cost status', ...lines].join('\n'),
+    )
+  }
+
   return (
     <>
       <PageHeader
         title="Team Booking"
         description="Book your team for upcoming shoots and avoid double-booking."
         actions={
-          <BookDialog
-            shoots={inMonth}
-            trigger={
-              <Button>
-                <UserPlus /> Bulk Assign
-              </Button>
-            }
-          />
+          <>
+            <Button variant="outline" onClick={exportCsv} disabled={(slots.data ?? []).length === 0}>
+              <Download /> Export CSV
+            </Button>
+            <BookDialog
+              shoots={inMonth}
+              trigger={
+                <Button>
+                  <UserPlus /> Bulk Assign
+                </Button>
+              }
+            />
+          </>
         }
       />
 
@@ -401,6 +431,91 @@ function EditSlotCostDialog({ slot }: { slot: TeamSlot }) {
   )
 }
 
+/** Edit a booking's who/when/what (Lovable parity: edit slot). Cost and status have their own dialogs/actions. */
+function EditSlotDialog({ slot, onClose }: { slot: TeamSlot; onClose: () => void }) {
+  const members = useMembers()
+  const update = useUpdateSlot()
+  const [userId, setUserId] = useState(slot.user_id)
+  const [service, setService] = useState(slot.service_name ?? '')
+  const [start, setStart] = useState(toLocalInput(slot.start_at))
+  const [end, setEnd] = useState(toLocalInput(slot.end_at))
+  const [error, setError] = useState<string | null>(null)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    try {
+      const startIso = new Date(start).toISOString()
+      const endIso = new Date(end).toISOString()
+      if (!(new Date(endIso) > new Date(startIso))) {
+        setError('End must be after start.')
+        return
+      }
+      await update.mutateAsync({
+        id: slot.id,
+        patch: {
+          user_id: userId,
+          service_name: service.trim() || null,
+          start_at: startIso,
+          end_at: endIso,
+        },
+      })
+      onClose()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'We could not save these changes.')
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent title="Edit booking" description={slot.user_name ?? undefined}>
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Member</Label>
+            <Select value={userId} onChange={(e) => setUserId(e.target.value)} required>
+              {(members.data ?? []).map((m) => (
+                <option key={m.user_id} value={m.user_id}>{m.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Role</Label>
+            <Input value={service} onChange={(e) => setService(e.target.value)} placeholder="Candid Photographer" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Start</Label>
+              <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} required />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>End</Label>
+              <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} required />
+            </div>
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">{error}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button type="submit" disabled={update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function toLocalInput(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function ShootRow({
   shoot,
   slots,
@@ -412,6 +527,7 @@ function ShootRow({
 }) {
   const setStatus = useSetSlotStatus()
   const confirm = useConfirm()
+  const [editing, setEditing] = useState<TeamSlot | null>(null)
   const mine = slots.filter((s) => s.shoot_id === shoot.id)
   const filledFor = (name: string) => mine.filter((s) => same(s.service_name, name)).length
 
@@ -423,6 +539,15 @@ function ShootRow({
       destructive: true,
     })
     if (yes) setStatus.mutate({ id: s.id, status: 'cancelled' })
+  }
+
+  async function onRelease(s: TeamSlot) {
+    const yes = await confirm({
+      title: `Release ${s.user_name ?? 'this'} from this slot?`,
+      description: 'Released slots no longer block future bookings.',
+      confirmLabel: 'Release',
+    })
+    if (yes) setStatus.mutate({ id: s.id, status: 'released' })
   }
   const needed = shoot.requirements.reduce((n, r) => n + r.quantity, 0)
   const filled = shoot.requirements.reduce((n, r) => n + Math.min(r.quantity, filledFor(r.name)), 0)
@@ -514,14 +639,45 @@ function ShootRow({
                 key={s.id}
                 className="flex items-center gap-1 rounded-full border border-border bg-muted/50 py-0.5 pl-2 pr-1 text-xs"
               >
-                {s.user_name ?? 'Member'}
+                <Link to="/team-allocation/member/$uid" params={{ uid: s.user_id }} className="hover:underline">
+                  {s.user_name ?? 'Member'}
+                </Link>
                 {s.service_name ? ` · ${s.service_name}` : ''}
+                <StatusBadge
+                  tone={s.status === 'booked' ? 'info' : s.status === 'released' ? 'neutral' : 'danger'}
+                  className="px-1.5 py-0 text-[0.65rem]"
+                >
+                  {s.status}
+                </StatusBadge>
                 {s.cost_status !== 'not_decided' && (
                   <StatusBadge tone={COST_STATUS_TONE[s.cost_status]} className="px-1.5 py-0 text-[0.65rem]">
                     {formatINR(s.final_cost ?? s.estimated_cost ?? 0)}
                   </StatusBadge>
                 )}
                 <EditSlotCostDialog slot={s} />
+                {s.status === 'booked' && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-4"
+                      title="Edit this booking"
+                      onClick={() => setEditing(s)}
+                    >
+                      <Pencil className="size-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-4"
+                      title="Release this booking (frees the slot)"
+                      onClick={() => void onRelease(s)}
+                      disabled={setStatus.isPending}
+                    >
+                      <CalendarClock className="size-3" />
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -536,6 +692,7 @@ function ShootRow({
             ))}
           </div>
         )}
+        {editing && <EditSlotDialog slot={editing} onClose={() => setEditing(null)} />}
       </CardContent>
     </Card>
   )
@@ -995,13 +1152,18 @@ function BookDialog({
   const slots = useSlots()
   const book = useBookSlot()
   const [open, setOpen] = useState(!!openNow)
-  const [userId, setUserId] = useState('')
+  /** Multi-select for bulk assignment (Lovable parity: BulkAssign). */
+  const [userIds, setUserIds] = useState<string[]>([])
   const [shootId, setShootId] = useState(prefill?.id ?? '')
   const [service, setService] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
   const [cost, setCost] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  function toggleUser(id: string) {
+    setUserIds((prev) => (prev.includes(id) ? prev.filter((u) => u !== id) : [...prev, id]))
+  }
 
   const shoot = shoots.find((s) => s.id === shootId) ?? null
   const shootDate = shoot?.shoot_date ?? null
@@ -1032,17 +1194,34 @@ function BookDialog({
   }, [open, gap])
 
   const conflicts = useMemo(() => {
-    if (!userId || !start || !end) return []
-    const mine = (slots.data ?? []).filter((s) => s.user_id === userId && s.status === 'booked')
+    if (userIds.length === 0 || !start || !end) return []
+    let startIso = ''
+    let endIso = ''
     try {
-      return findConflicts(
-        { start_at: new Date(start).toISOString(), end_at: new Date(end).toISOString() },
-        mine,
-      )
+      startIso = new Date(start).toISOString()
+      endIso = new Date(end).toISOString()
     } catch {
       return []
     }
-  }, [userId, start, end, slots.data])
+    const out: { userId: string; name: string; count: number }[] = []
+    for (const uid of userIds) {
+      const mine = (slots.data ?? []).filter((s) => s.user_id === uid && s.status === 'booked')
+      let n = 0
+      try {
+        n = findConflicts({ start_at: startIso, end_at: endIso }, mine).length
+      } catch {
+        n = 0
+      }
+      if (n > 0) {
+        out.push({
+          userId: uid,
+          name: (members.data ?? []).find((m) => m.user_id === uid)?.name ?? 'Member',
+          count: n,
+        })
+      }
+    }
+    return out
+  }, [userIds, start, end, slots.data, members.data])
 
   function change(next: boolean) {
     setOpen(next)
@@ -1053,17 +1232,23 @@ function BookDialog({
     e.preventDefault()
     setError(null)
     try {
-      const body: BookSlotRequest = {
-        user_id: userId,
-        shoot_id: shootId || null,
-        service_name: service || undefined,
-        start_at: new Date(start).toISOString(),
-        end_at: new Date(end).toISOString(),
-        estimated_cost: cost.trim() ? Number(cost) : undefined,
+      if (userIds.length === 0) throw new Error('Pick at least one member.')
+      let done = 0
+      for (const uid of userIds) {
+        const body: BookSlotRequest = {
+          user_id: uid,
+          shoot_id: shootId || null,
+          service_name: service || undefined,
+          start_at: new Date(start).toISOString(),
+          end_at: new Date(end).toISOString(),
+          estimated_cost: cost.trim() ? Number(cost) : undefined,
+        }
+        await book.mutateAsync(body)
+        done += 1
       }
-      await book.mutateAsync(body)
+      toast.success(done === 1 ? 'Crew booked' : `${done} crew booked`)
       change(false)
-      setUserId('')
+      setUserIds([])
       setService('')
       setStart('')
       setEnd('')
@@ -1088,15 +1273,22 @@ function BookDialog({
       >
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label>Member</Label>
-            <Select value={userId} onChange={(e) => setUserId(e.target.value)} required>
-              <option value="">— Select —</option>
+            <Label>Members ({userIds.length} selected)</Label>
+            <div className="grid max-h-44 gap-1.5 overflow-y-auto sm:grid-cols-2">
               {(members.data ?? []).map((m) => (
-                <option key={m.user_id} value={m.user_id}>
+                <label key={m.user_id} className="flex items-center gap-2 rounded-md border border-border p-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={userIds.includes(m.user_id)}
+                    onChange={() => toggleUser(m.user_id)}
+                  />
                   {m.name}
-                </option>
+                </label>
               ))}
-            </Select>
+            </div>
+            {(members.data ?? []).length === 0 && (
+              <p className="text-xs text-muted-foreground">No active members found.</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -1171,8 +1363,7 @@ function BookDialog({
 
           {conflicts.length > 0 && (
             <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-              This member already has {conflicts.length} booking
-              {conflicts.length === 1 ? '' : 's'} that overlap this window.
+              Overlapping bookings: {conflicts.map((c) => `${c.name} (${c.count})`).join(', ')}.
             </p>
           )}
           {error && (
@@ -1187,8 +1378,8 @@ function BookDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={book.isPending || conflicts.length > 0}>
-              <CalendarClock /> {book.isPending ? 'Booking…' : 'Book'}
+            <Button type="submit" disabled={book.isPending || conflicts.length > 0 || userIds.length === 0}>
+              <CalendarClock /> {book.isPending ? 'Booking…' : userIds.length > 1 ? `Book ${userIds.length}` : 'Book'}
             </Button>
           </div>
         </form>

@@ -194,6 +194,16 @@ export const THEME_PRESETS: Readonly<Record<string, ThemePreset>> = Object.fromE
       brandLight: { l: 0.68, c: 0.04, h: 255 },
       brandDark: { l: 0.78, c: 0.03, h: 255 },
     }),
+    preset({
+      key: 'premium_rose_gold',
+      label: 'Premium Rose Gold',
+      description: 'Luxury, feminine, and premium for boutique brands.',
+      font: 'playfair',
+      light: { l: 0.45, c: 0.18, h: 350 },
+      dark: { l: 0.68, c: 0.16, h: 350 },
+      brandLight: { l: 0.72, c: 0.14, h: 340 },
+      brandDark: { l: 0.78, c: 0.12, h: 340 },
+    }),
   ].map((p) => [p.key, p]),
 )
 

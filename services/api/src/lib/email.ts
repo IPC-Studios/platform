@@ -170,6 +170,42 @@ function brandedHtml({ title, preheader, body, cta, link, footer }: MailCopy): s
 }
 
 /**
+ * Client document emails (receipt / quotation / terms / delivery).
+ * Returns 'sent' | 'provider_missing' so the studio UI can fall back to
+ * mailto:/copy-link instead of claiming an email went. Never throws.
+ */
+export async function sendClientDocEmail(
+  env: Env,
+  to: string | null | undefined,
+  subject: string,
+  link: string,
+  intro: string,
+): Promise<{ status: 'sent' | 'provider_missing' | 'failed'; error?: string; url: string }> {
+  if (!env.RESEND_API_KEY) return { status: 'provider_missing', url: link }
+  if (!to) return { status: 'failed', error: 'Client email not found for this project.', url: link }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to,
+        subject,
+        html: brandedHtml({ title: subject, preheader: intro, body: intro, cta: 'Open document', link, footer: 'If you were not expecting this, you can ignore this email.' }),
+      }),
+    })
+    if (!res.ok) return { status: 'failed', error: 'Email failed to send.', url: link }
+    return { status: 'sent', url: link }
+  } catch (e) {
+    console.error('[email] client doc send threw', e)
+    return { status: 'failed', error: 'Email failed to send.', url: link }
+  }
+}
+
+/**
  * Terms sent to someone the studio has booked.
  *
  * Returns whether it actually went: unlike the others, the caller shows the

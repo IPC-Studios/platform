@@ -23,6 +23,8 @@ const valid = {
   admin_name: 'Priya Sharma',
   email: 'priya@aperture.in',
   password: 'correct-horse',
+  // Phone is required on register (contract + form both enforce it).
+  phone: '9876543210',
 }
 
 const register = (patch: Record<string, unknown>) =>
@@ -36,7 +38,7 @@ const register = (patch: Record<string, unknown>) =>
   )
 
 describe('fieldErrors — register', () => {
-  it('passes valid input with no phone', () => {
+  it('passes valid input with a phone', () => {
     expect(register({})).toEqual({})
   })
 

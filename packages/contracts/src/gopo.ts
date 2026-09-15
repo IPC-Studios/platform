@@ -65,5 +65,24 @@ export const gopoSummary = z.object({
   project_performance: z.array(gopoProjectPerformance),
   attention_items: z.array(gopoAttentionItem),
   recent_activity: z.array(gopoRecentActivity),
+  // Lovable parity: filters + cash/pending split + signals. All optional.
+  cash_received: z.number().nullish(),
+  pending_receivable: z.number().nullish(),
+  company_expenses: z.number().nullish(),
+  personal_expenses: z.number().nullish(),
+  salary_cost: z.number().nullish(),
+  gst_liability: z.number().nullish(),
+  rcm_liability: z.number().nullish(),
+  top_projects: z.array(gopoProjectPerformance).nullish(),
+  bottom_projects: z.array(gopoProjectPerformance).nullish(),
+  attention_count: z.number().int().nullish(),
+  signals: z.array(z.string()).nullish(),
 })
 export type GopoSummary = z.infer<typeof gopoSummary>
+
+export const gopoQuery = z.object({
+  start_date: z.string().nullish(),
+  end_date: z.string().nullish(),
+  include_salaries: z.coerce.boolean().default(true),
+})
+export type GopoQuery = z.infer<typeof gopoQuery>

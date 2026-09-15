@@ -12,6 +12,7 @@ const member = (over: Partial<DirectoryMember> & { name: string }): DirectoryMem
   engagement_type: 'in_house',
   login_enabled: true,
   salary: null,
+  freelancer_rate: null,
   address: null,
   payout_type: null,
   commission_pct: null,

@@ -39,6 +39,7 @@ import { useMembers, useSlots } from '@/features/allocation/api'
 import { useInvoices } from '@/features/billing/api'
 import { useDataRecords } from '@/features/data/api'
 import { useBoard } from '@/features/tasks/api'
+import { EmployeeDashboard } from '@/features/dashboard/EmployeeDashboard'
 import { buildJourney } from '@/features/onboarding/journey'
 import { dashboardSections } from '@/features/onboarding/dashboard-sections'
 import { SetupJourney } from '@/features/onboarding/SetupJourney'
@@ -46,6 +47,8 @@ import { SetupJourney } from '@/features/onboarding/SetupJourney'
 export function DashboardPage() {
   return <DashboardInner />
 }
+
+const EMPLOYEE_ROLES = new Set(['employee'])
 
 const STATUS_TONE = {
   active: 'info',
@@ -57,6 +60,22 @@ const STATUS_TONE = {
 function DashboardInner() {
   const { session } = useAuth()
   const access = useAccess()
+
+  // Lovable parity: employees get their own day view (my tasks/shoots/
+  // attendance/schedule), everyone else gets the studio command center below.
+  if (session?.role && EMPLOYEE_ROLES.has(session.role)) {
+    return (
+      <>
+        <PageHeader
+          title={`Welcome, ${session?.display_name ?? ''}`}
+          description="Your tasks, shoots and attendance at a glance."
+        />
+        <div className="mt-4">
+          <EmployeeDashboard />
+        </div>
+      </>
+    )
+  }
 
   const projects = useProjects()
   const clients = useClients()
@@ -86,9 +105,9 @@ function DashboardInner() {
   const totals = summary(tracked)
 
   const activeProjects = (projects.data ?? []).filter((p) => p.status === 'active').length
-  const clientCount = clients.data?.length ?? 0
+  const clientCount = Array.isArray(clients.data) ? clients.data.length : 0
   const teamCount = members.data?.length ?? 0
-  const outstanding = (invoices.data ?? []).reduce((s, i) => s + i.balance_due, 0)
+  const outstanding = (invoices.data?.items ?? []).reduce((s, i) => s + i.balance_due, 0)
   const recent = (projects.data ?? []).slice(0, 5)
 
   // The setup guide is for whoever is standing the studio up. An employee has
@@ -113,7 +132,7 @@ function DashboardInner() {
       projects: projects.data?.length ?? 0,
       bookings: (slots.data ?? []).filter((s) => s.status === 'booked').length,
       dataRecords: dataRecords.data?.length ?? 0,
-      invoices: invoices.data?.length ?? 0,
+      invoices: invoices.data?.items.length ?? 0,
       trackedTasks: board.data?.length ?? 0,
     },
     (m) => access.hasModule(m),

@@ -7,7 +7,7 @@ export type ReminderPriority = z.infer<typeof reminderPriority>
 export const reminderStatus = z.enum(['active', 'completed', 'dismissed'])
 export type ReminderStatus = z.infer<typeof reminderStatus>
 
-export const reminderEntityType = z.enum(['lead', 'project', 'client', 'invoice', 'enquiry', 'task', 'shoot', 'custom'])
+export const reminderEntityType = z.enum(['lead', 'project', 'client', 'invoice', 'enquiry', 'task', 'shoot', 'custom', 'general'])
 export type ReminderEntityType = z.infer<typeof reminderEntityType>
 
 export const reminder = z.object({
@@ -55,3 +55,24 @@ export const createReminderRequest = z.object({
   assigned_to: uuid.nullish(),
 })
 export type CreateReminderRequest = z.infer<typeof createReminderRequest>
+
+/** GET /reminders query — Lovable parity filters, all optional. */
+export const remindersQuery = z.object({
+  status: reminderStatus.optional(),
+  priority: reminderPriority.optional(),
+  /** Assignee (who it's for). */
+  user_id: uuid.optional(),
+  assigned_to: uuid.optional(),
+  entity_type: reminderEntityType.optional(),
+  entity_id: uuid.optional(),
+  due_from: isoDateTime.optional(),
+  due_to: isoDateTime.optional(),
+  overdue_only: z
+    .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
+  search: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+  cursor: isoDateTime.optional(),
+})
+export type RemindersQuery = z.infer<typeof remindersQuery>

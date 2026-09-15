@@ -76,6 +76,18 @@ export function useUpdateShoot() {
   })
 }
 
+export function useDeleteShoot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => callApi(`/shoots/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    onSuccess: () => {
+      toast.success('Shoot deleted')
+      void qc.invalidateQueries({ queryKey: ['shoots'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
 export function useShootPresets(kind: ShootPresetKind) {
   const { session } = useAuth()
   const access = useAccess()

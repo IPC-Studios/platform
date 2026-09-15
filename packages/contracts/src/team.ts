@@ -87,6 +87,8 @@ export const directoryMember = z.object({
   engagement_type: z.string().nullable(),
   login_enabled: z.boolean(),
   salary: z.number().nullable(),
+  /** Per-shoot/day rate for freelancers — separate from the monthly salary above. */
+  freelancer_rate: money.nullable().default(null),
   address: z.string().nullable(),
   /** Freelance-friendly: salaried, or paid per shoot/day/project. */
   payout_type: z.enum(['salary', 'per_shoot', 'per_day', 'per_project', 'custom']).nullable(),
@@ -126,6 +128,8 @@ export const addMemberRequest = z
     role: assignableRole.default('employee'),
     role_ids: z.array(uuid).max(20).default([]),
     salary: money.optional(),
+    /** Per-shoot/day rate — the freelancer counterpart to `salary`. */
+    freelancer_rate: money.optional(),
     address: z.string().trim().max(300).optional(),
     payout_type: z.enum(['salary', 'per_shoot', 'per_day', 'per_project', 'custom']).optional(),
     commission_pct: z.number().min(0).max(100).optional(),
@@ -169,12 +173,22 @@ export const addMemberResponse = z.object({
 })
 export type AddMemberResponse = z.infer<typeof addMemberResponse>
 
+/** Paginated directory response — returned when page/page_size are requested. Array shape is kept for callers without them. */
+export const directoryPage = z.object({
+  items: directoryMember.array(),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+export type DirectoryPage = z.infer<typeof directoryPage>
+
 export const updateMemberRequest = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   status: memberStatus.optional(),
   role: assignableRole.optional(),
   engagement_type: engagementType.optional(),
   salary: money.nullable().optional(),
+  freelancer_rate: money.nullable().optional(),
   phone: z.string().trim().max(20).nullable().optional(),
   alternate_phone: z.string().trim().max(20).nullable().optional(),
   address: z.string().trim().max(300).nullable().optional(),
@@ -192,11 +206,16 @@ export const updateMemberRequest = z.object({
 export type UpdateMemberRequest = z.infer<typeof updateMemberRequest>
 
 /** One row of the pending-invitations panel. */
+export const invitationStatus = z.enum(['pending', 'accepted', 'revoked', 'expired'])
+export type InvitationStatus = z.infer<typeof invitationStatus>
+
 export const invitation = z.object({
   id: uuid,
   email: z.string(),
   name: z.string(),
   role: z.string(),
+  phone: z.string().nullable().default(null),
+  status: invitationStatus.default('pending'),
   expires_at: isoDateTime,
   created_at: isoDateTime,
   last_sent_at: isoDateTime,
@@ -248,6 +267,52 @@ export type InvitationPreview = z.infer<typeof invitationPreview>
 
 export const acceptInvitationRequest = z.object({
   token: z.string().min(10),
-  password: z.string().min(6).max(72),
+  password: z.string().min(8).max(72),
 })
 export type AcceptInvitationRequest = z.infer<typeof acceptInvitationRequest>
+
+/** Monthly salary ledger row — one person's pay for one calendar month. */
+export const monthlySalaryStatus = z.enum(['unpaid', 'partial', 'paid', 'partially_paid'])
+export type MonthlySalaryStatus = z.infer<typeof monthlySalaryStatus>
+
+export const monthlySalary = z.object({
+  id: uuid,
+  user_id: uuid,
+  name: z.string().nullable().default(null),
+  email: z.string().nullable().default(null),
+  phone: z.string().nullable().default(null),
+  engagement_type: z.string().nullable().default(null),
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+  base_amount: money,
+  paid_amount: money.default(0),
+  status: monthlySalaryStatus.default('unpaid'),
+  created_at: isoDateTime,
+})
+export type MonthlySalary = z.infer<typeof monthlySalary>
+
+export const monthlySalaryList = z.object({
+  items: z.array(monthlySalary),
+  totals: z.object({
+    base: money,
+    paid: money,
+    pending: money,
+    count: z.number().int(),
+    paid_count: z.number().int(),
+    partial_count: z.number().int(),
+    unpaid_count: z.number().int(),
+  }),
+})
+export type MonthlySalaryList = z.infer<typeof monthlySalaryList>
+
+export const generateMonthlySalariesRequest = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+})
+export type GenerateMonthlySalariesRequest = z.infer<typeof generateMonthlySalariesRequest>
+
+export const updateMonthlySalaryRequest = z.object({
+  paid_amount: money.optional(),
+  status: monthlySalaryStatus.optional(),
+})
+export type UpdateMonthlySalaryRequest = z.infer<typeof updateMonthlySalaryRequest>

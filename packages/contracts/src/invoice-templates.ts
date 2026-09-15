@@ -66,6 +66,8 @@ export const invoiceNoteTemplate = z.object({
   company_id: uuid,
   title: z.string(),
   content: z.string(),
+  /** 'note' fills the invoice Notes field; 'terms' fills Terms & conditions. Legacy rows read as 'note'. */
+  template_type: z.enum(['terms', 'note']).default('note'),
   is_default: z.boolean(),
   created_at: isoDateTime,
 })
@@ -79,6 +81,7 @@ export type InvoiceNoteTemplateList = z.infer<typeof invoiceNoteTemplateList>
 export const createInvoiceNoteTemplateRequest = z.object({
   title: z.string().trim().min(1).max(160),
   content: z.string().trim().min(1).max(2000),
+  template_type: z.enum(['terms', 'note']).default('note'),
   is_default: z.boolean().default(false),
 })
 export type CreateInvoiceNoteTemplateRequest = z.infer<typeof createInvoiceNoteTemplateRequest>

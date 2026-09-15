@@ -1,53 +1,77 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, Circle, Play } from 'lucide-react'
-import type { TaskListItem, TaskStatus } from '@ipc/contracts'
+import { AlertCircle, CheckCircle2, Clock, Layers, Mic } from 'lucide-react'
+import type { TaskListItem, TaskPriority, TaskStatus } from '@ipc/contracts'
 import { PageHeader } from '@/shared/layout/page-header'
-import { FilterTabs } from '@/shared/layout/filter-tabs'
 import { Button } from '@/shared/ui/button'
-import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
+import { Dialog, DialogClose, DialogContent } from '@/shared/ui/dialog'
+import { Input, Label, Select } from '@/shared/ui/input'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { HowToUse } from '@/shared/ui/how-to-use'
-import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { cn } from '@/shared/ui/cn'
 import { useMyTasks, useUpdateMyTaskStatus } from '@/features/tasks/api'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
-  TASK_TABS,
-  byUrgency,
-  isOverdue,
-  matchesTab,
-  tabCounts,
   todayISO,
-  type TaskTab,
 } from '@/features/tasks/board'
 
-const STATUS_TONE: Record<TaskStatus, 'info' | 'warning' | 'success' | 'neutral'> = {
-  to_do: 'neutral',
-  in_progress: 'info',
-  completed: 'success',
-  cancelled: 'neutral',
+const STATUSES: TaskStatus[] = ['to_do', 'in_progress', 'completed', 'cancelled']
+
+type SortKey = 'due_asc' | 'due_desc' | 'recent' | 'priority'
+type StatusFilter = 'all' | TaskStatus
+
+const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+
+const PRIORITY_TONE = { low: 'neutral', medium: 'info', high: 'warning', urgent: 'danger' } as const
+
+function compareTasks(a: TaskListItem, b: TaskListItem, sort: SortKey): number {
+  if (sort === 'priority') {
+    const pr = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]
+    if (pr !== 0) return pr
+  }
+  if (!a.due_date && !b.due_date) return a.title.localeCompare(b.title)
+  if (!a.due_date) return 1
+  if (!b.due_date) return -1
+  if (a.due_date === b.due_date) return 0
+  if (sort === 'due_desc') return a.due_date < b.due_date ? 1 : -1
+  return a.due_date < b.due_date ? -1 : 1
 }
 
-const PRIORITY_TONE = {
-  low: 'neutral',
-  medium: 'info',
-  high: 'warning',
-  urgent: 'danger',
-} as const
+interface Buckets {
+  overdue: TaskListItem[]
+  dueToday: TaskListItem[]
+  upcoming: TaskListItem[]
+  noDue: TaskListItem[]
+  completed: TaskListItem[]
+}
 
-/** What the person can move a task to from where it is. */
-const NEXT: Partial<Record<TaskStatus, { status: TaskStatus; label: string; icon: typeof Play }>> = {
-  to_do: { status: 'in_progress', label: 'Start', icon: Play },
-  in_progress: { status: 'completed', label: 'Done', icon: CheckCircle2 },
-  completed: { status: 'to_do', label: 'Reopen', icon: Circle },
+function bucketize(items: TaskListItem[], sort: SortKey, today: string): Buckets {
+  const out: Buckets = { overdue: [], dueToday: [], upcoming: [], noDue: [], completed: [] }
+  for (const t of items) {
+    if (t.status === 'completed' || t.status === 'cancelled') {
+      out.completed.push(t)
+      continue
+    }
+    if (!t.due_date) out.noDue.push(t)
+    else if (t.due_date < today) out.overdue.push(t)
+    else if (t.due_date === today) out.dueToday.push(t)
+    else out.upcoming.push(t)
+  }
+  const fn = (a: TaskListItem, b: TaskListItem) => compareTasks(a, b, sort)
+  out.overdue.sort(fn)
+  out.dueToday.sort(fn)
+  out.upcoming.sort(fn)
+  out.noDue.sort(fn)
+  out.completed.sort(fn)
+  return out
 }
 
 /**
- * The tasks assigned to me, and nothing else. No module gate: every member
- * has work of their own, and the API only ever returns their assignments.
+ * My tasks as buckets (Lovable parity with _app.tasks.my): summary cards,
+ * sort + status filter, and Overdue / Due-today / Upcoming / No-date /
+ * Completed groups with inline status moves and voice notes.
  */
 export function MyTasksPage() {
   return <MyTasks />
@@ -56,16 +80,126 @@ export function MyTasksPage() {
 function MyTasks() {
   const { data, isLoading, isError, error, refetch } = useMyTasks()
   const move = useUpdateMyTaskStatus()
-  const [tab, setTab] = useState<TaskTab>('all')
   const today = todayISO()
-  const isMobile = useIsMobile()
+  const [sort, setSort] = useState<SortKey>('due_asc')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [voiceTask, setVoiceTask] = useState<TaskListItem | null>(null)
+  const [voiceUrl, setVoiceUrl] = useState('')
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const tasks = useMemo(() => data ?? [], [data])
-  const counts = useMemo(() => tabCounts(tasks, today), [tasks, today])
-  const rows = useMemo(
-    () => tasks.filter((t) => matchesTab(t, tab, today)).sort(byUrgency(today)),
-    [tasks, tab, today],
+
+  const summary = useMemo(() => {
+    const s = { dueToday: 0, overdue: 0, inProgress: 0, completed: 0 }
+    for (const t of tasks) {
+      if (t.status === 'completed') {
+        s.completed++
+        continue
+      }
+      if (t.status === 'cancelled') continue
+      if (t.status === 'in_progress') s.inProgress++
+      if (t.due_date === today) s.dueToday++
+      else if (t.due_date && t.due_date < today) s.overdue++
+    }
+    return s
+  }, [tasks, today])
+
+  const filtered = useMemo(
+    () => (statusFilter === 'all' ? tasks : tasks.filter((t) => t.status === statusFilter)),
+    [tasks, statusFilter],
   )
+  const buckets = useMemo(() => bucketize(filtered, sort, today), [filtered, sort, today])
+
+  function onChangeStatus(t: TaskListItem, status: TaskStatus) {
+    setBusyId(t.id)
+    move.mutate(
+      { id: t.id, status },
+      { onSettled: () => setBusyId(null) },
+    )
+  }
+
+  function openVoice(t: TaskListItem) {
+    setVoiceTask(t)
+    setVoiceUrl(t.voice_note_url ?? '')
+  }
+
+  function saveVoice() {
+    if (!voiceTask) return
+    setBusyId(voiceTask.id)
+    move.mutate(
+      { id: voiceTask.id, status: voiceTask.status, voice_note_url: voiceUrl.trim() || null },
+      {
+        onSettled: () => {
+          setBusyId(null)
+          setVoiceTask(null)
+        },
+      },
+    )
+  }
+
+  const renderTask = (t: TaskListItem) => {
+    const overdue = t.status !== 'completed' && t.status !== 'cancelled' && !!t.due_date && t.due_date < today
+    const dueToday = !!t.due_date && t.due_date === today && t.status !== 'completed'
+    return (
+      <div key={t.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{t.title}</p>
+          {t.description && <p className="truncate text-xs text-muted-foreground">{t.description}</p>}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <StatusBadge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</StatusBadge>
+            {t.due_date && <StatusBadge tone="neutral">Due {t.due_date}</StatusBadge>}
+            {overdue && <StatusBadge tone="danger">Overdue</StatusBadge>}
+            {dueToday && <StatusBadge tone="warning">Due today</StatusBadge>}
+            {t.project_name && <span className="text-[11px] text-muted-foreground">{t.project_name}</span>}
+            {t.voice_note_url && <StatusBadge tone="info">Voice note</StatusBadge>}
+          </div>
+          <p className="mt-1 text-xs">
+            <span className="font-medium text-muted-foreground">Next action: </span>
+            {t.status === 'completed'
+              ? 'No action needed'
+              : t.status === 'cancelled'
+                ? 'Cancelled — no action'
+                : overdue
+                  ? 'Complete overdue work'
+                  : dueToday
+                    ? 'Complete today'
+                    : t.status === 'in_progress'
+                      ? 'Continue work'
+                      : 'Start this task'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Select
+            value={t.status}
+            disabled={busyId === t.id}
+            onChange={(e) => onChangeStatus(t, e.target.value as TaskStatus)}
+            className="h-8 w-36"
+            aria-label={`Status for ${t.title}`}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+            ))}
+          </Select>
+          <Button size="sm" variant="outline" onClick={() => openVoice(t)}>
+            <Mic /> Voice note
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const Section = ({ title, icon: Icon, items }: { title: string; icon: typeof Clock; items: TaskListItem[] }) => {
+    if (items.length === 0) return null
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <Icon className="size-4" /> {title}
+          <span className="rounded-full bg-muted px-1.5 text-[11px]">{items.length}</span>
+        </h2>
+        <div className="flex flex-col gap-2">{items.map(renderTask)}</div>
+      </section>
+    )
+  }
 
   return (
     <>
@@ -73,125 +207,88 @@ function MyTasks() {
       <HowToUse
         title="Work the list top-down"
         description="Overdue first, then what is due soonest. Start a task when you pick it up and mark it done when it is."
-        steps={['Pick the top task.', 'Press Start.', 'Press Done when it is finished.']}
+        steps={['Pick the top task.', 'Change its status.', 'Attach a voice note when words are faster than typing.']}
       />
 
-      <FilterTabs<TaskTab>
-        value={tab}
-        onChange={setTab}
-        tabs={TASK_TABS.map((t) => ({ ...t, count: counts[t.value] }))}
-        className="mb-4 mt-6"
-      />
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <SummaryCard label="Due today" value={summary.dueToday} icon={Clock} />
+        <SummaryCard label="Overdue" value={summary.overdue} icon={AlertCircle} warn={summary.overdue > 0} />
+        <SummaryCard label="In progress" value={summary.inProgress} icon={Layers} />
+        <SummaryCard label="Completed" value={summary.completed} icon={CheckCircle2} />
+      </div>
 
-      {isLoading ? (
-        <SkeletonList rows={5} columns={5} />
-      ) : isError ? (
-        <ErrorState error={error} onRetry={() => void refetch()} />
-      ) : rows.length === 0 ? (
-        <Card>
-          <CardContent className="py-4">
-            <EmptyState
-              title={tasks.length === 0 ? 'Nothing assigned to you yet' : 'Nothing in this view'}
-              description={
-                tasks.length === 0
-                  ? 'When a manager assigns you a task, it will appear here.'
-                  : 'Try another tab.'
-              }
-            />
-          </CardContent>
-        </Card>
-      ) : isMobile ? (
-        <div className="flex flex-col gap-3">
-          {rows.map((t) => (
-            <TaskCard key={t.id} task={t} today={today} onMove={(s) => move.mutate({ id: t.id, status: s })} busy={move.isPending} />
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Sort</span>
+        <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 w-56">
+          <option value="due_asc">Due date: nearest first</option>
+          <option value="due_desc">Due date: farthest first</option>
+          <option value="recent">Recently created</option>
+          <option value="priority">Priority</option>
+        </Select>
+        <span className="ml-2 text-xs text-muted-foreground">Status</span>
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="h-8 w-44">
+          <option value="all">All</option>
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>{STATUS_LABEL[s]}</option>
           ))}
-        </div>
-      ) : (
-        <div className="table-wrap rounded-lg border border-border">
-          <table className="table-sticky w-full text-sm">
-            <thead className="bg-muted/50 text-left text-muted-foreground">
-              <tr>
-                <th className="min-w-64 px-4 py-2 font-medium">Task</th>
-                <th className="px-4 py-2 font-medium">Project</th>
-                <th className="px-4 py-2 font-medium">Priority</th>
-                <th className="px-4 py-2 font-medium">Due</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((t) => {
-                const late = isOverdue(t, today)
-                const next = NEXT[t.status]
-                return (
-                  <tr key={t.id} className="border-t border-border hover:bg-muted/30">
-                    <td className="px-4 py-2">
-                      <p className="font-medium">{t.title}</p>
-                      {t.description && <p className="truncate text-xs text-muted-foreground">{t.description}</p>}
-                    </td>
-                    <td className="px-4 py-2 text-muted-foreground">{t.project_name ?? '—'}</td>
-                    <td className="px-4 py-2">
-                      <StatusBadge tone={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</StatusBadge>
-                    </td>
-                    <td className={cn('px-4 py-2', late ? 'text-destructive' : 'text-muted-foreground')}>
-                      {t.due_date ?? '—'}
-                      {late && ' · overdue'}
-                    </td>
-                    <td className="px-4 py-2">
-                      <StatusBadge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</StatusBadge>
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      {next && (
-                        <Button size="sm" variant="outline" disabled={move.isPending} onClick={() => move.mutate({ id: t.id, status: next.status })}>
-                          <next.icon /> {next.label}
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+        </Select>
+      </div>
+
+      <div className="mt-4">
+        {isLoading ? (
+          <SkeletonList rows={5} columns={5} />
+        ) : isError ? (
+          <ErrorState error={error} onRetry={() => void refetch()} />
+        ) : tasks.length === 0 ? (
+          <Card>
+            <CardContent className="py-4">
+              <EmptyState
+                title="Nothing assigned to you yet"
+                description="When a manager assigns you a task, it will appear here."
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-5">
+            <Section title="Overdue" icon={Clock} items={buckets.overdue} />
+            <Section title="Due today" icon={Clock} items={buckets.dueToday} />
+            <Section title="Upcoming" icon={Clock} items={buckets.upcoming} />
+            <Section title="No due date" icon={Clock} items={buckets.noDue} />
+            <Section title="Completed" icon={CheckCircle2} items={buckets.completed} />
+          </div>
+        )}
+      </div>
+
+      <Dialog open={!!voiceTask} onOpenChange={(v) => { if (!v) setVoiceTask(null) }}>
+        <DialogContent title="Voice note" description="Paste a link to your voice note (audio file or recording).">
+          <div className="flex flex-col gap-1.5">
+            <Label>URL</Label>
+            <Input value={voiceUrl} onChange={(e) => setVoiceUrl(e.target.value)} placeholder="https://" />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button onClick={saveVoice} disabled={busyId !== null}>Save</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
 
-function TaskCard({
-  task,
-  today,
-  onMove,
-  busy,
-}: {
-  task: TaskListItem
-  today: string
-  onMove: (s: TaskStatus) => void
-  busy: boolean
-}) {
-  const late = isOverdue(task, today)
-  const next = NEXT[task.status]
+function SummaryCard({ label, value, icon: Icon, warn }: { label: string; value: number; icon: typeof Clock; warn?: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-medium">{task.title}</p>
-        <StatusBadge tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</StatusBadge>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">{task.project_name ?? 'No project'}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <StatusBadge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</StatusBadge>
-        {task.due_date && (
-          <span className={cn('flex items-center gap-1 text-xs', late ? 'text-destructive' : 'text-muted-foreground')}>
-            <CalendarClock className="size-3" /> {task.due_date}
-            {late && ' · overdue'}
-          </span>
-        )}
-        {next && (
-          <Button size="sm" variant="outline" className="ml-auto" disabled={busy} onClick={() => onMove(next.status)}>
-            <next.icon /> {next.label}
-          </Button>
-        )}
-      </div>
-    </div>
+    <Card>
+      <CardContent className="flex items-center gap-3 p-4">
+        <span className={warn ? 'text-destructive' : 'text-primary'}>
+          <Icon className="size-4" />
+        </span>
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-xl font-semibold tabular-nums">{value}</p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

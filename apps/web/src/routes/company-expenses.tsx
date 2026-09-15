@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
-import { Plus, Wallet, Pencil, Trash2 } from 'lucide-react'
+import { useMemo, useState, type FormEvent } from 'react'
+import { Plus, Wallet, Pencil, Trash2, Search, Download, Printer, Tags, X, Eye } from 'lucide-react'
 import type { CreateExpenseRequest, Expense } from '@ipc/contracts'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const GST_RATES = [0, 5, 12, 18, 28]
+const PAGE_SIZE = 20
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
@@ -15,14 +16,13 @@ import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
+import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent } from '@/shared/ui/card'
-import { BarChart, ShareChart } from '@/shared/ui/chart'
-import { groupBy, monthlySeries } from '@/shared/ui/chart-geometry'
 import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } from '@/features/financials/api'
 import { useProjects } from '@/features/projects/api'
 import { PartyPicker } from '@/features/parties/PartyPicker'
 import { useConfirm } from '@/shared/ui/confirm'
-import { useActiveLookups, useCreateCustomLookup } from '@/features/settings/api'
+import { useActiveLookups, useCreateCustomLookup, useUpdateCustomLookup, useDeleteCustomLookup } from '@/features/settings/api'
 import { useAuth } from '@/shared/auth/AuthProvider'
 
 /** Pick a studio-defined expense category, or add one inline without leaving the form (owner only). */
@@ -83,6 +83,22 @@ function ExpenseCategoryPicker({ value, onChange }: { value: string; onChange: (
   )
 }
 
+function exportCsv(rows: Expense[]) {
+  const header = ['id', 'date', 'category', 'description', 'project_id', 'party', 'amount', 'gst_treatment', 'gst_rate', 'invoice_number', 'reverse_charge']
+  const lines = rows.map((e) =>
+    [e.id, e.expense_date, e.category ?? '', (e.description ?? '').replace(/"/g, '""'), e.project_id ?? '', e.party_name ?? '', String(e.amount), e.gst_treatment, e.gst_rate == null ? '' : String(e.gst_rate), e.invoice_number ?? '', e.reverse_charge ? 'yes' : 'no']
+      .map((v) => `"${v}"`)
+      .join(','),
+  )
+  const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `company-expenses-${todayISO()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function CompanyExpensesPage() {
   return (
     <AuthedPage module="company_expenses">
@@ -92,11 +108,76 @@ export function CompanyExpensesPage() {
 }
 
 function Expenses() {
-  const { data, isLoading, isError, refetch } = useExpenses()
-  const del = useDeleteExpense()
   const confirm = useConfirm()
   const isMobile = useIsMobile()
-  const total = (data ?? []).reduce((s, e) => s + e.amount, 0)
+  const { data: projects } = useProjects()
+  const { data: categories } = useActiveLookups('expense_category')
+  const del = useDeleteExpense()
+
+  // Lovable parity filters: search/category/project/date/amount + sort + pagination.
+  const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [minAmount, setMinAmount] = useState('')
+  const [maxAmount, setMaxAmount] = useState('')
+  const [sort, setSort] = useState<'date' | 'amount'>('date')
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(1)
+  const [detail, setDetail] = useState<Expense | null>(null)
+  const [catsOpen, setCatsOpen] = useState(false)
+
+  const { data, isLoading, isError, refetch, isFetching } = useExpenses({
+    search: search.trim() || undefined,
+    category: category || undefined,
+    project_id: projectId || undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+    min_amount: minAmount || undefined,
+    max_amount: maxAmount || undefined,
+    sort,
+    dir,
+    page: 1,
+    page_size: 200,
+  })
+
+  const activeCount = [search.trim(), category, projectId, dateFrom, dateTo, minAmount, maxAmount].filter(Boolean).length
+
+  function resetFilters() {
+    setSearch('')
+    setCategory('')
+    setProjectId('')
+    setDateFrom('')
+    setDateTo('')
+    setMinAmount('')
+    setMaxAmount('')
+    setPage(1)
+  }
+
+  const sorted = useMemo(() => {
+    const rows = [...(data ?? [])]
+    rows.sort((a, b) => {
+      const av = sort === 'amount' ? a.amount : a.expense_date
+      const bv = sort === 'amount' ? b.amount : b.expense_date
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return dir === 'asc' ? cmp : -cmp
+    })
+    return rows
+  }, [data, sort, dir])
+
+  // SummaryCards (Lovable parity): computed over the filtered set.
+  const summary = useMemo(() => {
+    const rows = sorted
+    const total = rows.reduce((s, e) => s + e.amount, 0)
+    const linked = rows.filter((e) => e.project_id).length
+    const cats = new Set(rows.map((e) => e.category).filter(Boolean)).size
+    return { total, count: rows.length, linked, general: rows.length - linked, cats }
+  }, [sorted])
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pageRows = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   async function onDelete(e: Expense) {
     const yes = await confirm({
@@ -108,135 +189,294 @@ function Expenses() {
     if (yes) del.mutate(e.id)
   }
 
+  function onSort(field: 'date' | 'amount') {
+    if (sort === field) setDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSort(field)
+      setDir('desc')
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Company expenses"
-        description={`Total ${formatINR(total)}`}
-        actions={<AddExpenseDialog />}
+        description={`Total ${formatINR(summary.total)} · ${summary.count} entries`}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCatsOpen(true)}>
+              <Tags /> Categories
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => exportCsv(sorted)} disabled={sorted.length === 0}>
+              <Download /> Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()} disabled={sorted.length === 0}>
+              <Printer /> Print Report
+            </Button>
+            <AddExpenseDialog />
+          </div>
+        }
       />
+
+      {/* SummaryCards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard label="Total" value={formatINR(summary.total)} icon={Wallet} />
+        <StatCard label="Entries" value={String(summary.count)} icon={Wallet} />
+        <StatCard label="Project-linked" value={String(summary.linked)} icon={Wallet} />
+        <StatCard label="General" value={String(summary.general)} icon={Wallet} />
+        <StatCard label="Categories used" value={String(summary.cats)} icon={Tags} />
+      </div>
+
+      {/* Filter bar */}
+      <Card className="mt-4">
+        <CardContent className="flex flex-col gap-3 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search description, invoice…" className="pl-9" />
+            </div>
+            <Button variant="ghost" size="sm" onClick={resetFilters} disabled={activeCount === 0}>
+              <X /> Clear filters{activeCount > 0 ? ` (${activeCount})` : ''}
+            </Button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex flex-col gap-1.5">
+              <Label>Category</Label>
+              <Select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }}>
+                <option value="">All categories</option>
+                {(categories ?? []).map((c) => (
+                  <option key={c.id} value={c.value}>{c.value}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Project</Label>
+              <Select value={projectId} onChange={(e) => { setProjectId(e.target.value); setPage(1) }}>
+                <option value="">All projects</option>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>From</Label>
+              <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>To</Label>
+              <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1) }} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Min amount ₹</Label>
+              <Input inputMode="decimal" value={minAmount} onChange={(e) => { setMinAmount(e.target.value); setPage(1) }} placeholder="0" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Max amount ₹</Label>
+              <Input inputMode="decimal" value={maxAmount} onChange={(e) => { setMaxAmount(e.target.value); setPage(1) }} placeholder="No limit" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Sort by</Label>
+              <Select value={sort} onChange={(e) => onSort(e.target.value as 'date' | 'amount')}>
+                <option value="date">Date</option>
+                <option value="amount">Amount</option>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Direction</Label>
+              <Select value={dir} onChange={(e) => setDir(e.target.value as 'asc' | 'desc')}>
+                <option value="desc">Newest / largest first</option>
+                <option value="asc">Oldest / smallest first</option>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {isLoading ? (
-        <SkeletonList rows={5} columns={5} />
+        <div className="mt-4"><SkeletonList rows={5} columns={5} /></div>
       ) : isError ? (
-        <ErrorState onRetry={() => void refetch()} />
-      ) : !data || data.length === 0 ? (
-        <EmptyState title="No expenses logged" description="Track studio costs to see accurate profit." action={<AddExpenseDialog />} />
+        <div className="mt-4"><ErrorState onRetry={() => void refetch()} /></div>
+      ) : sorted.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState title={activeCount > 0 ? 'No expenses match your filters' : 'No expenses logged'} description={activeCount > 0 ? 'Try changing or clearing your filters.' : 'Track studio costs to see accurate profit.'} action={activeCount > 0 ? <Button variant="outline" onClick={resetFilters}>Clear filters</Button> : <AddExpenseDialog />} />
+        </div>
       ) : (
         <>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardContent className="p-5">
-              <h2 className="font-semibold tracking-tight">Spend by month</h2>
-              <p className="mt-0.5 text-sm text-muted-foreground">The last six months.</p>
-              <BarChart
-                className="mt-4"
-                points={monthlySeries(data, (e) => e.expense_date, (e) => e.amount)}
-                format={formatINR}
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5">
-              <h2 className="font-semibold tracking-tight">By category</h2>
-              <p className="mt-0.5 text-sm text-muted-foreground">Where the money actually goes.</p>
-              <ShareChart
-                className="mt-4"
-                points={groupBy(data, (e) => e.category, (e) => e.amount)}
-                format={formatINR}
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="mt-6">
-        {isMobile ? (
-          <RecordCards>
-            {data.map((e) => (
-              <RecordCard
-                key={e.id}
-                title={
-                  <span className="flex items-center gap-2">
-                    <Wallet className="size-4 text-muted-foreground" />
-                    {e.category ?? '—'}
-                  </span>
-                }
-                subtitle={e.description ?? '—'}
-                badge={e.is_fixed_overhead ? <StatusBadge tone="info">overhead</StatusBadge> : undefined}
-                fields={[
-                  { label: 'Date', value: e.expense_date },
-                  { label: 'GST', value: humanize(e.gst_treatment) },
-                  { label: 'Amount', value: formatINR(e.amount), strong: true },
-                ]}
-                actions={
-                  <div className="flex gap-1">
-                    <AddExpenseDialog
-                      expense={e}
-                      trigger={
-                        <Button variant="outline" size="icon">
-                          <Pencil />
-                        </Button>
-                      }
-                    />
-                    <Button variant="outline" size="icon" onClick={() => void onDelete(e)}>
-                      <Trash2 />
-                    </Button>
-                  </div>
-                }
-              />
-            ))}
-          </RecordCards>
-        ) : (
-        <div className="table-wrap rounded-lg border border-border">
-          <table className="table-sticky w-full text-sm">
-            <thead className="bg-muted/50 text-left text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">Category</th>
-                <th className="px-4 py-2 font-medium">Description</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">GST</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((e) => (
-                <tr key={e.id} className="border-t border-border">
-                  <td className="px-4 py-2 font-medium">
+          {isFetching && <p className="mt-3 text-xs text-muted-foreground">Refreshing…</p>}
+          <div className="mt-4">
+          {isMobile ? (
+            <RecordCards>
+              {pageRows.map((e) => (
+                <RecordCard
+                  key={e.id}
+                  title={
                     <span className="flex items-center gap-2">
                       <Wallet className="size-4 text-muted-foreground" />
                       {e.category ?? '—'}
-                      {e.is_fixed_overhead && <StatusBadge tone="info">overhead</StatusBadge>}
                     </span>
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">{e.description ?? '—'}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{e.expense_date}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{humanize(e.gst_treatment)}</td>
-                  <td className="px-4 py-2 text-right font-medium">{formatINR(e.amount)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex justify-end gap-1">
-                      <AddExpenseDialog
-                        expense={e}
-                        trigger={
-                          <Button size="sm" variant="ghost" title="Edit">
-                            <Pencil />
-                          </Button>
-                        }
-                      />
-                      <Button size="sm" variant="ghost" title="Delete" onClick={() => void onDelete(e)}>
-                        <Trash2 />
-                      </Button>
+                  }
+                  subtitle={e.description ?? '—'}
+                  badge={e.is_fixed_overhead ? <StatusBadge tone="info">overhead</StatusBadge> : undefined}
+                  fields={[
+                    { label: 'Date', value: e.expense_date },
+                    { label: 'GST', value: humanize(e.gst_treatment) },
+                    { label: 'Amount', value: formatINR(e.amount), strong: true },
+                  ]}
+                  actions={
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="icon" title="View" onClick={() => setDetail(e)}><Eye /></Button>
+                      <AddExpenseDialog expense={e} trigger={<Button variant="outline" size="icon"><Pencil /></Button>} />
+                      <Button variant="outline" size="icon" onClick={() => void onDelete(e)}><Trash2 /></Button>
                     </div>
-                  </td>
-                </tr>
+                  }
+                />
               ))}
-            </tbody>
-          </table>
-        </div>
-        )}
-        </div>
+            </RecordCards>
+          ) : (
+          <div className="table-wrap rounded-lg border border-border">
+            <table className="table-sticky w-full text-sm">
+              <thead className="bg-muted/50 text-left text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Category</th>
+                  <th className="px-4 py-2 font-medium">Description</th>
+                  <th className="px-4 py-2 font-medium"><button type="button" className="hover:text-foreground" onClick={() => onSort('date')}>Date {sort === 'date' ? (dir === 'asc' ? '↑' : '↓') : ''}</button></th>
+                  <th className="px-4 py-2 font-medium">GST</th>
+                  <th className="px-4 py-2 text-right font-medium"><button type="button" className="hover:text-foreground" onClick={() => onSort('amount')}>Amount {sort === 'amount' ? (dir === 'asc' ? '↑' : '↓') : ''}</button></th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((e) => (
+                  <tr key={e.id} className="border-t border-border">
+                    <td className="px-4 py-2 font-medium">
+                      <span className="flex items-center gap-2">
+                        <Wallet className="size-4 text-muted-foreground" />
+                        {e.category ?? '—'}
+                        {e.is_fixed_overhead && <StatusBadge tone="info">overhead</StatusBadge>}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">{e.description ?? '—'}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{e.expense_date}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{humanize(e.gst_treatment)}</td>
+                    <td className="px-4 py-2 text-right font-medium">{formatINR(e.amount)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" title="View" onClick={() => setDetail(e)}><Eye /></Button>
+                        <AddExpenseDialog expense={e} trigger={<Button size="sm" variant="ghost" title="Edit"><Pencil /></Button>} />
+                        <Button size="sm" variant="ghost" title="Delete" onClick={() => void onDelete(e)}><Trash2 /></Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Page {safePage} of {totalPages} · {sorted.length} total</span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Previous</Button>
+                <Button size="sm" variant="outline" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
         </>
       )}
+
+      {/* Detail dialog (Lovable parity) */}
+      <Dialog open={!!detail} onOpenChange={(v) => { if (!v) setDetail(null) }}>
+        <DialogContent title="Expense detail" description={detail ? `${detail.category ?? 'Uncategorised'} · ${formatINR(detail.amount)}` : undefined}>
+          {detail && (
+            <dl className="grid gap-3 text-sm">
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">Amount</dt>
+                <dd className="text-lg font-semibold">{formatINR(detail.amount)}</dd>
+              </div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Date</dt><dd>{detail.expense_date}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Category</dt><dd>{detail.category ?? 'Uncategorised'}</dd></div>
+              <div><dt className="text-muted-foreground">Description</dt><dd className="mt-0.5 whitespace-pre-wrap">{detail.description ?? '—'}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Party</dt><dd>{detail.party_name ?? '—'}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">GST</dt><dd>{humanize(detail.gst_treatment)}{detail.gst_rate != null ? ` · ${detail.gst_rate}%` : ''}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Invoice</dt><dd>{detail.invoice_number ?? '—'}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Tax</dt><dd>{detail.tax_name ?? '—'}{detail.tax_amount != null ? ` · ${formatINR(detail.tax_amount)}` : ''}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">Reverse charge</dt><dd>{detail.reverse_charge ? 'Yes' : 'No'}</dd></div>
+              {Array.isArray(detail.itemize_json) && detail.itemize_json.length > 0 && (
+                <div><dt className="text-muted-foreground">Itemized lines ({detail.itemize_json.length})</dt></div>
+              )}
+            </dl>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <CategoryManager open={catsOpen} onOpenChange={setCatsOpen} />
     </>
+  )
+}
+
+function CategoryManager({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { session } = useAuth()
+  const { data, isLoading, refetch } = useActiveLookups('expense_category')
+  const create = useCreateCustomLookup()
+  const update = useUpdateCustomLookup()
+  const remove = useDeleteCustomLookup()
+  const [name, setName] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+
+  async function onAdd() {
+    if (!name.trim()) return
+    await create.mutateAsync({ category: 'expense_category', value: name.trim() })
+    setName('')
+    void refetch()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title="Expense categories" description="Studio-wide categories used to filter and report expenses.">
+        <div className="flex flex-col gap-3">
+          {session?.is_owner && (
+            <div className="flex gap-2">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category name" />
+              <Button size="sm" onClick={() => void onAdd()} disabled={!name.trim() || create.isPending}>Add</Button>
+            </div>
+          )}
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <ul className="divide-y divide-border rounded-lg border">
+              {(data ?? []).map((c) => (
+                <li key={c.id} className="flex items-center gap-2 p-2 text-sm">
+                  {editingId === c.id ? (
+                    <>
+                      <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="flex-1" />
+                      <Button size="sm" onClick={() => { void update.mutateAsync({ id: c.id, patch: { value: editName.trim() } }).then(() => { setEditingId(null); void refetch() }) }} disabled={!editName.trim() || update.isPending}>Save</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 font-medium">{c.value}</span>
+                      {session?.is_owner && (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={() => { setEditingId(c.id); setEditName(c.value) }}>Rename</Button>
+                          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { void remove.mutateAsync(c.id).then(() => void refetch()) }}>Remove</Button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
+              {(data ?? []).length === 0 && <li className="p-3 text-sm text-muted-foreground">No categories yet.</li>}
+            </ul>
+          )}
+          <div className="flex justify-end">
+            <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -255,6 +495,10 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
   const [overhead, setOverhead] = useState(expense?.is_fixed_overhead ?? false)
   const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>(expense?.gst_treatment ?? 'non_gst')
   const [gstRate, setGstRate] = useState(expense?.gst_rate ?? 18)
+  const [invoiceNumber, setInvoiceNumber] = useState(expense?.invoice_number ?? '')
+  const [taxName, setTaxName] = useState(expense?.tax_name ?? '')
+  const [taxAmount, setTaxAmount] = useState(expense?.tax_amount != null ? String(expense.tax_amount) : '')
+  const [reverse, setReverse] = useState(expense?.reverse_charge ?? false)
   const [error, setError] = useState<string | null>(null)
 
   function reset() {
@@ -267,6 +511,10 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
     setOverhead(false)
     setGstTreatment('non_gst')
     setGstRate(18)
+    setInvoiceNumber('')
+    setTaxName('')
+    setTaxAmount('')
+    setReverse(false)
   }
 
   async function onSubmit(e: FormEvent) {
@@ -284,6 +532,10 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
         is_fixed_overhead: overhead,
         gst_treatment: gstTreatment,
         ...(gstTreatment === 'gst_applicable' ? { gst_rate: gstRate } : {}),
+        ...(invoiceNumber.trim() ? { invoice_number: invoiceNumber.trim() } : {}),
+        ...(taxName.trim() ? { tax_name: taxName.trim() } : {}),
+        ...(taxAmount.trim() ? { tax_amount: Number(taxAmount) } : {}),
+        ...(reverse ? { reverse_charge: true } : {}),
       }
       if (isEdit) {
         // Editing resends category/description explicitly (null clears them)
@@ -386,6 +638,27 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
                 </Select>
               </div>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Invoice number</Label>
+              <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="INV-001" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Tax name</Label>
+              <Input value={taxName} onChange={(e) => setTaxName(e.target.value)} placeholder="GST" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Tax amount ₹</Label>
+              <Input inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} placeholder="0" />
+            </div>
+            <label className="flex items-end gap-2 pb-2 text-sm">
+              <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
+              Reverse charge
+            </label>
           </div>
 
           {error && (

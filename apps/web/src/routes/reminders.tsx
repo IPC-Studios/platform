@@ -73,9 +73,9 @@ function EntityPicker({
       : entityType === 'project'
         ? (projects.data ?? []).map((p) => ({ id: p.id, label: p.name }))
         : entityType === 'client'
-          ? (clients.data ?? []).map((c) => ({ id: c.id, label: c.name }))
+          ? (Array.isArray(clients.data) ? clients.data : []).map((c) => ({ id: c.id, label: c.name }))
           : entityType === 'invoice'
-            ? (invoices.data ?? []).map((i) => ({ id: i.id, label: i.invoice_number }))
+            ? (invoices.data?.items ?? []).map((i) => ({ id: i.id, label: i.invoice_number }))
             : entityType === 'enquiry'
               ? (enquiries.data?.pages.flatMap((p) => p.items) ?? []).map((e) => ({ id: e.id, label: e.name }))
               : entityType === 'task'

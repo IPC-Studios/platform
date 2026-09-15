@@ -58,11 +58,13 @@ export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: read
           </CardContent>
         </Card>
       ) : (
-        groups.map((g) => (
-          <Card key={g.phone_norm}>
+        groups.map((g) => {
+          const key = g.phone_norm ?? g.match_value_masked ?? g.lead_ids[0] ?? 'group'
+          return (
+          <Card key={key}>
             <CardContent className="p-4">
               <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                Phone +{g.phone_norm}
+                Phone +{g.phone_norm ?? key}
                 <StatusBadge tone="warning">{g.lead_count} leads</StatusBadge>
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">Pick the one to keep. The others fold into it.</p>
@@ -72,9 +74,9 @@ export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: read
                     <label className="flex cursor-pointer flex-wrap items-center gap-2 rounded-md border border-border p-2 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5">
                       <input
                         type="radio"
-                        name={`survivor-${g.phone_norm}`}
-                        checked={pick[g.phone_norm] === l.id}
-                        onChange={() => setPick((p) => ({ ...p, [g.phone_norm]: l.id }))}
+                        name={`survivor-${key}`}
+                        checked={pick[key] === l.id}
+                        onChange={() => setPick((p) => ({ ...p, [key]: l.id }))}
                         disabled={!canEdit}
                       />
                       <span className="font-medium">{l.name ?? 'Unnamed lead'}</span>
@@ -86,13 +88,14 @@ export function DuplicatesTab({ archivedLeads, allLeads }: { archivedLeads: read
                 ))}
               </ul>
               {canEdit && (
-                <Button size="sm" className="mt-3" disabled={!pick[g.phone_norm] || merge.isPending} onClick={() => void doMerge(g.phone_norm, g.lead_ids)}>
+                <Button size="sm" className="mt-3" disabled={!pick[key] || merge.isPending} onClick={() => void doMerge(key, g.lead_ids)}>
                   <Merge /> Merge into the selected lead
                 </Button>
               )}
             </CardContent>
           </Card>
-        ))
+          )
+        })
       )}
 
       {merged.size > 0 && (

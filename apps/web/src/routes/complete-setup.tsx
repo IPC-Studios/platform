@@ -31,10 +31,14 @@ export function CompleteSetupPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!phone.trim()) {
+      setError('Phone is required — 10 digits, or with a country code.')
+      return
+    }
     const parsed = completeSetupRequest.safeParse({
       company_name: companyName.trim(),
       admin_name: adminName.trim(),
-      phone: phone.trim() || undefined,
+      phone: phone.trim(),
     })
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Please check the form and try again.')
@@ -97,8 +101,9 @@ export function CompleteSetupPage() {
                   placeholder="98765 43210"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
+                  required
                 />
-                <p className="text-xs text-muted-foreground">Optional — 10 digits, or with a country code.</p>
+                <p className="text-xs text-muted-foreground">Required — 10 digits, or with a country code.</p>
               </div>
 
               {error && (
@@ -106,7 +111,7 @@ export function CompleteSetupPage() {
                   {error}
                 </p>
               )}
-              <Button type="submit" disabled={busy || !companyName.trim() || !adminName.trim()}>
+              <Button type="submit" disabled={busy || !companyName.trim() || !adminName.trim() || !phone.trim()}>
                 {busy ? 'Setting up…' : 'Create my studio'}
               </Button>
             </form>

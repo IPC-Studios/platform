@@ -149,6 +149,35 @@ export const teamTermsRouter = new Hono<AppEnv>()
   })
 
   /**
+   * Permanent delete with a usage guard: a template that has ever been sent
+   * cannot be deleted (archive instead), so acknowledgement history never
+   * loses the words it points at. Unused drafts can go entirely.
+   */
+  .delete('/templates/:id', requireAction('projects', 'delete'), async (c) => {
+    const id = uuidParam(c)
+    const result = await attempt(
+      c,
+      'team_terms.template_delete',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const [used] = await sql<{ n: string }[]>`
+            select count(*)::text as n from team_terms_sends where template_id = ${id}`
+          if (used && Number(used.n) > 0) return 'used' as const
+          const rows = await sql<{ id: string }[]>`
+            delete from team_terms_templates where id = ${id} returning id`
+          if (!rows.length) return 'missing' as const
+          return 'ok' as const
+        }),
+    )
+    if (result === 'used')
+      fail(409, 'These terms have been sent before. Archive them instead of deleting.')
+    if (result === 'missing') fail(404, 'We could not find those terms.')
+    if (!result) fail(400, 'We could not delete these terms.')
+    await audit(c, { action: 'team_terms.template_delete', entityType: 'team_terms_template', entityId: id })
+    return c.body(null, 204)
+  })
+
+  /**
    * Archive rather than delete: a send points at the template it went out
    * under, and the studio may need to show what that said a year later.
    */
@@ -416,7 +445,8 @@ export const publicTeamTermsRouter = new Hono<AppEnv>()
             p_raw => ${token},
             p_name => ${parsed.data.name},
             p_ip => ${ip === 'unknown' ? null : ip},
-            p_user_agent => ${c.req.header('User-Agent') ?? null}
+            p_user_agent => ${c.req.header('User-Agent') ?? null},
+            p_email => ${parsed.data.email ?? null}
           ) as ok`,
       ),
     )

@@ -4,6 +4,7 @@ import { Eye, ClipboardList, Camera, FileCheck } from 'lucide-react'
 import { taskListItem, shootListItem, z } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
+import { Button } from '@/shared/ui/button'
 import { Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState } from '@/shared/ui/states'
@@ -12,7 +13,9 @@ import { SkeletonList } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
+import { useAccess } from '@/shared/auth/useAccess'
 import { useDirectory } from '@/features/team/api'
+import { useReviewWork } from '@/features/work/api'
 
 const tasksList = taskListItem.array()
 const shootsList = shootListItem.array()
@@ -39,9 +42,12 @@ export function TeamWorkPreviewPage() {
 function TeamWorkPreview() {
   const { data: directory } = useDirectory()
   const { session } = useAuth()
+  const access = useAccess()
   const [userId, setUserId] = useState('')
   const members = (directory ?? []).filter((m) => m.status === 'active')
   const selected = members.find((m) => m.user_id === userId)
+  const review = useReviewWork()
+  const canReview = access.hasAction('team_work_preview', 'edit')
 
   const tasks = useQuery({
     queryKey: ['team-work-preview', 'tasks', userId],
@@ -63,8 +69,13 @@ function TeamWorkPreview() {
     <>
       <PageHeader
         title="Team Work Preview"
-        description="See what a team member's own work view shows them — read-only, and they're never notified."
+        description="See what a team member's own work view shows them — they're never notified."
       />
+
+      <p className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+        <Eye className="size-4 shrink-0" />
+        Read-only dashboard preview. Reviews you record here are real — everything else is just looking.
+      </p>
 
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -95,9 +106,11 @@ function TeamWorkPreview() {
                 {(tasks.data ?? []).map((t) => (
                   <li key={t.id} className="rounded-lg border border-border p-3 text-sm">
                     <p className="font-medium">{t.title}</p>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    {t.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.description}</p>}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <StatusBadge tone={t.status === 'completed' ? 'success' : 'neutral'}>{humanize(t.status)}</StatusBadge>
                       {t.project_name && <span>{t.project_name}</span>}
+                      {t.due_date && <span>· due {t.due_date}</span>}
                     </div>
                   </li>
                 ))}
@@ -130,13 +143,44 @@ function TeamWorkPreview() {
               <ul className="flex flex-col gap-2">
                 {(submissions.data ?? []).map((s) => (
                   <li key={s.id} className="rounded-lg border border-border p-3 text-sm">
-                    <p className="truncate font-medium">{s.notes || s.submission_link || 'Submission'}</p>
-                    <StatusBadge
-                      className="mt-1"
-                      tone={s.status === 'approved' ? 'success' : s.status === 'rejected' ? 'danger' : 'info'}
+                    <a
+                      href={s.submission_link ?? '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate font-medium text-primary hover:underline"
                     >
-                      {s.status}
-                    </StatusBadge>
+                      {s.notes || s.submission_link || 'Submission'}
+                    </a>
+                    {s.review_notes && (
+                      <p className="mt-1 text-xs text-muted-foreground">Review: {s.review_notes}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        tone={s.status === 'approved' ? 'success' : s.status === 'rejected' ? 'danger' : 'info'}
+                      >
+                        {s.status}
+                      </StatusBadge>
+                      {canReview && s.status === 'submitted' && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={review.isPending}
+                            onClick={() => review.mutate({ id: s.id, approve: true })}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={review.isPending}
+                            onClick={() => review.mutate({ id: s.id, approve: false })}
+                          >
+                            Request changes
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>

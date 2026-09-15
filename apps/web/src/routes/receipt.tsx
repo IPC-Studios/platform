@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
-import { publicReceipt, type PublicReceipt } from '@ipc/contracts'
-import { IndianRupee, Printer } from 'lucide-react'
+import { publicReceipt, buildMailtoUrl, buildWhatsAppUrl, type PublicReceipt } from '@ipc/contracts'
+import { IndianRupee, Printer, Mail, MessageCircle, Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { StatusBadge } from '@/shared/ui/status-badge'
 import { formatINR } from '@/shared/ui/format'
 
 /**
  * PUBLIC page — no auth. A payment receipt, sent after money lands.
  *
- * No branding flourish and no backdrop: this is a document somebody may print
- * or forward to an accountant, so it stays plain and prints as it looks. The
- * balance is shown because "what do I still owe" is the next question every
- * client asks.
+ * Lovable parity: studio branding/logo, GSTIN, description, payment status,
+ * view counting (server-side access_count), and WhatsApp/mailto/copy share.
+ * Prints as it looks for the accountant.
  */
 export function ReceiptPage() {
   const token = new URLSearchParams(window.location.search).get('token') ?? ''
@@ -31,6 +32,21 @@ export function ReceiptPage() {
   }, [token])
 
   const balance = receipt ? Math.max(0, receipt.total_cost - receipt.received_total) : 0
+  const url = typeof window !== 'undefined' ? window.location.href : ''
+
+  function shareText(): string {
+    if (!receipt) return url
+    return `Hi ${receipt.client_name ?? 'there'}, we received your payment of ${formatINR(receipt.amount)}${receipt.project_name ? ` for ${receipt.project_name}` : ''} on ${receipt.paid_on}. View/download your receipt: ${url}`
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Receipt link copied.')
+    } catch {
+      toast.error('Could not copy the link.')
+    }
+  }
 
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
@@ -48,13 +64,27 @@ export function ReceiptPage() {
             <>
               <div className="flex items-start justify-between gap-3">
                 <div>
+                  {receipt.logo_url && (
+                    <img src={receipt.logo_url} alt={receipt.company_name ?? 'Studio logo'} className="mb-2 h-10 w-auto object-contain" />
+                  )}
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Payment received
                   </p>
                   <p className="text-lg font-semibold">{receipt.company_name}</p>
+                  {(receipt.company_phone || receipt.company_email || receipt.company_address) && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {[receipt.company_phone, receipt.company_email, receipt.company_address].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {receipt.gstin && (
+                    <p className="text-xs text-muted-foreground">GSTIN: {receipt.gstin}</p>
+                  )}
                 </div>
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-                  <IndianRupee className="size-5" />
+                <span className="flex flex-col items-end gap-2">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
+                    <IndianRupee className="size-5" />
+                  </span>
+                  {receipt.status && <StatusBadge tone="success">{receipt.status}</StatusBadge>}
                 </span>
               </div>
 
@@ -66,6 +96,40 @@ export function ReceiptPage() {
                 {receipt.mode ? ` · ${receipt.mode}` : ''}
                 {receipt.reference ? ` · ${receipt.reference}` : ''}
               </p>
+              {receipt.description && (
+                <p className="mt-2 text-sm text-muted-foreground">{receipt.description}</p>
+              )}
+              {receipt.invoice_number && (
+                <p className="mt-1 text-xs text-muted-foreground">Invoice {receipt.invoice_number}</p>
+              )}
+
+              {receipt.line_items && receipt.line_items.length > 0 && (
+                <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-left text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Description</th>
+                        <th className="px-3 py-2 text-right font-medium">Qty</th>
+                        <th className="px-3 py-2 text-right font-medium">Rate</th>
+                        <th className="px-3 py-2 text-right font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {receipt.line_items.map((li, i) => (
+                        <tr key={i} className="border-t border-border">
+                          <td className="px-3 py-2">
+                            {li.description}
+                            {li.subtext && <p className="text-xs text-muted-foreground">{li.subtext}</p>}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{li.quantity ?? '—'}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{li.rate != null ? formatINR(li.rate) : '—'}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{li.amount != null ? formatINR(li.amount) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <dl className="mt-5 flex flex-col gap-1.5 border-t border-border pt-4 text-sm">
                 <Row label="Project" value={receipt.project_name ?? '—'} />
@@ -75,13 +139,26 @@ export function ReceiptPage() {
                 <Row label="Balance" value={formatINR(balance)} strong />
               </dl>
 
-              <Button
-                variant="outline"
-                className="mt-5 w-full no-print"
-                onClick={() => window.print()}
-              >
-                <Printer /> Print or save as PDF
-              </Button>
+              <div className="no-print mt-5 flex flex-wrap gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => window.print()}>
+                  <Printer /> Print or save as PDF
+                </Button>
+              </div>
+              <div className="no-print mt-2 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" asChild>
+                  <a href={buildWhatsAppUrl(null, shareText())} target="_blank" rel="noreferrer noopener">
+                    <MessageCircle className="mr-1 size-4" /> WhatsApp
+                  </a>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <a href={buildMailtoUrl(null, `Payment receipt — ${formatINR(receipt.amount)}`, shareText())}>
+                    <Mail className="mr-1 size-4" /> Email
+                  </a>
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void copyLink()}>
+                  <Copy className="mr-1 size-4" /> Copy link
+                </Button>
+              </div>
             </>
           )}
         </CardContent>

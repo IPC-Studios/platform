@@ -8,17 +8,22 @@ import {
   updateInvitationRequest,
   directoryMember,
   employeeRole,
+  generateMonthlySalariesRequest,
   libraryRole,
   invitation,
   invitationLink,
+  monthlySalaryList,
   updateMemberRequest,
+  updateMonthlySalaryRequest,
   upsertEmployeeRoleRequest,
   z,
   type AddMemberRequest,
   type AssignRolesRequest,
   type CreateInvitationRequest,
+  type GenerateMonthlySalariesRequest,
   type UpdateInvitationRequest,
   type UpdateMemberRequest,
+  type UpdateMonthlySalaryRequest,
   type UpsertEmployeeRoleRequest,
 } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
@@ -40,6 +45,117 @@ export function useDirectory() {
     queryFn: () => callApi('/team/directory', { responseSchema: directoryList }),
     enabled: !!session && access.hasModule('team_directory'),
     staleTime: 30_000,
+  })
+}
+
+export interface DirectoryPageParams {
+  page: number
+  page_size: number
+  search?: string | undefined
+  status?: string | undefined
+}
+
+const directoryPageSchema = z.object({
+  items: directoryList,
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+
+/**
+ * Server-paginated directory (Lovable parity). Falls back to client-side
+ * slicing when the server answers with the legacy array shape, so mixed
+ * deploys never break the page.
+ */
+export function useDirectoryPaged(params: DirectoryPageParams) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const qs = new URLSearchParams({
+    page: String(params.page),
+    page_size: String(params.page_size),
+  })
+  if (params.search?.trim()) qs.set('search', params.search.trim())
+  if (params.status) qs.set('status', params.status)
+  const key = qs.toString()
+  return useQuery({
+    queryKey: ['team', 'directory', 'paged', key],
+    queryFn: async () => {
+      const raw: unknown = await callApi(`/team/directory?${key}`, {
+        responseSchema: z.unknown(),
+      })
+      const paged = directoryPageSchema.safeParse(raw)
+      if (paged.success) return paged.data
+      const items = directoryList.parse(raw)
+      const start = (params.page - 1) * params.page_size
+      return {
+        items: items.slice(start, start + params.page_size),
+        total: items.length,
+        page: params.page,
+        page_size: params.page_size,
+      }
+    },
+    enabled: !!session && access.hasModule('team_directory'),
+    staleTime: 15_000,
+  })
+}
+
+/** Delete with an optional reason, recorded in the audit trail. */
+export function useDeleteMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, reason }: { userId: string; reason?: string | null }) =>
+      callApi(`/team/members/${userId}`, {
+        method: 'DELETE',
+        body: reason ? { reason } : {},
+        responseSchema: ok,
+      }),
+    onSuccess: () => {
+      toast.success('Team member removed')
+      void qc.invalidateQueries({ queryKey: ['team'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+/** One member's stored access (profile + overrides) for ManageAccessDialog. */
+export function useUserAccess(userId: string | null) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['team', 'access', userId],
+    queryFn: () =>
+      callApi(`/access/${userId}`, {
+        responseSchema: z.object({
+          profile_key: z.string().nullable(),
+          overrides: z.array(z.object({ permission_key: z.string(), enabled: z.boolean() })),
+        }),
+      }),
+    enabled: !!session?.is_owner && !!userId,
+    staleTime: 30_000,
+  })
+}
+
+export function useSetUserAccess() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      userId,
+      profile_key,
+      overrides,
+    }: {
+      userId: string
+      profile_key: string | null
+      overrides: { permission_key: string; enabled: boolean }[]
+    }) =>
+      callApi(`/access/${userId}`, {
+        method: 'PUT',
+        body: { profile_key, overrides },
+        responseSchema: z.unknown(),
+      }),
+    onSuccess: (_d, v) => {
+      toast.success('Access updated')
+      void qc.invalidateQueries({ queryKey: ['team', 'access', v.userId] })
+    },
+    onError: (e: Error) => toast.error(e.message),
   })
 }
 
@@ -213,4 +329,61 @@ export function useRevokeInvitation() {
     (id: string) => callApi(`/team/invitations/${id}`, { method: 'DELETE', responseSchema: ok }),
     'Invitation revoked',
   )
+}
+
+/** Monthly salary ledger for one period (owner/admin generate+update, manager views). */
+export function useMonthlySalaries(filters: { month: number; year: number; status?: string | undefined; search?: string | undefined; user_id?: string | undefined }) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const params = new URLSearchParams({
+    month: String(filters.month),
+    year: String(filters.year),
+  })
+  if (filters.status && filters.status !== 'all') params.set('status', filters.status)
+  if (filters.search?.trim()) params.set('search', filters.search.trim())
+  if (filters.user_id) params.set('user_id', filters.user_id)
+  return useQuery({
+    queryKey: ['team', 'monthly-salaries', params.toString()],
+    queryFn: () => callApi(`/team/monthly-salaries?${params.toString()}`, { responseSchema: monthlySalaryList }),
+    enabled: !!session && access.hasModule('team_salaries'),
+    staleTime: 15_000,
+  })
+}
+
+export function useGenerateMonthlySalaries() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: GenerateMonthlySalariesRequest) =>
+      callApi('/team/monthly-salaries/generate', {
+        method: 'POST',
+        body: generateMonthlySalariesRequest.parse(input),
+        responseSchema: z.object({
+          created_count: z.number(),
+          skipped_existing_count: z.number(),
+          errors: z.array(z.string()),
+        }),
+      }),
+    onSuccess: () => {
+      toast.success('Salaries generated')
+      void qc.invalidateQueries({ queryKey: ['team', 'monthly-salaries'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useUpdateMonthlySalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateMonthlySalaryRequest }) =>
+      callApi(`/team/monthly-salaries/${id}`, {
+        method: 'PATCH',
+        body: updateMonthlySalaryRequest.parse(patch),
+        responseSchema: ok,
+      }),
+    onSuccess: () => {
+      toast.success('Salary updated')
+      void qc.invalidateQueries({ queryKey: ['team', 'monthly-salaries'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 }

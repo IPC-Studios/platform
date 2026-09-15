@@ -35,6 +35,8 @@ export interface MemberDraft {
   role: 'admin' | 'manager' | 'employee'
   role_ids: string[]
   salary: string
+  freelancer_rate: string
+  has_login_access: boolean
   address: string
   payout_type: '' | 'salary' | 'per_shoot' | 'per_day' | 'per_project' | 'custom'
   commission_pct: string
@@ -60,6 +62,8 @@ export const EMPTY_DRAFT: MemberDraft = {
   role: 'employee',
   role_ids: [],
   salary: '',
+  freelancer_rate: '',
+  has_login_access: true,
   address: '',
   payout_type: '',
   commission_pct: '',
@@ -87,6 +91,8 @@ const LABELS: Record<string, string> = {
   role: 'Role',
   role_ids: 'Job roles',
   salary: 'Salary',
+  freelancer_rate: 'Rate',
+  has_login_access: 'Login access',
   address: 'Address',
   payout_type: 'Payout type',
   commission_pct: 'Commission',
@@ -108,6 +114,7 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
   role: ['role', 'role_ids'],
   details: [
     'salary',
+    'freelancer_rate',
     'address',
     'payout_type',
     'commission_pct',
@@ -140,6 +147,7 @@ const STEP_FIELDS: Record<WizardStep, readonly DraftField[]> = {
 /** Draft (all strings, as typed) → the shape the contract expects. */
 export function toPayload(d: MemberDraft): Record<string, unknown> {
   const salary = d.salary.trim() === '' ? undefined : Number(d.salary)
+  const freelancerRate = d.freelancer_rate.trim() === '' ? undefined : Number(d.freelancer_rate)
   return {
     engagement_type: d.engagement_type,
     create_login: d.create_login,
@@ -151,6 +159,7 @@ export function toPayload(d: MemberDraft): Record<string, unknown> {
     ...(d.alternate_phone.trim() ? { alternate_phone: d.alternate_phone.trim() } : {}),
     ...(d.create_login && d.password ? { password: d.password } : {}),
     ...(salary !== undefined ? { salary } : {}),
+    ...(freelancerRate !== undefined ? { freelancer_rate: freelancerRate } : {}),
     ...(d.address.trim() ? { address: d.address.trim() } : {}),
     ...(d.payout_type ? { payout_type: d.payout_type } : {}),
     ...(d.commission_pct.trim() ? { commission_pct: Number(d.commission_pct) } : {}),
@@ -186,6 +195,14 @@ export function stepErrors(step: WizardStep, draft: MemberDraft): FieldErrors<Dr
   if (STEP_FIELDS[step].includes('salary') && draft.salary.trim() !== '') {
     const n = Number(draft.salary)
     if (Number.isNaN(n) || n < 0) out.salary = 'Salary must be a number.'
+  }
+  if (STEP_FIELDS[step].includes('freelancer_rate') && draft.freelancer_rate.trim() !== '') {
+    const n = Number(draft.freelancer_rate)
+    if (Number.isNaN(n) || n < 0) out.freelancer_rate = 'Rate must be a non-negative number.'
+  }
+  if (STEP_FIELDS[step].includes('salary') && draft.commission_pct.trim() !== '') {
+    const n = Number(draft.commission_pct)
+    if (Number.isNaN(n) || n < 0 || n > 100) out.commission_pct = 'Commission must be between 0 and 100.'
   }
   return out
 }

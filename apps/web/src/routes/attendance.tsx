@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -199,19 +200,42 @@ function ClockActions() {
   )
 }
 
+const pagedDay = z.object({
+  items: dayList,
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+
 function TeamDashboard() {
   const { session } = useAuth()
   const [date, setDate] = useState(todayISO())
   const [filters, setFilters] = useState<AttendanceFilters>(EMPTY_FILTERS)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const { data: fence } = useFence()
 
+  // Server-paginated roster: search narrows on the server, the rest refines
+  // the loaded page client-side. Falls back to the legacy array shape.
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['hr', 'attendance', date],
-    queryFn: () => callApi(`/hr/attendance?date=${date}`, { responseSchema: dayList }),
+    queryKey: ['hr', 'attendance', date, page, pageSize, filters.search],
+    queryFn: async () => {
+      const qs = new URLSearchParams({ date, page: String(page), page_size: String(pageSize) })
+      if (filters.search.trim()) qs.set('search', filters.search.trim())
+      const raw: unknown = await callApi(`/hr/attendance?${qs.toString()}`, {
+        responseSchema: z.unknown(),
+      })
+      const paged = pagedDay.safeParse(raw)
+      if (paged.success) return paged.data
+      const items = dayList.parse(raw)
+      const start = (page - 1) * pageSize
+      return { items: items.slice(start, start + pageSize), total: items.length, page, page_size: pageSize }
+    },
     staleTime: 15_000,
   })
 
-  const rows = useMemo(() => data ?? [], [data])
+  const rows = useMemo(() => data?.items ?? [], [data])
+  const total = data?.total ?? 0
   const shown = useMemo(() => filterRows(rows, filters), [rows, filters])
   const totals = useMemo(() => summarise(rows), [rows])
   // Only the people who answer for the roster may rewrite a day on it.
@@ -260,13 +284,23 @@ function TeamDashboard() {
       <div className="mt-4 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="flex flex-col gap-1.5">
           <Label>Date</Label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value)
+              setPage(1)
+            }}
+          />
         </div>
         <div className="flex flex-col gap-1.5 lg:col-span-2">
           <Label>Search</Label>
           <Input
             value={filters.search}
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+            onChange={(e) => {
+              setFilters({ ...filters, search: e.target.value })
+              setPage(1)
+            }}
             placeholder="Name, email or phone"
           />
         </div>
@@ -312,8 +346,37 @@ function TeamDashboard() {
           </Button>
         )}
         <span className="ml-auto text-xs text-muted-foreground">
-          Showing {shown.length} of {rows.length}
+          Showing {shown.length} of {total} · page {page}
         </span>
+        <Select
+          value={String(pageSize)}
+          onChange={(e) => {
+            setPageSize(Number(e.target.value))
+            setPage(1)
+          }}
+          aria-label="Page size"
+          className="h-8 w-24"
+        >
+          <option value="10">10 / page</option>
+          <option value="25">25 / page</option>
+          <option value="50">50 / page</option>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page * pageSize >= total}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </Button>
       </div>
 
       <div className="mt-4">
@@ -399,7 +462,11 @@ function RosterTable({
           return (
             <div key={r.user_id} className="rounded-lg border border-border p-4">
               <div className="flex items-start justify-between gap-2">
-                <p className="truncate font-medium">{r.name}</p>
+                <p className="truncate font-medium">
+                  <Link to="/employees/$id" params={{ id: r.user_id }} className="hover:underline">
+                    {r.name}
+                  </Link>
+                </p>
                 <StatusBadge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</StatusBadge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -444,7 +511,9 @@ function RosterTable({
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2 font-medium">
                     <Avatar name={r.name} size="sm" />
-                    {r.name}
+                    <Link to="/employees/$id" params={{ id: r.user_id }} className="hover:underline">
+                      {r.name}
+                    </Link>
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {r.engagement_type === 'freelancer' ? 'Freelancer' : 'In-house'}
@@ -477,47 +546,82 @@ function RosterTable({
   )
 }
 
+const HISTORY_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
 function MyAttendance() {
   const { session } = useAuth()
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['attendance', 'my'],
-    queryFn: () => callApi('/hr/attendance/my', { responseSchema: myList }),
+    queryKey: ['attendance', 'my', month, year],
+    queryFn: () =>
+      callApi(`/hr/attendance/my?month=${month}&year=${year}`, { responseSchema: myList }),
     enabled: !!session,
     staleTime: 15_000,
   })
 
-  if (isLoading) return <SkeletonList rows={5} columns={6} />
-  if (isError) return <ErrorState onRetry={() => void refetch()} />
-  if (!data || data.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-4">
-          <EmptyState title="No attendance yet" description="Check in to start your record." />
-        </CardContent>
-      </Card>
-    )
-  }
+  const years = Array.from({ length: 3 }, (_, i) => now.getFullYear() - i)
 
   return (
-    <div className="flex flex-col gap-2">
-      {data.map((a) => (
-        <Card key={a.id}>
-          <CardContent className="flex flex-wrap items-center gap-3 p-3">
-            <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
-            <span className="text-sm font-medium">{a.a_date}</span>
-            <span className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Clock className="size-3.5" />
-              in {formatTime(a.check_in_at)} · out {formatTime(a.check_out_at)}
-            </span>
-            <StatusBadge
-              className="ml-auto"
-              tone={STATUS_TONE[a.check_in_at && !a.check_out_at ? 'not_checked_out' : a.status]}
-            >
-              {STATUS_LABEL[a.check_in_at && !a.check_out_at ? 'not_checked_out' : a.status]}
-            </StatusBadge>
+    <div className="flex flex-col gap-3">
+      <div className="grid max-w-xl gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label>Month</Label>
+          <Select value={String(month)} onChange={(e) => setMonth(Number(e.target.value))}>
+            {HISTORY_MONTHS.map((m, i) => (
+              <option key={m} value={String(i + 1)}>{m}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Year</Label>
+          <Select value={String(year)} onChange={(e) => setYear(Number(e.target.value))}>
+            {years.map((y) => (
+              <option key={y} value={String(y)}>{y}</option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <SkeletonList rows={5} columns={6} />
+      ) : isError ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : !data || data.length === 0 ? (
+        <Card>
+          <CardContent className="py-4">
+            <EmptyState
+              title="No attendance this month"
+              description="Check in to start your record, or pick another month."
+            />
           </CardContent>
         </Card>
-      ))}
+      ) : (
+        <div className="flex flex-col gap-2">
+          {data.map((a) => (
+            <Card key={a.id}>
+              <CardContent className="flex flex-wrap items-center gap-3 p-3">
+                <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-sm font-medium">{a.a_date}</span>
+                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <Clock className="size-3.5" />
+                  in {formatTime(a.check_in_at)} · out {formatTime(a.check_out_at)}
+                </span>
+                <StatusBadge
+                  className="ml-auto"
+                  tone={STATUS_TONE[a.check_in_at && !a.check_out_at ? 'not_checked_out' : a.status]}
+                >
+                  {STATUS_LABEL[a.check_in_at && !a.check_out_at ? 'not_checked_out' : a.status]}
+                </StatusBadge>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

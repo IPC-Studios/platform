@@ -20,6 +20,8 @@ export const teamSlot = z.object({
   final_cost: money.nullable(),
   cost_status: slotCostStatus,
   cost_notes: z.string().nullable(),
+  data_required: z.boolean().default(false),
+  data_not_required_reason: z.string().nullable().default(null),
 })
 export type TeamSlot = z.infer<typeof teamSlot>
 
@@ -44,6 +46,28 @@ export type BookSlotRequest = z.infer<typeof bookSlotRequest>
 
 export const setSlotStatusRequest = z.object({ status: slotStatus })
 export type SetSlotStatusRequest = z.infer<typeof setSlotStatusRequest>
+
+/** Edit a booking's who/when/what — distinct from cost (bookkeeping) and status (release/cancel). */
+export const updateSlotRequest = z
+  .object({
+    user_id: uuid.optional(),
+    shoot_id: uuid.nullable().optional(),
+    service_name: z.string().max(120).nullable().optional(),
+    start_at: isoDateTime.optional(),
+    end_at: isoDateTime.optional(),
+  })
+  .refine(
+    (v) => !v.start_at || !v.end_at || new Date(v.end_at) > new Date(v.start_at),
+    { message: 'End must be after start.', path: ['end_at'] },
+  )
+export type UpdateSlotRequest = z.infer<typeof updateSlotRequest>
+
+/** Data-requirement flag on a booking: does this slot still owe footage/cards? */
+export const setSlotDataRequest = z.object({
+  data_required: z.boolean(),
+  data_not_required_reason: z.string().trim().max(300).nullish(),
+})
+export type SetSlotDataRequest = z.infer<typeof setSlotDataRequest>
 
 /** Lightweight team member for pickers (assignees, bookings). */
 export const teamMember = z.object({

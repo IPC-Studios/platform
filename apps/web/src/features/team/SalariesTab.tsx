@@ -1,36 +1,63 @@
-import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
-import { IndianRupee, Lock } from 'lucide-react'
-import type { DirectoryMember } from '@ipc/contracts'
-import { useAccess } from '@/shared/auth/useAccess'
+import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
+import { Download, RefreshCcw } from 'lucide-react'
+import type { MonthlySalary } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
-import { Card, CardContent } from '@/shared/ui/card'
-import { SkeletonList } from '@/shared/ui/skeleton'
-import { Input } from '@/shared/ui/input'
+import { useAccess } from '@/shared/auth/useAccess'
 import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Dialog, DialogContent, DialogFooter } from '@/shared/ui/dialog'
+import { Input, Label, Select } from '@/shared/ui/input'
+import { SkeletonList } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
-import { formatINR, humanize } from '@/shared/ui/format'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
-import { useDirectory, useUpdateMember } from './api'
+import { downloadCsv } from '@/shared/ui/csv'
+import { formatINR } from '@/shared/ui/format'
+import { useGenerateMonthlySalaries, useMonthlySalaries, useUpdateMonthlySalary } from './api'
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+const STATUS_TONE: Record<string, 'success' | 'warning' | 'neutral'> = {
+  paid: 'success',
+  partially_paid: 'warning',
+  partial: 'warning',
+  unpaid: 'neutral',
+}
+
+const statusLabel = (s: string) =>
+  s === 'partially_paid' || s === 'partial' ? 'Partially paid' : s === 'paid' ? 'Paid' : 'Unpaid'
 
 /**
- * Salaries — the same people, seen through what they cost.
- *
- * Owner-only by default (module `team_salaries`): the API blanks the figure for
- * anyone else, so this tab would be a grid of dashes rather than a leak, but
- * showing it at all would still imply access that isn't there.
+ * Monthly salary ledger: generate one row per active member per calendar
+ * month, then track paid against base. Wires the existing monthly-salary
+ * hooks (previously unused by any screen).
  */
 export function SalariesTab() {
   const access = useAccess()
-  const { data, isLoading, isError, refetch } = useDirectory()
+  const { session } = useAuth()
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const [status, setStatus] = useState('all')
+  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<MonthlySalary | null>(null)
+
+  const list = useMonthlySalaries({ month, year, status, search: search || undefined })
+  const generate = useGenerateMonthlySalaries()
+
+  const canManage = !!session?.is_owner || session?.role === 'admin'
+  const rows = useMemo(() => list.data?.items ?? [], [list.data])
+  const totals = list.data?.totals
 
   if (!access.hasModule('team_salaries')) {
     return (
       <Card className="mt-6">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <Lock className="size-8 text-muted-foreground" />
-          <p className="font-medium">Salaries are owner-only</p>
-          <p className="max-w-sm text-sm text-muted-foreground">
+        <CardContent className="py-16 text-center">
+          <p className="font-medium">Salaries are restricted</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
             Ask the studio owner to grant you the Team salaries module if you need this.
           </p>
         </CardContent>
@@ -38,134 +65,257 @@ export function SalariesTab() {
     )
   }
 
-  if (isLoading) return <SkeletonList rows={5} columns={6} />
-  if (isError) return <ErrorState onRetry={() => void refetch()} />
+  async function onGenerate() {
+    try {
+      const res = await generate.mutateAsync({ month, year })
+      toast.success(`Created ${res.created_count}, skipped ${res.skipped_existing_count}.`)
+      if (res.errors.length) toast.warning(res.errors.join(' '))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to generate salaries.')
+    }
+  }
 
-  const rows = (data ?? []).filter((m) => m.role !== 'super_admin')
-  const inHouse = rows.filter((m) => m.engagement_type !== 'freelancer')
-  const monthly = inHouse.reduce((sum, m) => sum + (m.salary ?? 0), 0)
-  const unset = rows.filter((m) => m.salary === null).length
-
-  if (rows.length === 0) {
-    return (
-      <Card className="mt-6">
-        <CardContent className="py-4">
-          <EmptyState
-            title="Nobody on payroll yet"
-            description="Salaries are set per person, so this fills in as you add your team."
-            action={
-              <Button variant="outline" asChild>
-                <Link to="/employees">Go to team directory</Link>
-              </Button>
-            }
-          />
-        </CardContent>
-      </Card>
+  function exportCsv() {
+    if (rows.length === 0) {
+      toast.error('Nothing to export.')
+      return
+    }
+    const lines = rows.map((r) =>
+      [
+        r.name ?? '', r.email ?? '', r.phone ?? '',
+        String(r.base_amount), String(r.paid_amount),
+        String(Math.max(0, r.base_amount - r.paid_amount)), r.status,
+      ]
+        .map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v))
+        .join(','),
+    )
+    downloadCsv(
+      `salaries-${year}-${String(month).padStart(2, '0')}.csv`,
+      ['Name,Email,Phone,Base,Paid,Pending,Status', ...lines].join('\n'),
     )
   }
 
+  const years = Array.from({ length: 6 }, (_, i) => now.getFullYear() - 2 + i)
+
   return (
     <div className="mt-6 flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Monthly payroll" value={formatINR(monthly)} icon />
-        <Stat label="On payroll" value={`${inHouse.length}`} />
-        <Stat label="Rate not set" value={`${unset}`} />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Salary management</h2>
+          <p className="text-sm text-muted-foreground">
+            Generate and track monthly salaries for your team.
+            {list.isFetching && list.data ? ' · refreshing…' : ''}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={exportCsv} disabled={rows.length === 0}>
+            <Download /> Export CSV
+          </Button>
+          {canManage && (
+            <Button onClick={() => void onGenerate()} disabled={generate.isPending}>
+              <RefreshCcw /> {generate.isPending ? 'Generating…' : 'Generate salaries'}
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-muted-foreground">
-            <tr>
-              <th className="px-4 py-2 font-medium">Name</th>
-              <th className="px-4 py-2 font-medium">Access</th>
-              <th className="px-4 py-2 font-medium">Engagement</th>
-              <th className="px-4 py-2 font-medium">Job roles</th>
-              <th className="px-4 py-2 font-medium">Monthly salary / rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.user_id} className="border-t border-border hover:bg-muted/30">
-                <td className="px-4 py-2 font-medium">{m.name}</td>
-                <td className="px-4 py-2">
-                  <StatusBadge>{humanize(m.role)}</StatusBadge>
-                </td>
-                <td className="px-4 py-2 text-muted-foreground">
-                  {m.engagement_type === 'freelancer' ? 'Freelancer' : 'In-house'}
-                </td>
-                <td className="px-4 py-2 text-muted-foreground">
-                  {m.role_names.length ? m.role_names.join(', ') : '—'}
-                </td>
-                <td className="px-4 py-2">
-                  <SalaryCell member={m} />
-                </td>
-              </tr>
+      <div className="grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex flex-col gap-1.5">
+          <Label>Month</Label>
+          <Select value={String(month)} onChange={(e) => setMonth(Number(e.target.value))}>
+            {MONTHS.map((m, i) => (
+              <option key={m} value={String(i + 1)}>{m}</option>
             ))}
-          </tbody>
-        </table>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Year</Label>
+          <Select value={String(year)} onChange={(e) => setYear(Number(e.target.value))}>
+            {years.map((y) => (
+              <option key={y} value={String(y)}>{y}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Status</Label>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="all">All</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="partially_paid">Partially paid</option>
+            <option value="paid">Paid</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Search</Label>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Name, email, phone"
+          />
+        </div>
       </div>
+
+      {totals && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat label="Total base" value={formatINR(totals.base)} />
+          <Stat label="Total paid" value={formatINR(totals.paid)} />
+          <Stat label="Total pending" value={formatINR(totals.pending)} />
+          <Stat label="Paid" value={String(totals.paid_count)} />
+          <Stat label="Partially paid" value={String(totals.partial_count)} />
+          <Stat label="Unpaid" value={String(totals.unpaid_count)} />
+        </div>
+      )}
+
+      {list.isLoading ? (
+        <SkeletonList rows={5} columns={6} />
+      ) : list.isError ? (
+        <ErrorState onRetry={() => void list.refetch()} />
+      ) : rows.length === 0 ? (
+        <Card>
+          <CardContent className="py-4">
+            <EmptyState
+              title="No salary records for this period."
+              description={
+                canManage
+                  ? 'Click Generate salaries to create rows for active employees.'
+                  : 'Ask an admin to generate salaries for this month.'
+              }
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="table-wrap rounded-lg border border-border">
+          <table className="table-sticky w-full text-sm">
+            <thead className="bg-muted/50 text-left text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">Employee</th>
+                <th className="px-4 py-2 text-right font-medium">Base</th>
+                <th className="px-4 py-2 text-right font-medium">Paid</th>
+                <th className="px-4 py-2 text-right font-medium">Pending</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                {canManage && <th className="px-4 py-2"><span className="sr-only">Actions</span></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-4 py-2">
+                    <p className="font-medium">{r.name ?? r.user_id}</p>
+                    {r.email && <p className="text-xs text-muted-foreground">{r.email}</p>}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatINR(r.base_amount)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatINR(r.paid_amount)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {formatINR(Math.max(0, r.base_amount - r.paid_amount))}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StatusBadge tone={STATUS_TONE[r.status] ?? 'neutral'}>{statusLabel(r.status)}</StatusBadge>
+                  </td>
+                  {canManage && (
+                    <td className="px-4 py-2 text-right">
+                      <Button size="sm" variant="outline" onClick={() => setEditing(r)}>
+                        Update
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && <UpdateSalaryDialog row={editing} onClose={() => setEditing(null)} />}
     </div>
   )
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon?: boolean }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        {icon && (
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <IndianRupee className="size-4" />
-          </span>
-        )}
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="text-lg font-semibold tabular-nums">{value}</p>
-        </div>
+      <CardContent className="p-4">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
       </CardContent>
     </Card>
   )
 }
 
 /**
- * Edit in place: setting pay is a column of numbers, and a dialog per person
- * turns a five-minute pass over the team into twenty clicks. Saves only when
- * the value actually changed.
+ * Update one ledger row. Overpayments are refused by the server unless the
+ * caller confirms — the first save asks, the retry sends status paid to
+ * confirm (matching the server's overpay guard).
  */
-function SalaryCell({ member }: { member: DirectoryMember }) {
-  const { session } = useAuth()
-  const update = useUpdateMember()
-  const [value, setValue] = useState(member.salary === null ? '' : String(member.salary))
-  const original = member.salary === null ? '' : String(member.salary)
-  const dirty = value.trim() !== original
+function UpdateSalaryDialog({ row, onClose }: { row: MonthlySalary; onClose: () => void }) {
+  const update = useUpdateMonthlySalary()
+  const [paid, setPaid] = useState(String(row.paid_amount))
+  const [confirmingOverpay, setConfirmingOverpay] = useState(false)
 
-  if (!session?.is_owner) {
-    return <span className="tabular-nums">{member.salary === null ? '—' : formatINR(member.salary)}</span>
+  async function save(paidAmount: number, opts?: { markPaid?: boolean; markUnpaid?: boolean }) {
+    try {
+      if (opts?.markUnpaid) {
+        await update.mutateAsync({ id: row.id, patch: { paid_amount: 0, status: 'unpaid' } })
+      } else if (opts?.markPaid) {
+        await update.mutateAsync({ id: row.id, patch: { paid_amount: row.base_amount, status: 'paid' } })
+      } else if (confirmingOverpay) {
+        await update.mutateAsync({ id: row.id, patch: { paid_amount: paidAmount, status: 'paid' } })
+      } else {
+        await update.mutateAsync({ id: row.id, patch: { paid_amount: paidAmount } })
+      }
+      onClose()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to update salary.'
+      if (!confirmingOverpay && /exceed/i.test(msg)) {
+        setConfirmingOverpay(true)
+      } else {
+        toast.error(msg)
+      }
+    }
   }
 
   return (
-    <span className="flex items-center gap-2">
-      <Input
-        inputMode="numeric"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Not set"
-        aria-label={`Salary for ${member.name}`}
-        className="h-8 w-36 tabular-nums"
-      />
-      {dirty && (
-        <Button
-          size="sm"
-          disabled={update.isPending}
-          onClick={() =>
-            update.mutate({
-              userId: member.user_id,
-              patch: { salary: value.trim() === '' ? null : Number(value) },
-            })
-          }
-        >
-          Save
-        </Button>
-      )}
-    </span>
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent
+        title={`Update salary — ${row.name ?? row.user_id}`}
+        description={`Base ${formatINR(row.base_amount)} · currently ${formatINR(row.paid_amount)} paid.`}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="salary-paid">Paid amount (₹)</Label>
+            <Input
+              id="salary-paid"
+              type="number"
+              min={0}
+              value={paid}
+              onChange={(e) => {
+                setPaid(e.target.value)
+                setConfirmingOverpay(false)
+              }}
+            />
+          </div>
+          {confirmingOverpay && (
+            <p role="alert" className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+              Paid amount exceeds the base salary. Press Save again to confirm the overpayment.
+            </p>
+          )}
+          {update.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {update.error instanceof Error ? update.error.message : 'Unable to update salary.'}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void save(0, { markUnpaid: true })} disabled={update.isPending}>
+            Mark unpaid
+          </Button>
+          <Button variant="outline" onClick={() => void save(row.base_amount, { markPaid: true })} disabled={update.isPending}>
+            Mark paid
+          </Button>
+          <Button onClick={() => void save(Number(paid))} disabled={update.isPending}>
+            {update.isPending ? 'Saving…' : confirmingOverpay ? 'Confirm overpayment' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

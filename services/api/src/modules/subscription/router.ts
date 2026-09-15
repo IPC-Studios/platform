@@ -5,6 +5,7 @@ import {
   createOrderRequest,
   createOrderResponse,
   plan,
+  subscriptionStatus,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
@@ -31,12 +32,58 @@ export const subscriptionRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, key, name, price, billing_interval
+          select id, key, name, price, billing_interval,
+                 description, currency, duration_days, features, is_active
           from plans where is_active = true order by price`,
       ),
     )
     if (!rows) fail(400, 'We could not load plans.')
-    return c.json(plan.array().parse(rows))
+    return c.json(plan.array().parse((rows as Record<string, unknown>[]).map((r) => ({
+      ...r,
+      description: (r['description'] as string | null) ?? null,
+      currency: (r['currency'] as string | null) ?? 'INR',
+      duration_days: r['duration_days'] ?? null,
+      features: Array.isArray(r['features']) ? r['features'] : null,
+      is_active: true,
+    }))))
+  })
+
+  // Lovable parity: extended status (current/latest/can_purchase/webhook + history + recovery).
+  .get('/status', async (c) => {
+    const auth = c.get('auth')
+    const row = await attempt(c, 'subscription.status', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const me = await sql<Record<string, unknown>[]>`select plan_gate, plan_expiry from users where user_id = ${auth.userId}`
+        void me
+        const comp = await sql<Record<string, unknown>[]>`select plan_key, plan_name, plan_gate, plan_expiry from companies where id = ${auth.companyId}`
+        const orders = await sql<Record<string, unknown>[]>`select id, status, amount, plan_id, created_at, expires_at
+          from payment_orders where company_id = ${auth.companyId} order by created_at desc limit 10`
+        const plans = await sql<Record<string, unknown>[]>`select id, name from plans where is_active = true`
+        const planName = new Map(plans.map((p) => [String(p['id']), String(p['name'])]))
+        return { comp: comp[0] ?? {}, orders, planName }
+      }),
+    )
+    if (!row) fail(400, 'We could not load subscription status.')
+    const comp = row.comp as Record<string, unknown>
+    const gate = (comp['plan_gate'] as string ?? 'expired') as 'active' | 'grandfathered' | 'grace' | 'expired'
+    return c.json(subscriptionStatus.parse({
+      plan_key: (comp['plan_key'] as string | null) ?? null,
+      plan_name: (comp['plan_name'] as string | null) ?? null,
+      plan_gate: gate,
+      plan_expiry: (comp['plan_expiry'] as string | null) ?? null,
+      can_purchase: gate !== 'active',
+      latest_order_id: ((row.orders as Record<string, unknown>[])[0]?.['id'] as string | undefined) ?? null,
+      latest_order_status: ((row.orders as Record<string, unknown>[])[0]?.['status'] as string | undefined) ?? null,
+      webhook_configured: Boolean(c.env.RAZORPAY_WEBHOOK_SECRET),
+      history: (row.orders as Record<string, unknown>[]).map((o) => ({
+        id: String(o['id']),
+        plan_name: (row.planName as Map<string, string>).get(String(o['plan_id'])) ?? null,
+        amount: typeof o['amount'] === 'number' ? o['amount'] : null,
+        status: typeof o['status'] === 'string' ? o['status'] : null,
+        created_at: typeof o['created_at'] === 'string' ? o['created_at'] : null,
+        expires_at: typeof o['expires_at'] === 'string' ? o['expires_at'] : null,
+      })),
+    }))
   })
 
   .post('/order', requireOwner(), async (c) => {

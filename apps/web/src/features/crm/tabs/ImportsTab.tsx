@@ -58,7 +58,7 @@ function CsvImport() {
       .filter((r) => r.valid && !!r.phone)
       .map((r) => ({ name: r.name, phone: r.phone!, email: r.email, source: r.source, notes: r.notes }))
     commit.mutate(
-      { rows, skip_duplicates: skipDuplicates },
+      { mode: "skip", rows, skip_duplicates: skipDuplicates },
       {
         onSuccess: () => {
           setPreview(null)

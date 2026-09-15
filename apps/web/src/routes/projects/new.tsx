@@ -65,6 +65,7 @@ import {
   useDeliverableSets,
   useIssueQuotation,
   useSaveDeliverableSet,
+  useShootTypes,
 } from '@/features/projects/api'
 import { useRoleLibrary } from '@/features/team/api'
 import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
@@ -226,10 +227,8 @@ function NewProject() {
     try {
       let clientId = draft.client_id
       if (!clientId) {
-        const created = await createClient.mutateAsync({
-          name: draft.new_client_name.trim(),
-          ...(draft.new_client_phone.trim() ? { phone: draft.new_client_phone.trim() } : {}),
-        })
+        const { toNewClientRequest } = await import('@/features/projects/wizard')
+        const created = await createClient.mutateAsync(toNewClientRequest(draft))
         clientId = created.id
       }
 
@@ -577,7 +576,7 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const [mode, setMode] = useState<'existing' | 'new'>(draft.new_client_name ? 'new' : 'existing')
   const [q, setQ] = useState('')
 
-  const matches = (clients ?? []).filter((c) =>
+  const matches = (Array.isArray(clients) ? clients : []).filter((c) =>
     [c.name, c.phone].filter(Boolean).some((v) => String(v).toLowerCase().includes(q.trim().toLowerCase())),
   )
 
@@ -674,13 +673,47 @@ function ClientStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
                 placeholder="Sharma Family"
               />
             </Field>
-            <Field label="Phone" hint="Optional, but it is how most studios look a client up later.">
+            <Field label="Phone" required hint="Required — used for duplicate checks and lookups.">
               <Input
                 value={draft.new_client_phone}
                 onChange={(e) => patch({ new_client_phone: e.target.value })}
                 placeholder="9876543210"
               />
             </Field>
+            <Field label="Email">
+              <Input
+                value={draft.new_client_email}
+                onChange={(e) => patch({ new_client_email: e.target.value })}
+                placeholder="client@example.com"
+              />
+            </Field>
+            <Field label="Relation" hint="Referral, Repeat, Vendor…">
+              <Input
+                value={draft.new_client_relation}
+                onChange={(e) => patch({ new_client_relation: e.target.value })}
+                placeholder="Referral"
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Address">
+                <Input
+                  value={draft.new_client_address}
+                  onChange={(e) => patch({ new_client_address: e.target.value })}
+                  placeholder="Street, area, city"
+                />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Notes">
+                <textarea
+                  value={draft.new_client_notes}
+                  onChange={(e) => patch({ new_client_notes: e.target.value })}
+                  rows={2}
+                  placeholder="Anything the studio should remember about this client"
+                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
+                />
+              </Field>
+            </div>
           </div>
         )}
       </div>
@@ -853,6 +886,10 @@ function AddShootMenu({
 function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
   const services = useServices()
   const shootPresets = useShootPresets('shoot')
+  const shootTypes = useShootTypes()
+  // Library first, hardcoded fallback: QUICK_SHOOTS stays when the catalog is empty.
+  const quickShoots = (shootTypes.data ?? []).filter((t) => !t.is_archived).slice(0, 8).map((t) => t.name)
+  const quickList = quickShoots.length ? quickShoots : [...QUICK_SHOOTS]
   const listRef = useRef<HTMLDivElement>(null)
   // The chips sit above a list that can already be several cards long, so a
   // shoot added from up there would otherwise land off the bottom of the
@@ -933,9 +970,9 @@ function ShootsStep({ draft, patch }: { draft: ProjectDraft; patch: Patch }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Quick add
+          Quick add{(shootTypes.data ?? []).length ? ' · from library' : ''}
         </span>
-        {QUICK_SHOOTS.map((name) => {
+        {quickList.map((name) => {
           const already = draft.shoots.some(
             (s) => s.name.trim().toLowerCase() === name.toLowerCase(),
           )
@@ -2217,6 +2254,29 @@ function BillingStep({
                     placeholder="UTR / cheque no."
                   />
                 </Field>
+                <Field label="Status">
+                  <Select value={p.status} onChange={(e) => set(i, { status: e.target.value as 'paid' | 'pending' })}>
+                    <option value="paid">Paid</option>
+                    <option value="pending">Pending</option>
+                  </Select>
+                </Field>
+                <Field label="Description">
+                  <Input value={p.description} onChange={(e) => set(i, { description: e.target.value })} placeholder="Advance / instalment…" />
+                </Field>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={p.is_gst} onChange={(e) => set(i, { is_gst: e.target.checked })} />
+                  GST receipt
+                </label>
+                {p.is_gst && (
+                  <Field label="GST number">
+                    <Input value={p.gst_number} onChange={(e) => set(i, { gst_number: e.target.value })} placeholder="GSTIN" />
+                  </Field>
+                )}
+              </div>
+              <div className="mt-3">
+                <Field label="Notes">
+                  <Input value={p.notes} onChange={(e) => set(i, { notes: e.target.value })} placeholder="Optional note" />
+                </Field>
               </div>
             </div>
           ))}
@@ -2247,7 +2307,7 @@ function ReviewStep({
   onJump: (s: WizardStep) => void
 }) {
   const { data: clients } = useClients()
-  const client = clients?.find((c) => c.id === draft.client_id)
+  const client = Array.isArray(clients) ? clients.find((c) => c.id === draft.client_id) : undefined
   const clientName = client?.name ?? draft.new_client_name.trim()
   const problems = WIZARD_STEPS.filter((s) => errors[s])
 

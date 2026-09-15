@@ -69,6 +69,10 @@ export const profitabilitySummary = z.object({
   loss_project_count: z.number().int(),
   pending_project_count: z.number().int(),
   over_collected_project_count: z.number().int(),
+  // Lovable parity: pending-income + collection-rate + total-pending cards.
+  pending_income: z.number().nullish(),
+  pending_collection_rate: z.number().nullish(),
+  total_pending: z.number().nullish(),
 })
 export type ProfitabilitySummary = z.infer<typeof profitabilitySummary>
 

@@ -1,13 +1,18 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Button } from '@/shared/ui/button'
 import { Input, Label } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { Card, CardContent } from '@/shared/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
-import { ApiError } from '@/shared/api/client'
+import { ApiError, callApi } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthProvider'
+import { useAccess } from '@/shared/auth/useAccess'
+import { shootListItem } from '@ipc/contracts'
 import {
   useTeamPayouts,
   useCreateTeamPayout,
@@ -278,59 +283,217 @@ function TeamPayoutsContent() {
 const COST_STATUS_TONE = { not_decided: 'neutral', tentative: 'warning', final: 'success' } as const
 const SETTLEMENT_TONE = { unpaid: 'danger', partially_paid: 'warning', paid: 'success' } as const
 
+type SettlementFilter = 'all' | 'unpaid' | 'partially_paid' | 'paid'
+type CostFilter = 'all' | 'final' | 'tentative' | 'not_added'
+type RangeFilter = 'all' | 'this_month' | 'custom'
+
+function settlementOf(due: number, paid: number): 'unpaid' | 'partially_paid' | 'paid' {
+  if (paid <= 0) return 'unpaid'
+  if (paid + 0.001 >= due) return 'paid'
+  return 'partially_paid'
+}
+
 /** Grouped by member: what a shoot-day booking is worth, and what's actually been paid toward it. */
 function ShootPayoutsTracker() {
   const { data: slots, isLoading } = useSlots()
-  const costed = (slots ?? []).filter((s) => s.status !== 'cancelled' && s.cost_status !== 'not_decided')
-  const slotIds = costed.map((s) => s.id)
+  const { session } = useAuth()
+  const access = useAccess()
+  const [settlement, setSettlement] = useState<SettlementFilter>('all')
+  const [cost, setCost] = useState<CostFilter>('all')
+  const [range, setRange] = useState<RangeFilter>('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [search, setSearch] = useState('')
+
+  const shoots = useQuery({
+    queryKey: ['shoots'],
+    queryFn: () => callApi('/shoots', { responseSchema: shootListItem.array() }),
+    enabled: !!session && access.hasModule('projects'),
+    staleTime: 30_000,
+  })
+  const shootById = useMemo(() => new Map((shoots.data ?? []).map((s) => [s.id, s])), [shoots.data])
+
+  const bookable = useMemo(
+    () => (slots ?? []).filter((s) => s.status !== 'cancelled'),
+    [slots],
+  )
+  const slotIds = useMemo(() => bookable.map((s) => s.id), [bookable])
   const { data: settlements } = usePayoutSettlements(slotIds)
-  const paidBySlot = new Map((settlements?.aggregates ?? []).map((a) => [a.slot_id, a]))
+  const paidBySlot = useMemo(
+    () => new Map((settlements?.aggregates ?? []).map((a) => [a.slot_id, a])),
+    [settlements],
+  )
+
+  const { fromDate, toDate } = useMemo(() => {
+    if (range === 'this_month') {
+      const n = new Date()
+      const pad = (v: number) => String(v).padStart(2, '0')
+      return {
+        fromDate: `${n.getFullYear()}-${pad(n.getMonth() + 1)}-01`,
+        toDate: `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate())}`,
+      }
+    }
+    return { fromDate: from || null, toDate: to || null }
+  }, [range, from, to])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return bookable.filter((s) => {
+      const due = s.final_cost ?? s.estimated_cost ?? 0
+      const paid = paidBySlot.get(s.id)?.paid_total ?? 0
+      const uncosted = s.cost_status === 'not_decided' && due <= 0
+      if (cost === 'final' && s.cost_status !== 'final') return false
+      if (cost === 'tentative' && s.cost_status !== 'tentative') return false
+      if (cost === 'not_added' && !uncosted) return false
+      if (settlement !== 'all' && settlementOf(due, paid) !== settlement) return false
+      if (fromDate && s.start_at.slice(0, 10) < fromDate) return false
+      if (toDate && s.start_at.slice(0, 10) > toDate) return false
+      if (q && !(s.user_name ?? '').toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [bookable, paidBySlot, cost, settlement, fromDate, toDate, search])
+
+  const summary = useMemo(() => {
+    const due = filtered.reduce((n, s) => n + (s.final_cost ?? s.estimated_cost ?? 0), 0)
+    const paid = filtered.reduce((n, s) => n + (paidBySlot.get(s.id)?.paid_total ?? 0), 0)
+    const partial = filtered.filter((s) =>
+      settlementOf(s.final_cost ?? s.estimated_cost ?? 0, paidBySlot.get(s.id)?.paid_total ?? 0) === 'partially_paid',
+    ).length
+    return {
+      due,
+      paid,
+      pending: Math.max(0, due - paid),
+      partial,
+      members: new Set(filtered.map((s) => s.user_id)).size,
+    }
+  }, [filtered, paidBySlot])
 
   if (isLoading) return <div className="py-12 text-center text-muted-foreground">Loading…</div>
-  if (costed.length === 0) {
+  if (bookable.length === 0) {
     return (
       <div className="py-12 text-center text-muted-foreground">
-        No priced bookings yet. Set a cost on a booking in Team Allocation to see it here.
+        No bookings yet. Book crew in Team Allocation to see payouts here.
       </div>
     )
   }
 
   const byMember = new Map<string, TeamSlot[]>()
-  for (const s of costed) {
+  for (const s of filtered) {
     const list = byMember.get(s.user_id) ?? []
     list.push(s)
     byMember.set(s.user_id, list)
   }
 
   return (
-    <div className="space-y-6">
-      {[...byMember.entries()].map(([userId, slots]) => {
-        const memberTotal = slots.reduce((n, s) => n + (s.final_cost ?? s.estimated_cost ?? 0), 0)
-        const memberPaid = slots.reduce((n, s) => n + (paidBySlot.get(s.id)?.paid_total ?? 0), 0)
-        return (
-          <div key={userId} className="space-y-2">
-            <div className="flex items-baseline justify-between">
-              <h3 className="font-semibold">{slots[0]!.user_name ?? 'Member'}</h3>
-              <p className="text-sm text-muted-foreground">
-                {formatINR(memberPaid)} of {formatINR(memberTotal)} paid
-              </p>
-            </div>
-            {slots.map((s) => (
-              <SlotPayoutRow key={s.id} slot={s} agg={paidBySlot.get(s.id)} entries={settlements?.entries ?? []} />
-            ))}
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard label="Total due" value={formatINR(summary.due)} icon={DollarSign} />
+        <StatCard label="Paid" value={formatINR(summary.paid)} icon={CheckCircle} />
+        <StatCard label="Pending" value={formatINR(summary.pending)} icon={Clock} />
+        <StatCard label="Partially paid" value={String(summary.partial)} icon={Wallet} />
+        <StatCard label="Members" value={String(summary.members)} icon={DollarSign} />
+      </div>
+
+      <Card>
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="flex flex-col gap-1.5">
+            <Label>Settlement</Label>
+            <Select value={settlement} onChange={(e) => setSettlement(e.target.value as SettlementFilter)}>
+              <option value="all">All</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="partially_paid">Partially paid</option>
+              <option value="paid">Paid</option>
+            </Select>
           </div>
-        )
-      })}
+          <div className="flex flex-col gap-1.5">
+            <Label>Cost status</Label>
+            <Select value={cost} onChange={(e) => setCost(e.target.value as CostFilter)}>
+              <option value="all">All</option>
+              <option value="final">Final</option>
+              <option value="tentative">Tentative</option>
+              <option value="not_added">Not added</option>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Date range</Label>
+            <Select value={range} onChange={(e) => setRange(e.target.value as RangeFilter)}>
+              <option value="all">All time</option>
+              <option value="this_month">This month</option>
+              <option value="custom">Custom</option>
+            </Select>
+          </div>
+          {range === 'custom' ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>From</Label>
+                <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>To</Label>
+                <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col gap-1.5 lg:col-span-2">
+              <Label>Member</Label>
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" />
+            </div>
+          )}
+          {range === 'custom' && (
+            <div className="flex flex-col gap-1.5 lg:col-span-5">
+              <Label>Member</Label>
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {filtered.length === 0 ? (
+        <div className="py-12 text-center text-muted-foreground">
+          Nothing matches these filters.
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {[...byMember.entries()].map(([userId, memberSlots]) => {
+            const memberTotal = memberSlots.reduce((n, s) => n + (s.final_cost ?? s.estimated_cost ?? 0), 0)
+            const memberPaid = memberSlots.reduce((n, s) => n + (paidBySlot.get(s.id)?.paid_total ?? 0), 0)
+            return (
+              <div key={userId} className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <h3 className="font-semibold">{memberSlots[0]!.user_name ?? 'Member'}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {formatINR(memberPaid)} of {formatINR(memberTotal)} paid
+                  </p>
+                </div>
+                {memberSlots.map((s) => (
+                  <SlotPayoutRow
+                    key={s.id}
+                    slot={s}
+                    shootName={s.shoot_id ? (shootById.get(s.shoot_id)?.name ?? null) : null}
+                    projectName={s.shoot_id ? (shootById.get(s.shoot_id)?.project_name ?? null) : null}
+                    agg={paidBySlot.get(s.id)}
+                    entries={settlements?.entries ?? []}
+                  />
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
 function SlotPayoutRow({
   slot,
+  shootName,
+  projectName,
   agg,
   entries,
 }: {
   slot: TeamSlot
+  shootName: string | null
+  projectName: string | null
   agg: { paid_total: number } | undefined
   entries: readonly { id: string; slot_id: string; entry_type: string; amount_paid: number; paid_date: string; payment_mode: string | null; payment_reference: string | null; notes: string | null }[]
 }) {
@@ -338,19 +501,27 @@ function SlotPayoutRow({
   const due = slot.final_cost ?? slot.estimated_cost ?? 0
   const paid = agg?.paid_total ?? 0
   const pending = Math.max(0, due - paid)
-  const settlementStatus = pending <= 0.001 ? 'paid' : paid > 0 ? 'partially_paid' : 'unpaid'
+  const uncosted = slot.cost_status === 'not_decided' && due <= 0
+  const settlementStatus = uncosted ? 'unpaid' : settlementOf(due, paid)
   const mine = entries.filter((e) => e.slot_id === slot.id)
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{slot.service_name ?? 'Booking'}</span>
-          <StatusBadge tone={COST_STATUS_TONE[slot.cost_status]}>{slot.cost_status.replace('_', ' ')}</StatusBadge>
+          {uncosted ? (
+            <StatusBadge>No cost yet</StatusBadge>
+          ) : (
+            <StatusBadge tone={COST_STATUS_TONE[slot.cost_status]}>{slot.cost_status.replace('_', ' ')}</StatusBadge>
+          )}
           <StatusBadge tone={SETTLEMENT_TONE[settlementStatus]}>{settlementStatus.replace('_', ' ')}</StatusBadge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          {new Date(slot.start_at).toLocaleDateString()} · {formatINR(due)} due, {formatINR(paid)} paid
+          {projectName ?? 'No project'} · {shootName ?? 'No shoot'}
+        </p>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {new Date(slot.start_at).toLocaleDateString()} · {uncosted ? 'uncosted' : `${formatINR(due)} due, ${formatINR(paid)} paid`}
         </p>
         {slot.cost_notes && <p className="mt-1 text-xs text-muted-foreground">{slot.cost_notes}</p>}
       </div>
@@ -358,7 +529,7 @@ function SlotPayoutRow({
         <Button variant="ghost" size="icon" className="h-8 w-8" title="History" onClick={() => setHistoryOpen(true)} disabled={mine.length === 0}>
           <History className="h-4 w-4" />
         </Button>
-        {pending > 0.001 && <MarkPaidDialog slot={slot} pending={pending} />}
+        {!uncosted && pending > 0.001 && <MarkPaidDialog slot={slot} pending={pending} />}
       </div>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>

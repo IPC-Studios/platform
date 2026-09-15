@@ -13,7 +13,7 @@ export const registerRequest = z.object({
   admin_name: z.string().trim().min(2).max(120),
   email,
   password: z.string().min(8).max(200),
-  phone: phone.optional(),
+  phone: phone,
 })
 export type RegisterRequest = z.infer<typeof registerRequest>
 
@@ -43,7 +43,7 @@ export type AuthToken = z.infer<typeof authToken>
 export const completeSetupRequest = z.object({
   company_name: z.string().trim().min(2).max(120),
   admin_name: z.string().trim().min(2).max(120),
-  phone: phone.optional(),
+  phone: phone,
 })
 export type CompleteSetupRequest = z.infer<typeof completeSetupRequest>
 

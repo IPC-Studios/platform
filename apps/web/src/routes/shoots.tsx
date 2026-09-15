@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Camera, Plus, MapPin, Pencil, Trash2, ExternalLink } from 'lucide-react'
+import { Camera, Plus, MapPin, Pencil, Trash2, ExternalLink, CalendarDays, Eye, X } from 'lucide-react'
 import { shootListItem, shootRequirementInput, z, type CreateShootRequest, type ShootListItem, type ShootRequirementInput, type ShootStatus, type UpdateShootRequest } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
@@ -11,6 +12,7 @@ import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
+import { useConfirm } from '@/shared/ui/confirm'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
@@ -18,7 +20,7 @@ import { SendTermsDialog } from '@/features/team-terms/SendTermsDialog'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { humanize } from '@/shared/ui/format'
 import { useProjects } from '@/features/projects/api'
-import { useUpdateShoot } from '@/features/shoots/api'
+import { useDeleteShoot, useUpdateShoot } from '@/features/shoots/api'
 
 const list = shootListItem.array()
 const TONE: Record<ShootStatus, 'info' | 'success' | 'warning' | 'danger'> = {
@@ -47,39 +49,166 @@ export function ShootsPage() {
   )
 }
 
+type SortKey = 'date_asc' | 'date_desc' | 'name_az' | 'recent'
+type DateFilter = 'all' | 'upcoming' | 'past' | 'today'
+
 function Shoots() {
   const { data, isLoading, isError, refetch } = useShoots()
   const access = useAccess()
   const canEdit = access.hasAction('projects', 'edit')
+  const canDelete = access.hasAction('projects', 'delete')
+  const confirm = useConfirm()
+  const del = useDeleteShoot()
+
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<'all' | ShootStatus>('all')
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all')
+  const [sort, setSort] = useState<SortKey>('date_asc')
+
+  const today = new Date().toISOString().slice(0, 10)
+  const all = useMemo(() => data ?? [], [data])
+
+  // Stats over the unfiltered set (Lovable parity).
+  const stats = useMemo(
+    () => ({
+      total: all.length,
+      upcoming: all.filter((s) => s.shoot_date && s.shoot_date >= today).length,
+      past: all.filter((s) => s.shoot_date && s.shoot_date < today).length,
+      unscheduled: all.filter((s) => !s.shoot_date).length,
+    }),
+    [all, today],
+  )
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const filtered = all.filter((s) => {
+      if (status !== 'all' && s.status !== status) return false
+      if (dateFilter === 'upcoming' && !(s.shoot_date && s.shoot_date >= today)) return false
+      if (dateFilter === 'past' && !(s.shoot_date && s.shoot_date < today)) return false
+      if (dateFilter === 'today' && s.shoot_date !== today) return false
+      if (q) {
+        const hay = [s.name, s.project_name ?? '', s.location ?? '', s.client_name ?? '']
+          .join(' ')
+          .toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+    const sorted = [...filtered]
+    sorted.sort((a, b) => {
+      if (sort === 'name_az') return a.name.localeCompare(b.name)
+      if (sort === 'recent') return b.id.localeCompare(a.id)
+      const ak = a.shoot_date || '9999-99-99'
+      const bk = b.shoot_date || '9999-99-99'
+      return sort === 'date_desc' ? bk.localeCompare(ak) : ak.localeCompare(bk)
+    })
+    return sorted
+  }, [all, search, status, dateFilter, sort, today])
+
+  async function onDelete(s: ShootListItem) {
+    const yes = await confirm({
+      title: `Delete shoot "${s.name}"?`,
+      description: 'This releases related team bookings. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (yes) del.mutate(s.id)
+  }
+
+  const hasFilters = search.trim() !== '' || status !== 'all' || dateFilter !== 'all'
 
   return (
     <>
       <PageHeader
         title="Shoots"
         description="Every scheduled shoot across your projects."
-        actions={canEdit && <ShootDialog />}
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/shoots/my">My shoots</Link>
+            </Button>
+            {canEdit && <ShootDialog />}
+          </>
+        }
       />
+
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Total" value={stats.total} />
+        <StatCard label="Upcoming" value={stats.upcoming} />
+        <StatCard label="Past" value={stats.past} />
+        <StatCard label="Unscheduled" value={stats.unscheduled} />
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search shoot, project, client, venue…"
+          aria-label="Search shoots"
+        />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Select value={status} onChange={(e) => setStatus(e.target.value as 'all' | ShootStatus)} aria-label="Status">
+            <option value="all">All statuses</option>
+            <option value="planned">Planned</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </Select>
+          <Select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)} aria-label="Date">
+            <option value="all">All dates</option>
+            <option value="upcoming">Upcoming</option>
+            <option value="past">Past</option>
+            <option value="today">Today</option>
+          </Select>
+          <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort">
+            <option value="date_asc">Date ↑</option>
+            <option value="date_desc">Date ↓</option>
+            <option value="name_az">Name A–Z</option>
+          </Select>
+        </div>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Showing {rows.length} of {all.length} shoots</span>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setStatus('all'); setDateFilter('all'); setSort('date_asc') }}>
+              <X /> Clear filters
+            </Button>
+          )}
+        </div>
+      </div>
+
       {isLoading ? (
         <SkeletonCards count={3} />
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
-      ) : !data || data.length === 0 ? (
-        <EmptyState title="No shoots scheduled" description="Add a shoot to a project to plan crew and data." action={canEdit && <ShootDialog />} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title={all.length === 0 ? 'No shoots scheduled' : 'No shoots match these filters'}
+          description="Add a shoot to a project to plan crew and data."
+          action={canEdit && all.length === 0 ? <ShootDialog /> : undefined}
+        />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {data.map((s) => (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {rows.map((s) => (
             <Card key={s.id}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <span className="flex items-center gap-2 font-medium">
                     <Camera className="size-4 text-muted-foreground" />
-                    {s.name}
+                    <Link to="/shoots/$shootId" params={{ shootId: s.id }} className="hover:text-primary hover:underline">
+                      {s.name}
+                    </Link>
                   </span>
                   <StatusBadge tone={TONE[s.status]}>{humanize(s.status)}</StatusBadge>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{s.project_name ?? '—'}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  {s.shoot_date && <span>{s.shoot_date}</span>}
+                  {s.shoot_date ? (
+                    <span className="flex items-center gap-1">
+                      <CalendarDays className="size-3" /> {s.shoot_date}
+                    </span>
+                  ) : (
+                    <span>Unscheduled</span>
+                  )}
                   {s.location && (
                     <span className="flex items-center gap-1">
                       <MapPin className="size-3" />
@@ -102,18 +231,37 @@ function Shoots() {
                     Needs: {s.requirements.map((r) => `${r.name} ×${r.quantity}`).join(', ')}
                   </p>
                 )}
-                {canEdit && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <EditShootDialog shoot={s} />
-                    <SendTermsDialog shoot={s} />
-                  </div>
-                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/shoots/$shootId" params={{ shootId: s.id }}>
+                      <Eye /> View
+                    </Link>
+                  </Button>
+                  {canEdit && <EditShootDialog shoot={s} />}
+                  {canEdit && <SendTermsDialog shoot={s} />}
+                  {canDelete && (
+                    <Button size="sm" variant="ghost" title="Delete shoot" onClick={() => void onDelete(s)} disabled={del.isPending}>
+                      <Trash2 />
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
     </>
+  )
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      </CardContent>
+    </Card>
   )
 }
 

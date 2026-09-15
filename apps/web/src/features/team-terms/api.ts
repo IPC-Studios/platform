@@ -83,6 +83,18 @@ export function useArchiveTeamTermsTemplate() {
   )
 }
 
+/**
+ * Permanent delete with a server-side usage guard: used templates are
+ * refused with 409 (archive instead). The button stays disabled with a hint
+ * once send_count > 0, so the 409 is a backstop, not the UX.
+ */
+export function useDeleteTeamTermsTemplate() {
+  return useTermsMutation(
+    (id: string) => callApi(`/team-terms/templates/${id}`, { method: 'DELETE', responseSchema: anySchema }),
+    'Terms deleted',
+  )
+}
+
 export function useSendTeamTerms() {
   const qc = useQueryClient()
   return useMutation({

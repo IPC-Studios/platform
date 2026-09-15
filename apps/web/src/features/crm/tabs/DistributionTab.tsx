@@ -57,7 +57,7 @@ export function DistributionTab() {
                 ))}
               </Select>
             </div>
-            <Button disabled={!pick || add.isPending} onClick={() => add.mutate({ user_id: pick, priority: 0 }, { onSuccess: () => setPick('') })}>
+            <Button disabled={!pick || add.isPending} onClick={() => add.mutate({ user_id: pick, priority: 0, source_filter: [], strategy: "round_robin" }, { onSuccess: () => setPick('') })}>
               <UserPlus /> Add
             </Button>
           </div>

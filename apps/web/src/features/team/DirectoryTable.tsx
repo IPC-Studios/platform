@@ -1,4 +1,5 @@
-import { KeyRound, Search, Trash2, UserCheck, UserX } from 'lucide-react'
+import { KeyRound, Search, ShieldCheck, Trash2, UserCheck, UserX } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import type { DirectoryMember, EmployeeRole } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -119,16 +120,45 @@ export function DirectoryFiltersBar({
   )
 }
 
+/**
+ * Contact-completeness badges (Lovable parity): at a glance, who cannot be
+ * reached and who cannot sign in.
+ */
+export function ContactBadges({ member }: { member: DirectoryMember }) {
+  return (
+    <span className="mt-1 flex flex-wrap gap-1">
+      {!member.login_enabled && <StatusBadge>No login</StatusBadge>}
+      {!member.email && !member.phone && <StatusBadge tone="danger">Contact missing</StatusBadge>}
+      {!member.email && member.phone && <StatusBadge> Email missing</StatusBadge>}
+      {!member.phone && member.email && <StatusBadge>Phone missing</StatusBadge>}
+    </span>
+  )
+}
+
 export function DirectoryTable({
   rows,
   canManage,
   showSalary,
+  selected,
+  onToggle,
+  onToggleAll,
+  onDelete,
+  onManageAccess,
 }: {
   rows: readonly DirectoryMember[]
   canManage: boolean
   showSalary: boolean
+  /** Selection for the bulk bar. Omit to hide checkboxes. */
+  selected?: ReadonlySet<string> | undefined
+  onToggle?: ((userId: string, on: boolean) => void) | undefined
+  onToggleAll?: ((on: boolean) => void) | undefined
+  /** Delete via DeleteEmployeeDialog (with reason), not the inline confirm. */
+  onDelete?: ((member: DirectoryMember) => void) | undefined
+  onManageAccess?: ((member: DirectoryMember) => void) | undefined
 }) {
   const isMobile = useIsMobile()
+  const selectable = !!selected && !!onToggle && !!onToggleAll
+  const allSelected = selectable && rows.length > 0 && rows.every((m) => selected.has(m.user_id))
 
   if (isMobile) {
     return (
@@ -137,12 +167,25 @@ export function DirectoryTable({
           <div key={m.user_id} className="rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
+                {selectable && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(m.user_id)}
+                    onChange={(e) => onToggle!(m.user_id, e.target.checked)}
+                    aria-label={`Select ${m.name}`}
+                  />
+                )}
                 <Avatar name={m.name} size="sm" />
                 <div className="min-w-0">
-                <p className="truncate font-medium">{m.name}</p>
-                <p className="truncate text-sm text-muted-foreground">
-                  {[m.email, m.phone].filter(Boolean).join(' · ') || '—'}
+                <p className="truncate font-medium">
+                  <Link to="/employees/$id" params={{ id: m.user_id }} className="hover:underline">
+                    {m.name}
+                  </Link>
                 </p>
+                <p className="truncate text-sm text-muted-foreground">
+                  {[m.email, m.phone, m.alternate_phone].filter(Boolean).join(' · ') || '—'}
+                </p>
+                <ContactBadges member={m} />
                 </div>
               </div>
               <StatusBadge tone={STATUS_TONE[m.status] ?? 'neutral'}>{humanize(m.status)}</StatusBadge>
@@ -152,9 +195,10 @@ export function DirectoryTable({
               <StatusBadge>{engagementLabel(m.engagement_type)}</StatusBadge>
               {showSalary && m.salary !== null && <StatusBadge>{formatINR(m.salary)}</StatusBadge>}
             </div>
+            <p className="mt-2 text-xs text-muted-foreground">Joined {m.created_at.slice(0, 10)}</p>
             {canManage && (
               <div className="mt-3">
-                <RowActions member={m} />
+                <RowActions member={m} onDelete={onDelete} onManageAccess={onManageAccess} />
               </div>
             )}
           </div>
@@ -168,6 +212,16 @@ export function DirectoryTable({
       <table className="table-sticky w-full text-sm">
         <thead className="bg-muted/50 text-left text-muted-foreground">
           <tr>
+            {selectable && (
+              <th className="w-10 px-4 py-2">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => onToggleAll!(e.target.checked)}
+                  aria-label="Select all"
+                />
+              </th>
+            )}
             <th className="min-w-56 px-4 py-2 font-medium">Name</th>
             <th className="px-4 py-2 font-medium">Contact</th>
             <th className="px-4 py-2 font-medium">Access</th>
@@ -175,6 +229,7 @@ export function DirectoryTable({
             <th className="px-4 py-2 font-medium">Engagement</th>
             <th className="px-4 py-2 font-medium">Status</th>
             {showSalary && <th className="px-4 py-2 text-right font-medium">Salary</th>}
+            <th className="px-4 py-2 font-medium">Joined</th>
             {canManage && (
               <th className="px-4 py-2 font-medium">
                 <span className="sr-only">Actions</span>
@@ -185,20 +240,32 @@ export function DirectoryTable({
         <tbody>
           {rows.map((m) => (
             <tr key={m.user_id} className="border-t border-border hover:bg-muted/30">
+              {selectable && (
+                <td className="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(m.user_id)}
+                    onChange={(e) => onToggle!(m.user_id, e.target.checked)}
+                    aria-label={`Select ${m.name}`}
+                  />
+                </td>
+              )}
               <td className="px-4 py-2 font-medium">
                 <span className="flex items-center gap-2">
                   <Avatar name={m.name} size="sm" />
-                  <span>{m.name}</span>
-                  {!m.login_enabled && (
-                    <span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
-                      (no login)
-                    </span>
-                  )}
+                  <span>
+                    <Link to="/employees/$id" params={{ id: m.user_id }} className="hover:underline">
+                      {m.name}
+                    </Link>
+                    <ContactBadges member={m} />
+                  </span>
                 </span>
               </td>
               <td className="px-4 py-2 text-muted-foreground">
                 <span className="block truncate">{m.email ?? '—'}</span>
-                <span className="block truncate text-xs">{m.phone ?? '—'}</span>
+                <span className="block truncate text-xs">
+                  {[m.phone, m.alternate_phone].filter(Boolean).join(' · ') || '—'}
+                </span>
               </td>
               <td className="px-4 py-2">
                 <StatusBadge tone={ROLE_TONE[m.role] ?? 'neutral'}>{humanize(m.role)}</StatusBadge>
@@ -230,9 +297,10 @@ export function DirectoryTable({
                   {m.salary === null ? '—' : formatINR(m.salary)}
                 </td>
               )}
+              <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">{m.created_at.slice(0, 10)}</td>
               {canManage && (
                 <td className="px-4 py-2">
-                  <RowActions member={m} />
+                  <RowActions member={m} onDelete={onDelete} onManageAccess={onManageAccess} />
                 </td>
               )}
             </tr>
@@ -247,8 +315,19 @@ export function DirectoryTable({
  * Owner-only row actions. Removal is soft on the server — the person stays on
  * the shoots and payouts they were part of, which is why it reads as "Remove"
  * rather than "Delete".
+ *
+ * When `onDelete` is provided the row delegates to the DeleteEmployeeDialog
+ * (reason + acknowledgement); otherwise it falls back to the inline confirm.
  */
-function RowActions({ member }: { member: DirectoryMember }) {
+function RowActions({
+  member,
+  onDelete,
+  onManageAccess,
+}: {
+  member: DirectoryMember
+  onDelete?: ((member: DirectoryMember) => void) | undefined
+  onManageAccess?: ((member: DirectoryMember) => void) | undefined
+}) {
   const update = useUpdateMember()
   const remove = useRemoveMember()
   const reset = useSendReset()
@@ -257,6 +336,10 @@ function RowActions({ member }: { member: DirectoryMember }) {
   const active = member.status === 'active'
 
   async function onRemove() {
+    if (onDelete) {
+      onDelete(member)
+      return
+    }
     const yes = await confirm({
       title: `Remove ${member.name}?`,
       description:
@@ -272,6 +355,12 @@ function RowActions({ member }: { member: DirectoryMember }) {
   return (
     <div className="row-actions flex items-center justify-end gap-1">
       <EditMemberDialog member={member} />
+      {onManageAccess && member.login_enabled && (
+        <Button size="sm" variant="ghost" title="Manage access" onClick={() => onManageAccess(member)}>
+          <ShieldCheck />
+          <span className="sr-only">Manage access</span>
+        </Button>
+      )}
       {member.login_enabled && member.email && (
         <Button
           size="sm"

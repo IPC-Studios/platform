@@ -36,6 +36,8 @@ export function EditMemberDialog({ member }: { member: DirectoryMember }) {
     pay_components: member.pay_components,
     payment_status: member.payment_status,
     salary: member.salary != null ? String(member.salary) : '',
+    freelancer_rate: member.freelancer_rate != null ? String(member.freelancer_rate) : '',
+    has_login_access: member.login_enabled,
     payout_type: member.payout_type ?? '',
     commission_pct: member.commission_pct != null ? String(member.commission_pct) : '',
     commission_basis: member.commission_basis ?? '',
@@ -67,6 +69,7 @@ export function EditMemberDialog({ member }: { member: DirectoryMember }) {
           ...(role === 'super_admin' ? {} : { role }),
           engagement_type: engagementType,
           salary: comp.salary.trim() === '' ? null : Number(comp.salary),
+          freelancer_rate: comp.freelancer_rate.trim() === '' ? null : Number(comp.freelancer_rate),
           payout_type: comp.payout_type ? (comp.payout_type as NonNullable<typeof member.payout_type>) : null,
           commission_pct: comp.commission_pct.trim() === '' ? null : Number(comp.commission_pct),
           commission_basis: comp.commission_basis

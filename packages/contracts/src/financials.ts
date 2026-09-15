@@ -15,8 +15,22 @@ export const expense = z.object({
   gst_treatment: gstTreatment,
   gst_rate: gstRate.nullable(),
   is_fixed_overhead: z.boolean(),
+  // Lovable parity (optional so old rows still parse).
+  invoice_number: z.string().nullable().nullish(),
+  amount_is: z.enum(['including_tax', 'excluding_tax']).nullish(),
+  tax_name: z.string().nullable().nullish(),
+  tax_amount: money.nullish(),
+  reverse_charge: z.boolean().nullish(),
+  itemize_json: z.array(z.record(z.string(), z.unknown())).nullish(),
 })
 export type Expense = z.infer<typeof expense>
+
+export const expenseItemLine = z.object({
+  title: z.string().trim().max(200),
+  amount: money,
+  qty: z.number().min(0).nullish(),
+})
+export type ExpenseItemLine = z.infer<typeof expenseItemLine>
 
 export const createExpenseRequest = z.object({
   project_id: uuid.nullable().default(null),
@@ -28,6 +42,12 @@ export const createExpenseRequest = z.object({
   gst_treatment: gstTreatment.default('non_gst'),
   gst_rate: gstRate.optional(),
   is_fixed_overhead: z.boolean().default(false),
+  invoice_number: z.string().trim().max(80).nullish(),
+  amount_is: z.enum(['including_tax', 'excluding_tax']).nullish(),
+  tax_name: z.string().trim().max(80).nullish(),
+  tax_amount: money.nullish(),
+  reverse_charge: z.boolean().nullish(),
+  itemize_json: z.array(z.record(z.string(), z.unknown())).nullish(),
 })
 export type CreateExpenseRequest = z.infer<typeof createExpenseRequest>
 
@@ -41,6 +61,12 @@ export const updateExpenseRequest = z.object({
   gst_treatment: gstTreatment.optional(),
   gst_rate: gstRate.nullable().optional(),
   is_fixed_overhead: z.boolean().optional(),
+  invoice_number: z.string().trim().max(80).nullable().optional(),
+  amount_is: z.enum(['including_tax', 'excluding_tax']).nullable().optional(),
+  tax_name: z.string().trim().max(80).nullable().optional(),
+  tax_amount: money.nullable().optional(),
+  reverse_charge: z.boolean().optional(),
+  itemize_json: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
 })
 export type UpdateExpenseRequest = z.infer<typeof updateExpenseRequest>
 
@@ -56,3 +82,82 @@ export const projectFinancials = z.object({
   balance_pending: money,
 })
 export type ProjectFinancials = z.infer<typeof projectFinancials>
+
+// ── Lovable parity: monthly profit + fixed overheads + overview ──
+export const fixedOverheadCategory = z.enum([
+  'rent', 'salaries', 'utilities', 'internet', 'software', 'insurance', 'maintenance', 'marketing', 'other',
+])
+export type FixedOverheadCategory = z.infer<typeof fixedOverheadCategory>
+
+export const fixedOverheadAlloc = z.enum(['equal', 'revenue', 'shoot_days', 'headcount'])
+export type FixedOverheadAlloc = z.infer<typeof fixedOverheadAlloc>
+
+export const fixedOverhead = z.object({
+  id: uuid,
+  category: z.string(),
+  label: z.string().nullable(),
+  amount: money,
+  alloc_basis: z.string(),
+  month: isoDate,
+  is_active: z.boolean(),
+  created_at: z.string().nullable().nullish(),
+})
+export type FixedOverhead = z.infer<typeof fixedOverhead>
+
+export const createFixedOverheadRequest = z.object({
+  category: fixedOverheadCategory,
+  label: z.string().trim().max(160).nullish(),
+  amount: money,
+  alloc_basis: fixedOverheadAlloc.default('equal'),
+  month: isoDate,
+})
+export type CreateFixedOverheadRequest = z.infer<typeof createFixedOverheadRequest>
+
+export const monthlyProfitSummary = z.object({
+  month: z.string(),
+  basis: z.string(),
+  alloc: z.string(),
+  cash_received: z.number(),
+  booked_revenue: z.number(),
+  salary_cost: z.number(),
+  office_fixed: z.number(),
+  variable_cost: z.number(),
+  fixed_total: z.number(),
+  total_cost: z.number(),
+  net_cash: z.number(),
+  net_booked: z.number(),
+  margin_cash: z.number().nullish(),
+  margin_booked: z.number().nullish(),
+  warnings: z.array(z.string()).nullish(),
+  projects: z.array(z.record(z.string(), z.unknown())).nullish(),
+  salary_buckets: z.array(z.record(z.string(), z.unknown())).nullish(),
+})
+export type MonthlyProfitSummary = z.infer<typeof monthlyProfitSummary>
+
+export const financialOverview = z.object({
+  start_date: z.string().nullable().nullish(),
+  end_date: z.string().nullable().nullish(),
+  revenue: z.number(),
+  received: z.number(),
+  receivables: z.number(),
+  collection_rate: z.number(),
+  margin: z.number().nullish(),
+  salaries: z.number(),
+  company_expenses: z.number(),
+  personal_expenses: z.number(),
+  gst_collected: z.number().nullish(),
+  gst_paid: z.number().nullish(),
+  rcm_liability: z.number().nullish(),
+  attention_count: z.number().int().nullish(),
+  attention: z.array(z.record(z.string(), z.unknown())).nullish(),
+  recent: z.array(z.record(z.string(), z.unknown())).nullish(),
+  // Lovable parity (additive optional): net/expected profit, totals, data-quality counts, salary toggle echo.
+  net_profit: z.number().nullish(),
+  expected_profit: z.number().nullish(),
+  total_expenses: z.number().nullish(),
+  uncategorized_count: z.number().int().nullish(),
+  missing_invoice_count: z.number().int().nullish(),
+  include_salaries: z.boolean().nullish(),
+  salaries_warning: z.string().nullable().nullish(),
+})
+export type FinancialOverview = z.infer<typeof financialOverview>

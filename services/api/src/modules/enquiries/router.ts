@@ -35,6 +35,7 @@ export const enquiriesRouter = new Hono<AppEnv>()
   .get('/', requireModule('crm'), async (c) => {
     const status = enquiryStatus.safeParse(c.req.query('status'))
     const search = (c.req.query('search') ?? '').trim()
+    const source = (c.req.query('source') ?? '').trim()
     const cursor = c.req.query('cursor')
     if (cursor && Number.isNaN(Date.parse(cursor))) fail(422, 'That page marker is invalid.')
     const limitRaw = Number(c.req.query('limit') ?? 100)
@@ -48,14 +49,16 @@ export const enquiriesRouter = new Hono<AppEnv>()
                  e.converted_lead_id, e.created_at
             from enquiries e
             left join users u on u.user_id = e.assigned_to
-           where ${status.success ? sql`e.enquiry_status = ${status.data}` : sql`true`}
-             and ${
-               search
-                 ? sql`(e.name ilike ${'%' + search + '%'}
-                        or e.phone ilike ${'%' + search + '%'}
-                        or e.email ilike ${'%' + search + '%'})`
-                 : sql`true`
-             }
+            where ${status.success ? sql`e.enquiry_status = ${status.data}` : sql`true`}
+              and ${source ? sql`e.source = ${source}` : sql`true`}
+              and ${
+                search
+                  ? sql`(e.name ilike ${'%' + search + '%'}
+                         or e.phone ilike ${'%' + search + '%'}
+                         or e.email ilike ${'%' + search + '%'}
+                         or e.message ilike ${'%' + search + '%'})`
+                  : sql`true`
+              }
              and ${cursor ? sql`e.created_at < ${cursor}` : sql`true`}
            order by e.created_at desc
            limit ${limit + 1}`
@@ -161,6 +164,16 @@ export const enquiriesRouter = new Hono<AppEnv>()
     const id = uuidParam(c)
     const parsed = convertEnquiryRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the note.')
+    // Flags for Lovable parity: was it already converted, did we link an existing lead.
+    const before = await attempt(c, 'enquiries.convert_check', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ converted_lead_id: string | null; phone: string | null; email: string | null }[]>`
+          select converted_lead_id, phone, email from enquiries where id = ${id}`,
+      ),
+    )
+    const already = !!before?.[0]?.converted_lead_id
     const rows = await attempt(c, 'enquiries.convert', () =>
       withUser(
         c.env,
@@ -174,11 +187,25 @@ export const enquiriesRouter = new Hono<AppEnv>()
     )
     const leadId = rows?.[0]?.lead_id
     if (!leadId) fail(400, 'We could not convert this enquiry.')
+    // linked_existing: convert returned a lead that existed before this call and
+    // the enquiry was not already converted.
+    let linked = false
+    if (!already) {
+      const check = await attempt(c, 'enquiries.convert_linked', () =>
+        withUser(
+          c.env,
+          c.get('auth').userId,
+          (sql) => sql<{ n: string }[]>`
+            select count(*)::text as n from crm_leads where id = ${leadId} and created_at < now() - interval '2 seconds'`,
+        ),
+      )
+      linked = check?.[0] ? Number(check[0].n) > 0 : false
+    }
     await audit(c, {
       action: 'enquiry.convert',
       entityType: 'enquiry',
       entityId: id,
       after: { lead_id: leadId },
     })
-    return c.json(convertEnquiryResponse.parse({ lead_id: leadId }), 201)
+    return c.json(convertEnquiryResponse.parse({ lead_id: leadId, already_converted: already, linked_existing: linked }), 201)
   })

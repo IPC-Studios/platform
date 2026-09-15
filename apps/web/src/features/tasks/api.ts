@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -43,6 +44,26 @@ export function useTasks() {
     enabled: !!session && access.hasModule('tasks'),
     staleTime: 15_000,
   })
+}
+
+/** Single task for the detail dialog (server GET /tasks/:id). */
+export function useTask(id: string | null) {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['tasks', 'detail', id],
+    queryFn: () => callApi(`/tasks/${id}`, { responseSchema: taskListItem }),
+    enabled: !!session && !!id,
+    staleTime: 15_000,
+  })
+}
+
+/** Subtasks of one task — client-side slice of the list (parent_task_id). */
+export function useSubtasks(parentId: string | null) {
+  const { data } = useTasks()
+  return useMemo(
+    () => (data ?? []).filter((t) => t.parent_task_id === parentId),
+    [data, parentId],
+  )
 }
 
 /** One project's own tasks — its detail page's Tasks tab. */
@@ -225,12 +246,16 @@ export function useMyTasks() {
   })
 }
 
-/** Move one of your own tasks; the RPC refuses a task you are not assigned to. */
+/** Move one of your own tasks; the RPC refuses a task you are not assigned to. A voice-note link can ride along. */
 export function useUpdateMyTaskStatus() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: TaskStatus }) =>
-      callApi(`/tasks/my/${id}/status`, { method: 'PATCH', body: { status }, responseSchema: anySchema }),
+    mutationFn: ({ id, status, voice_note_url }: { id: string; status: TaskStatus; voice_note_url?: string | null }) =>
+      callApi(`/tasks/my/${id}/status`, {
+        method: 'PATCH',
+        body: voice_note_url !== undefined ? { status, voice_note_url } : { status },
+        responseSchema: anySchema,
+      }),
     onSuccess: () => {
       toast.success('Task updated')
       void qc.invalidateQueries({ queryKey: ['tasks'] })

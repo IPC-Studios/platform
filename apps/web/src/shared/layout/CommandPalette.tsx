@@ -111,7 +111,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       ...(l.icon ? { icon: l.icon } : {}),
     }))
 
-    const clientCmds: Command[] = (clients.data ?? []).map((c) => ({
+    const clientCmds: Command[] = (Array.isArray(clients.data) ? clients.data : []).map((c) => ({
       id: `client:${c.id}`,
       label: c.name,
       ...(c.phone ? { hint: c.phone } : {}),

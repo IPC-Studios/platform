@@ -9,20 +9,39 @@ import { ErrorState } from '../ui/states'
  * Blocks children until a studio session exists; bounces to /login otherwise.
  * An expired plan blocks the whole app EXCEPT pages that pass allowExpired
  * (the subscription/renewal page — the recovery path).
+ *
+ * Lovable parity: ?redirect= round-trips the destination through /login,
+ * role === 'none' bounces to /no-account, and an expired plan bounces to
+ * the standalone /plan-expired page (which itself uses allowExpired).
  */
 export function RequireAuth({
   children,
   allowExpired = false,
+  allowNoAccount = false,
 }: {
   children: ReactNode
   allowExpired?: boolean
+  allowNoAccount?: boolean
 }) {
   const { session, loading, bootError, retry } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!loading && !session && !bootError) void navigate({ to: '/login' })
+    if (loading || session || bootError) return
+    const redirect = `${window.location.pathname}${window.location.search}`
+    void navigate({ to: '/login', search: { redirect } as never })
   }, [loading, session, bootError, navigate])
+
+  useEffect(() => {
+    if (loading || !session) return
+    if (session.role === 'none' && !allowNoAccount) {
+      void navigate({ to: '/no-account' })
+      return
+    }
+    if (session.plan_gate === 'expired' && !allowExpired && window.location.pathname !== '/plan-expired') {
+      void navigate({ to: '/plan-expired' })
+    }
+  }, [loading, session, allowExpired, allowNoAccount, navigate])
 
   if (loading) return <BootSkeleton />
   if (bootError && !session) {
@@ -33,6 +52,7 @@ export function RequireAuth({
     )
   }
   if (!session) return null
+  if (session.role === 'none' && !allowNoAccount) return null
   if (session.plan_gate === 'expired' && !allowExpired) return <PlanExpired />
   return <>{children}</>
 }

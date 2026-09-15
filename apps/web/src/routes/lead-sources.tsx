@@ -345,7 +345,7 @@ function NewSourceDialog() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
-    create.mutate({ label: label.trim(), kind })
+    create.mutate({ label: label.trim(), kind, source_type: "website_form" })
   }
 
   return (

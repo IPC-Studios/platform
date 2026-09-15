@@ -30,12 +30,24 @@ export const TRACKING_TABS: ReadonlyArray<{ value: TrackingTab; label: string }>
   { value: 'completed', label: 'Completed' },
 ]
 
-export type TrackingSort = 'risk' | 'completion' | 'next_shoot' | 'name'
+export type TrackingSort =
+  | 'risk'
+  | 'completion'
+  | 'completion_desc'
+  | 'next_shoot'
+  | 'name'
+  | 'overdue'
+  | 'pending_review'
+  | 'recent'
 
 export const TRACKING_SORTS: ReadonlyArray<{ value: TrackingSort; label: string }> = [
   { value: 'risk', label: 'Highest risk first' },
   { value: 'completion', label: 'Lowest completion first' },
+  { value: 'completion_desc', label: 'Highest completion first' },
+  { value: 'overdue', label: 'Most overdue first' },
+  { value: 'pending_review', label: 'Most pending reviews first' },
   { value: 'next_shoot', label: 'Next shoot first' },
+  { value: 'recent', label: 'Recently active' },
   { value: 'name', label: 'Name (A–Z)' },
 ]
 
@@ -84,6 +96,12 @@ const byName = (a: TrackedProject, b: TrackedProject) => a.name.localeCompare(b.
 const SORTS: Record<TrackingSort, (a: TrackedProject, b: TrackedProject) => number> = {
   risk: (a, b) => b.health.score - a.health.score || byName(a, b),
   completion: (a, b) => a.health.completion - b.health.completion || byName(a, b),
+  // Furthest along first — the "what can we close out" view.
+  completion_desc: (a, b) => b.health.completion - a.health.completion || byName(a, b),
+  // Most overdue work first; quiet projects sink below noisy ones.
+  overdue: (a, b) => b.tasks_overdue - a.tasks_overdue || b.health.score - a.health.score || byName(a, b),
+  // Most work waiting on review first; nothing pending sinks.
+  pending_review: (a, b) => b.pending_reviews - a.pending_reviews || b.health.score - a.health.score || byName(a, b),
   // A project with no shoot booked has no date to sort by; it sinks rather than
   // sorting as "soonest".
   next_shoot: (a, b) => {
@@ -92,6 +110,8 @@ const SORTS: Record<TrackingSort, (a: TrackedProject, b: TrackedProject) => numb
     if (!b.next_shoot_date) return -1
     return a.next_shoot_date.localeCompare(b.next_shoot_date)
   },
+  // Freshest activity first — the board's "what moved" view.
+  recent: (a, b) => b.last_activity_at.localeCompare(a.last_activity_at) || byName(a, b),
   name: byName,
 }
 

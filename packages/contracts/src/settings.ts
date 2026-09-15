@@ -16,6 +16,17 @@ export const companyProfile = z.object({
   invoice_next_number: z.number().int(),
   quote_number_prefix: z.string(),
   quote_next_number: z.number().int(),
+  /** Branding/defaults applied to every new invoice (Lovable parity). */
+  invoice_address: z.string().nullable().default(null),
+  invoice_phone: z.string().nullable().default(null),
+  invoice_email: z.string().nullable().default(null),
+  invoice_upi_id: z.string().nullable().default(null),
+  invoice_bank_details: z.string().nullable().default(null),
+  invoice_default_notes: z.string().nullable().default(null),
+  invoice_default_terms: z.string().nullable().default(null),
+  /** Lovable parity: footer note on client documents + separate invoice logo. */
+  document_footer_note: z.string().nullable().default(null),
+  invoice_logo_url: z.string().nullable().default(null),
 })
 export type CompanyProfile = z.infer<typeof companyProfile>
 
@@ -35,6 +46,15 @@ export const updateCompanyRequest = z.object({
   invoice_next_number: z.number().int().min(1).optional(),
   quote_number_prefix: z.string().trim().min(1).max(20).optional(),
   quote_next_number: z.number().int().min(1).optional(),
+  invoice_address: z.string().trim().max(500).nullish(),
+  invoice_phone: z.string().trim().max(40).nullish(),
+  invoice_email: z.string().trim().max(200).nullish(),
+  invoice_upi_id: z.string().trim().max(120).nullish(),
+  invoice_bank_details: z.string().trim().max(1000).nullish(),
+  invoice_default_notes: z.string().trim().max(2000).nullish(),
+  invoice_default_terms: z.string().trim().max(4000).nullish(),
+  document_footer_note: z.string().trim().max(2000).nullish(),
+  invoice_logo_url: z.string().trim().max(500).nullish(),
 })
 export type UpdateCompanyRequest = z.infer<typeof updateCompanyRequest>
 
@@ -77,6 +97,7 @@ export const themePresetKey = z.enum([
   'emerald_studio',
   'warm_terracotta',
   'minimal_slate',
+  'premium_rose_gold',
 ])
 export type ThemePresetKey = z.infer<typeof themePresetKey>
 

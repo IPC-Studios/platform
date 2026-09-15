@@ -75,7 +75,7 @@ describe('theme presets', () => {
     expect(new Set(THEME_PRESET_KEYS).size).toBe(THEME_PRESET_KEYS.length)
   })
 
-  it('ships the nine named themes', () => {
+  it('ships the ten named themes', () => {
     expect([...THEME_PRESET_KEYS].sort()).toEqual([
       'blush_wedding',
       'editorial_black',
@@ -84,6 +84,7 @@ describe('theme presets', () => {
       'luxury_gold',
       'minimal_slate',
       'ocean_blue',
+      'premium_rose_gold',
       'royal_purple',
       'warm_terracotta',
     ])

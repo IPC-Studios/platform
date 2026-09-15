@@ -17,3 +17,51 @@ export function templateVariables(body: string): string[] {
   for (const m of body.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) set.add(m[1] as string)
   return [...set]
 }
+
+/**
+ * Lovable parity: every variable a CRM template may reference. Unknown or
+ * missing values render as '' (never a raw {{placeholder}} to the client).
+ * follow_up_date is the lead's next promised contact, formatted DD Mon YYYY.
+ */
+export const CRM_TEMPLATE_VARS = [
+  'name',
+  'phone',
+  'email',
+  'studio',
+  'follow_up_date',
+  'city',
+  'group',
+  'event_type',
+  'event_date',
+  'deal_value',
+] as const
+export type CrmTemplateVar = (typeof CRM_TEMPLATE_VARS)[number]
+
+export function crmTemplateVars(lead: {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  follow_up_at?: string | null
+  city?: string | null
+  group_name?: string | null
+  event_type?: string | null
+  event_date?: string | null
+  deal_value?: number | string | null
+}, studio: string): Record<string, string> {
+  const followUp = lead.follow_up_at ? new Date(lead.follow_up_at) : null
+  return {
+    name: lead.name ?? '',
+    phone: lead.phone ?? '',
+    email: lead.email ?? '',
+    studio,
+    follow_up_date:
+      followUp && !Number.isNaN(followUp.getTime())
+        ? followUp.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '',
+    city: lead.city ?? '',
+    group: lead.group_name ?? '',
+    event_type: lead.event_type ?? '',
+    event_date: lead.event_date ?? '',
+    deal_value: lead.deal_value === null || lead.deal_value === undefined ? '' : String(lead.deal_value),
+  }
+}

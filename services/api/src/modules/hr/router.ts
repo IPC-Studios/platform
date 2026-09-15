@@ -30,6 +30,12 @@ export const hrRouter = new Hono<AppEnv>()
 
   .get('/attendance/my', async (c) => {
     const auth = c.get('auth')
+    const monthRaw = c.req.query('month')
+    const yearRaw = c.req.query('year')
+    const month = monthRaw ? Number(monthRaw) : null
+    const year = yearRaw ? Number(yearRaw) : null
+    if (monthRaw && !(month && month >= 1 && month <= 12)) fail(422, 'Invalid month.')
+    if (yearRaw && !(year && year >= 2000 && year <= 2100)) fail(422, 'Invalid year.')
     const rows = await attempt(c, 'hr.attendance_my', () =>
       withUser(
         c.env,
@@ -37,7 +43,39 @@ export const hrRouter = new Hono<AppEnv>()
         (sql) => sql`
           select id, a_date, check_in_at, check_out_at, status
           from attendance where user_id = ${auth.userId}
-          order by a_date desc limit 30`,
+            and ${month ? sql`extract(month from a_date)::int = ${month}` : sql`true`}
+            and ${year ? sql`extract(year from a_date)::int = ${year}` : sql`true`}
+          order by a_date desc limit 120`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not load attendance.')
+    return c.json(list.parse(rows))
+  })
+
+  // One member's history for the /attendance/$uid stub. Self, owner, admin or
+  // manager only — RLS still scopes the underlying read.
+  .get('/attendance/user/:userId', requireModule('attendance'), async (c) => {
+    const userId = uuidParam(c, 'userId')
+    const auth = c.get('auth')
+    const allowed =
+      auth.isOwner || auth.role === 'admin' || auth.role === 'manager' || auth.userId === userId
+    if (!allowed) fail(403, 'You do not have access to this record.')
+    const monthRaw = c.req.query('month')
+    const yearRaw = c.req.query('year')
+    const month = monthRaw ? Number(monthRaw) : null
+    const year = yearRaw ? Number(yearRaw) : null
+    if (monthRaw && !(month && month >= 1 && month <= 12)) fail(422, 'Invalid month.')
+    if (yearRaw && !(year && year >= 2000 && year <= 2100)) fail(422, 'Invalid year.')
+    const rows = await attempt(c, 'hr.attendance_user', () =>
+      withUser(
+        c.env,
+        auth.userId,
+        (sql) => sql`
+          select id, a_date, check_in_at, check_out_at, status
+          from attendance where user_id = ${userId}
+            and ${month ? sql`extract(month from a_date)::int = ${month}` : sql`true`}
+            and ${year ? sql`extract(year from a_date)::int = ${year}` : sql`true`}
+          order by a_date desc limit 120`,
       ),
     )
     if (!rows) fail(400, 'We could not load attendance.')
@@ -47,10 +85,24 @@ export const hrRouter = new Hono<AppEnv>()
   // The whole team's day. RLS decides what comes back: an admin or manager
   // sees everyone, anyone else sees themselves — so this needs no gate of its
   // own beyond the module.
+  //
+  // Lovable parity: page/page_size/search/status are honoured on the server.
+  // Without page/page_size the historical array shape is returned untouched.
   .get('/attendance', requireModule('attendance'), async (c) => {
     const date = c.req.query('date') ?? null
     if (date !== null && !DATE.test(date)) fail(422, 'Invalid date.')
+    const pageRaw = c.req.query('page')
+    const sizeRaw = c.req.query('page_size')
+    const search = c.req.query('search')?.trim().toLowerCase() ?? ''
+    const status = c.req.query('status')?.trim() ?? ''
+    const paged = pageRaw !== undefined || sizeRaw !== undefined
+    const page = Math.max(1, Number(pageRaw ?? 1) || 1)
+    const pageSize = Math.min(200, Math.max(1, Number(sizeRaw ?? 25) || 25))
+    const offset = (page - 1) * pageSize
 
+    // A day roster is one row per active member (tens of rows), so the status
+    // filter — derived from the join, not stored — is applied in memory and
+    // the page is sliced afterwards. No extra round trip, correct totals.
     const rows = await attempt(c, 'hr.attendance_day', () =>
       withUser(
         c.env,
@@ -64,11 +116,26 @@ export const hrRouter = new Hono<AppEnv>()
             on a.user_id = u.user_id
            and a.a_date = coalesce(${date}::date, current_date)
           where u.deleted_at is null and u.status = 'active'
+            and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`})` : sql`true`}
           order by u.name`,
       ),
     )
     if (!rows) fail(400, 'We could not load attendance.')
-    return c.json(attendanceDayRow.array().parse(rows))
+    const items = attendanceDayRow.array().parse(rows)
+    if (!paged && !status) return c.json(items)
+    const filtered = status
+      ? items.filter((r) => {
+          const derived = r.check_in_at && !r.check_out_at ? 'not_checked_out' : r.status
+          return derived === status || r.status === status
+        })
+      : items
+    if (!paged) return c.json(filtered)
+    return c.json({
+      items: filtered.slice(offset, offset + pageSize),
+      total: filtered.length,
+      page,
+      page_size: pageSize,
+    })
   })
 
   // Manual correction: the owner or an admin fixes a day for someone who

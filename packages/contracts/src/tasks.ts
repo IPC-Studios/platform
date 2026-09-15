@@ -50,9 +50,14 @@ export const taskListItem = z.object({
   custom_priority_code: z.string().nullable().default(null),
   custom_priority_label: z.string().nullable().default(null),
   custom_priority_tone: taskPriorityTone.nullable().default(null),
+  custom_status_code: z.string().nullable().default(null),
+  custom_status_label: z.string().nullable().default(null),
   due_date: isoDate.nullable(),
   project_id: uuid.nullable(),
   project_name: z.string().nullable(),
+  deliverable_id: uuid.nullable().default(null),
+  parent_task_id: uuid.nullable().default(null),
+  voice_note_url: z.string().nullable().default(null),
   assignee_names: z.array(z.string()).default([]),
   assignee_ids: z.array(uuid).default([]),
   sort_order: z.number().int().default(0),
@@ -62,12 +67,14 @@ export type TaskListItem = z.infer<typeof taskListItem>
 export const createTaskRequest = z.object({
   project_id: uuid.nullable().default(null),
   deliverable_id: uuid.nullable().default(null),
+  parent_task_id: uuid.nullable().optional(),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).optional(),
   status: taskStatus.default('to_do'),
   priority: taskPriority.default('medium'),
   custom_priority_code: z.string().nullable().optional(),
   due_date: isoDate.optional(),
+  voice_note_url: z.string().trim().max(500).nullable().optional(),
   assignees: z.array(uuid).default([]),
 })
 export type CreateTaskRequest = z.infer<typeof createTaskRequest>
@@ -79,12 +86,14 @@ export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusRequest>
 export const updateTaskRequest = z.object({
   project_id: uuid.nullable().optional(),
   deliverable_id: uuid.nullable().optional(),
+  parent_task_id: uuid.nullable().optional(),
   title: z.string().trim().min(1).max(200).optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   status: taskStatus.optional(),
   priority: taskPriority.optional(),
   custom_priority_code: z.string().nullable().optional(),
   due_date: isoDate.nullable().optional(),
+  voice_note_url: z.string().trim().max(500).nullable().optional(),
   assignees: z.array(uuid).optional(),
 })
 export type UpdateTaskRequest = z.infer<typeof updateTaskRequest>

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { Archive, FileText, Pencil, Plus, RotateCcw, Users } from 'lucide-react'
+import { Archive, Copy, FileText, Pencil, Plus, RotateCcw, Trash2, Users } from 'lucide-react'
 import type { SaveTeamTermsTemplateRequest, TeamTermsCategory, TeamTermsTemplate } from '@ipc/contracts'
-import { teamTermsVariablesUsed } from '@ipc/domain'
+import { TEAM_TERMS_VARIABLES, teamTermsVariablesUsed } from '@ipc/domain'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { SettingsTabs } from '@/features/settings/SettingsTabs'
@@ -18,6 +18,7 @@ import { cn } from '@/shared/ui/cn'
 import { useEmployeeRoles } from '@/features/team/api'
 import {
   useArchiveTeamTermsTemplate,
+  useDeleteTeamTermsTemplate,
   useSaveTeamTermsTemplate,
   useTeamTermsTemplates,
 } from '@/features/team-terms/api'
@@ -33,7 +34,7 @@ const CATEGORY_ORDER: TeamTermsCategory[] = [
 
 export function TeamTermsPage() {
   return (
-    <AuthedPage module="projects">
+    <AuthedPage module="team_terms">
       <TeamTerms />
     </AuthedPage>
   )
@@ -57,7 +58,7 @@ function TeamTerms() {
       <PageHeader
         title="Team Terms"
         description="What the crew agrees to when you book them."
-        actions={<TemplateDialog />}
+        actions={<TemplateDialog allTemplates={templates.data ?? []} />}
       />
       <SettingsTabs />
 
@@ -113,6 +114,7 @@ function TeamTerms() {
                           key={t.id}
                           template={t}
                           archived={showArchived}
+                          allTemplates={templates.data ?? []}
                           onArchive={() => archive.mutate({ id: t.id, restore: showArchived })}
                         />
                       ))}
@@ -133,22 +135,65 @@ function TeamTerms() {
 function TemplateCard({
   template,
   archived,
+  allTemplates,
   onArchive,
 }: {
   template: TeamTermsTemplate
   archived: boolean
+  allTemplates: readonly TeamTermsTemplate[]
   onArchive: () => void
 }) {
+  const save = useSaveTeamTermsTemplate()
+  const del = useDeleteTeamTermsTemplate()
+  const used = template.send_count > 0
+  const canDelete = !used && !archived
+
+  function duplicate() {
+    save.mutate({
+      body: {
+        title: `${template.title} (copy)`,
+        description: template.description,
+        body: template.body,
+        mode: template.mode,
+        validity_days: template.validity_days,
+        category: template.category,
+        is_active: false,
+        role_ids: [],
+      },
+    })
+  }
+
+  function toggleActive() {
+    save.mutate({
+      id: template.id,
+      body: {
+        title: template.title,
+        description: template.description,
+        body: template.body,
+        mode: template.mode,
+        validity_days: template.validity_days,
+        category: template.category,
+        is_active: !template.is_active,
+        role_ids: template.role_ids,
+      },
+    })
+  }
+
   return (
     <div className="flex flex-col rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 flex-1 font-medium">{template.title}</p>
-        <StatusBadge tone={template.mode === 'acknowledgement_required' ? 'info' : 'neutral'}>
-          {template.mode === 'acknowledgement_required' ? 'Signed' : 'Briefing'}
-        </StatusBadge>
+        <div className="flex items-center gap-1.5">
+          {!template.is_active && !archived && <StatusBadge>Inactive</StatusBadge>}
+          <StatusBadge tone={template.mode === 'acknowledgement_required' ? 'info' : 'neutral'}>
+            {template.mode === 'acknowledgement_required' ? 'Signed' : 'Briefing'}
+          </StatusBadge>
+        </div>
       </div>
-      {template.description && (
+      {template.description ? (
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{template.description}</p>
+      ) : (
+        <p className="mt-1 text-xs italic text-muted-foreground">No description — add one so the next manager knows what this covers.</p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>v{template.version}</span>
@@ -162,13 +207,48 @@ function TemplateCard({
           {template.validity_days ? ` · ${template.validity_days}-day link` : ''}
         </span>
       </div>
-      <div className="mt-3 flex items-center gap-1">
-        {!archived && <TemplateDialog template={template} />}
+      {!archived && (
+        <Switch
+          className="mt-3 w-auto"
+          checked={template.is_active}
+          onChange={() => toggleActive()}
+          label={template.is_active ? 'Active' : 'Inactive'}
+          description="Inactive terms are kept but no longer offered when sending."
+        />
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-1">
+        {!archived && <TemplateDialog template={template} allTemplates={allTemplates} />}
         <Button size="sm" variant="ghost" onClick={onArchive}>
           {archived ? <RotateCcw /> : <Archive />}
           {archived ? 'Restore' : 'Archive'}
         </Button>
+        {!archived && (
+          <Button size="sm" variant="ghost" onClick={duplicate} disabled={save.isPending}>
+            <Copy /> Duplicate
+          </Button>
+        )}
+        {!archived && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            disabled={!canDelete || del.isPending}
+            title={used ? 'Used templates cannot be deleted. Archive instead.' : 'Delete permanently'}
+            onClick={() => {
+              if (window.confirm(`Delete "${template.title}" permanently? This cannot be undone.`)) {
+                del.mutate(template.id)
+              }
+            }}
+          >
+            <Trash2 /> Delete
+          </Button>
+        )}
       </div>
+      {used && !archived && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Sent {template.send_count}× — deletion is locked to protect acknowledgement history.
+        </p>
+      )}
     </div>
   )
 }
@@ -252,7 +332,13 @@ function PreviewDialog({ title, body }: { title: string; body: string }) {
 }
 
 /** Write or edit a set of terms, and say which job roles they cover. */
-function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
+function TemplateDialog({
+  template,
+  allTemplates,
+}: {
+  template?: TeamTermsTemplate
+  allTemplates: readonly TeamTermsTemplate[]
+}) {
   const save = useSaveTeamTermsTemplate()
   const { data: roles } = useEmployeeRoles()
   const editing = !!template
@@ -260,6 +346,18 @@ function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
   const [draft, setDraft] = useState<SaveTeamTermsTemplateRequest>(() => fromTemplate(template))
 
   const used = teamTermsVariablesUsed(draft.body)
+  // Roles already defaulting to another template — selecting one here moves
+  // the default, so say so before the save.
+  const coveredElsewhere = new Map<string, string>()
+  for (const t of allTemplates) {
+    if (template && t.id === template.id) continue
+    for (const roleId of t.role_ids) {
+      if (!coveredElsewhere.has(roleId)) coveredElsewhere.set(roleId, t.title)
+    }
+  }
+  const conflicts = draft.role_ids
+    .map((id) => ({ id, name: (roles ?? []).find((r) => r.id === id)?.type_name ?? 'Role', other: coveredElsewhere.get(id) }))
+    .filter((r) => r.other)
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -302,6 +400,23 @@ function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
               placeholder="Photographer undertaking"
             />
           </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Description</Label>
+            <Input
+              value={draft.description ?? ''}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value || null }))}
+              placeholder="Short internal note — what this covers, when to send it"
+            />
+          </div>
+
+          <Switch
+            className="w-auto"
+            checked={draft.is_active}
+            onChange={(v) => setDraft((d) => ({ ...d, is_active: v }))}
+            label={draft.is_active ? 'Active' : 'Inactive'}
+            description="Inactive terms are kept but no longer offered when sending."
+          />
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
@@ -358,6 +473,19 @@ function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
                 ? `Fills in on send: ${used.map((v) => `{{${v}}}`).join(', ')}`
                 : 'Use {{team_member_name}}, {{role}}, {{shoot_name}}, {{shoot_date}} and friends.'}
             </p>
+            <div className="flex flex-wrap gap-1">
+              {TEAM_TERMS_VARIABLES.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setDraft((d) => ({ ...d, body: `${d.body}{{${v}}}` }))}
+                  title={`Insert {{${v}}}`}
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] hover:bg-muted/70"
+                >
+                  {`{{${v}}}`}
+                </button>
+              ))}
+            </div>
           </div>
 
           {roles && roles.length > 0 && (
@@ -397,6 +525,12 @@ function TemplateDialog({ template }: { template?: TeamTermsTemplate }) {
               <p className="text-xs text-muted-foreground">
                 Tagged terms are offered first when you send to someone in that role.
               </p>
+              {conflicts.length > 0 && (
+                <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning">
+                  Already the default elsewhere: {conflicts.map((c) => `${c.name} → ${c.other}`).join('; ')}.
+                  Saving here moves {conflicts.length === 1 ? 'that default' : 'those defaults'} to these terms.
+                </p>
+              )}
             </div>
           )}
 

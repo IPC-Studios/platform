@@ -14,8 +14,10 @@ import {
   IndianRupee,
   Lightbulb,
   PauseCircle,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   X,
 } from 'lucide-react'
 import type { ProjectListItem, ProjectStatus } from '@ipc/contracts'
@@ -33,10 +35,24 @@ import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { downloadCsv, toCsv } from '@/shared/ui/csv'
-import { useIssueQuotation, useProjects } from '@/features/projects/api'
+import { useIssueQuotation, useProjectsPage, useDeleteProject } from '@/features/projects/api'
+import { useConfirm } from '@/shared/ui/confirm'
+import { Select } from '@/shared/ui/input'
 import { cn } from '@/shared/ui/cn'
 
 type Filter = ProjectStatus | 'all'
+type ProjectSort = 'recent' | 'oldest' | 'value_desc' | 'pending_desc' | 'received_desc' | 'name' | 'risk' | 'completion' | 'overdue' | 'upcoming'
+
+const SORT_OPTIONS: { value: ProjectSort; label: string }[] = [
+  { value: 'recent', label: 'Recent first' },
+  { value: 'risk', label: 'Highest risk first' },
+  { value: 'completion', label: 'Lowest completion first' },
+  { value: 'overdue', label: 'Most overdue first' },
+  { value: 'upcoming', label: 'Upcoming shoot first' },
+  { value: 'value_desc', label: 'Highest value first' },
+  { value: 'pending_desc', label: 'Highest pending first' },
+  { value: 'name', label: 'Name (A–Z)' },
+]
 
 const STATUS_TONE: Record<ProjectStatus, 'info' | 'success' | 'danger' | 'warning'> = {
   active: 'info',
@@ -69,27 +85,25 @@ export function ProjectsListPage() {
 }
 
 function ProjectsList() {
-  const { data, isLoading, isError, refetch } = useProjects()
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<ProjectSort>('recent')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
+  const { data: paged, isLoading, isError, refetch } = useProjectsPage({
+    page, page_size: pageSize,
+    ...(filter !== 'all' ? { status: filter } : {}),
+    ...(search.trim() ? { search: search.trim() } : {}),
+    sort,
+  })
+  const data = paged?.items
+  const total = paged?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const [guide, setGuide] = useState(false)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const isMobile = useIsMobile()
 
-  const rows = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return (data ?? []).filter((p) => {
-      if (filter !== 'all' && p.status !== filter) return false
-      if (!term) return true
-      // Studios look a project up by whose wedding it is at least as often as
-      // by what they called it, so the client's name and number search too.
-      return (
-        p.name.toLowerCase().includes(term) ||
-        (p.client_name ?? '').toLowerCase().includes(term) ||
-        (p.client_phone ?? '').includes(term)
-      )
-    })
-  }, [data, filter, search])
+  const rows = useMemo(() => data ?? [], [data])
 
   // The totals describe what is on screen, not the whole table: filter to
   // "on hold" and the pending figure is what is stuck, which is the question
@@ -204,7 +218,7 @@ function ProjectsList() {
               />
               <Input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
                 placeholder="Search projects or clients…"
                 aria-label="Search projects"
                 className="pl-9"
@@ -218,23 +232,32 @@ function ProjectsList() {
                 setSearch('')
                 setFilter('all')
                 setSelected(new Set())
+                setPage(1)
               }}
             >
               <X /> Clear
             </Button>
           </div>
 
-          <FilterTabs<Filter>
-            value={filter}
-            onChange={setFilter}
-            tabs={[
-              { value: 'all', label: 'All', count: data?.length },
-              { value: 'active', label: 'Active' },
-              { value: 'on_hold', label: 'On hold' },
-              { value: 'completed', label: 'Completed' },
-              { value: 'cancelled', label: 'Cancelled' },
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterTabs<Filter>
+              value={filter}
+              onChange={(v) => { setFilter(v); setPage(1) }}
+              tabs={[
+                { value: 'all', label: 'All', count: total || undefined },
+                { value: 'active', label: 'Active' },
+                { value: 'on_hold', label: 'On hold' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'cancelled', label: 'Cancelled' },
+              ]}
+            />
+            <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
+              Sort
+              <Select value={sort} onChange={(e) => { setSort(e.target.value as ProjectSort); setPage(1) }} className="w-52" aria-label="Sort projects">
+                {SORT_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </Select>
+            </label>
+          </div>
         </CardContent>
       </Card>
 
@@ -321,6 +344,15 @@ function ProjectsList() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+            <span>Page {page} of {totalPages} · {total} projects</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+            </div>
           </div>
         )}
       </div>
@@ -452,12 +484,8 @@ function Tick({
 }
 
 /**
- * The row's overflow menu.
- *
- * Only two things belong here: opening the project, and getting the quotation
- * link without opening it. Deleting a project from a list row is how a studio
- * loses a wedding by mis-tapping on a phone, so that stays on the project's
- * own page behind a confirmation.
+ * The row's overflow menu: open, edit shortcut, quotation link, delete.
+ * Delete confirms and surfaces the server's 409 (payments/quotations → cancel instead).
  */
 function RowMenu({ project }: { project: ProjectListItem }) {
   const [open, setOpen] = useState(false)
@@ -465,6 +493,8 @@ function RowMenu({ project }: { project: ProjectListItem }) {
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const issue = useIssueQuotation()
+  const del = useDeleteProject()
+  const confirm = useConfirm()
 
   // Portaled to <body> with viewport coordinates: the row lives inside
   // .table-wrap, a bounded `overflow: auto` scroll box (so a sticky header
@@ -539,6 +569,16 @@ function RowMenu({ project }: { project: ProjectListItem }) {
               <ExternalLink className="size-4 shrink-0" aria-hidden />
               Open project
             </Link>
+            <Link
+              to="/projects/$id/edit"
+              params={{ id: project.id }}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+            >
+              <Pencil className="size-4 shrink-0" aria-hidden />
+              Edit project
+            </Link>
             <button
               type="button"
               role="menuitem"
@@ -559,6 +599,27 @@ function RowMenu({ project }: { project: ProjectListItem }) {
             >
               <FileText className="size-4 shrink-0" aria-hidden />
               {issue.isPending ? 'Preparing…' : 'Copy quotation link'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={del.isPending}
+              onClick={() => {
+                void (async () => {
+                  const yes = await confirm({
+                    title: `Delete ${project.name}?`,
+                    description: 'Its shoots, deliverables and tasks go with it. Blocked when payments exist — cancel instead.',
+                    confirmLabel: 'Delete project',
+                    destructive: true,
+                  })
+                  if (!yes) return
+                  del.mutate(project.id, { onSuccess: () => setOpen(false) })
+                })()
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
+            >
+              <Trash2 className="size-4 shrink-0" aria-hidden />
+              {del.isPending ? 'Deleting…' : 'Delete project'}
             </button>
           </div>,
           document.body,

@@ -108,7 +108,10 @@ export function ClientFormDialog({ client, trigger }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Phone</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" />
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" aria-describedby="client-phone-hint" />
+              <p id="client-phone-hint" className="text-[11px] text-muted-foreground">
+                10-digit mobile — used to spot duplicate clients.
+              </p>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Alternate phone</Label>

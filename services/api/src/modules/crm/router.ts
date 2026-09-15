@@ -35,7 +35,10 @@ import {
   leadsQuery,
   mergeLeadsRequest,
   mergeLeadsResponse,
+  markCadenceSentRequest,
   normalizePhone,
+  resolveDuplicateRequest,
+  resolveDuplicateResponse,
   savedView,
   sendTemplateRequest,
   sendTemplateResponse,
@@ -48,9 +51,13 @@ import {
   updateLeadRequest,
   updateLeadSourceRequest,
   updateSavedViewRequest,
+  fbImportsQuery,
+  fbImportsSummary,
+  fbLeadImport,
+  fbTestImportRequest,
   type CsvImportRow,
 } from '@ipc/contracts'
-import { leadsFromCsv, parseCsv, renderTemplate } from '@ipc/domain'
+import { leadsFromCsv, parseCsv, renderTemplate, crmTemplateVars } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction, requireModule } from '../../middleware/permissions'
@@ -77,6 +84,7 @@ const selectLead = (sql: TransactionSql) => sql`
          l.sla_due_at, l.pipeline_id, l.stage_id, s.name as stage_name, l.contact_id, l.crm_company_id,
          co.name as crm_company_name, l.title, l.close_date, l.currency, l.score, l.created_at,
          l.event_type, l.event_date, l.event_location, l.alternate_phone, l.city, l.group_name,
+         l.quality, l.contacted_status,
          u.name as assignee_name
   from crm_leads l
   left join users u on u.user_id = l.assigned_to
@@ -110,10 +118,30 @@ export const crmRouter = new Hono<AppEnv>()
       contact_id: c.req.query('contact_id'),
       crm_company_id: c.req.query('crm_company_id'),
       q: c.req.query('q'),
+      source: c.req.query('source'),
+      stage: c.req.query('stage'),
+      quality: c.req.query('quality'),
+      contacted: c.req.query('contacted'),
+      group: c.req.query('group'),
+      budget_min: c.req.query('budget_min'),
+      budget_max: c.req.query('budget_max'),
+      city: c.req.query('city'),
+      event_date: c.req.query('event_date'),
+      event_date_from: c.req.query('event_date_from'),
+      event_date_to: c.req.query('event_date_to'),
+      date_created: c.req.query('date_created'),
+      date_from: c.req.query('date_from'),
+      date_to: c.req.query('date_to'),
+      follow_up: c.req.query('follow_up'),
+      assigned: c.req.query('assigned'),
+      unassigned: c.req.query('unassigned'),
     })
     if (!q.success) fail(422, 'Invalid query.')
-    const { include_archived, limit, pipeline_id, stage_id, contact_id, crm_company_id, q: text } = q.data
+    const v = q.data
+    const { include_archived, limit, pipeline_id, stage_id, contact_id, crm_company_id, q: text } = v
     const needle = text ? `%${text.replace(/[%_]/g, '')}%` : null
+    const groupNeedle = v.group ? `%${v.group.replace(/[%_]/g, '')}%` : null
+    const cityNeedle = v.city ? `%${v.city.replace(/[%_]/g, '')}%` : null
     const rows = await attempt(c, 'crm.leads', () =>
       withUser(
         c.env,
@@ -125,6 +153,28 @@ export const crmRouter = new Hono<AppEnv>()
             and ${stage_id ? sql`l.stage_id = ${stage_id}` : sql`true`}
             and ${contact_id ? sql`l.contact_id = ${contact_id}` : sql`true`}
             and ${crm_company_id ? sql`l.crm_company_id = ${crm_company_id}` : sql`true`}
+            and ${v.source ? sql`l.source = ${v.source}` : sql`true`}
+            and ${v.stage ? sql`l.status = ${v.stage}` : sql`true`}
+            and ${v.quality ? sql`l.quality = ${v.quality}` : sql`true`}
+            and ${v.contacted ? sql`l.contacted_status = ${v.contacted}` : sql`true`}
+            and ${groupNeedle ? sql`l.group_name ilike ${groupNeedle}` : sql`true`}
+            and ${v.budget_min !== undefined ? sql`coalesce(l.deal_value, 0) >= ${v.budget_min}` : sql`true`}
+            and ${v.budget_max !== undefined ? sql`coalesce(l.deal_value, 0) <= ${v.budget_max}` : sql`true`}
+            and ${cityNeedle ? sql`l.city ilike ${cityNeedle}` : sql`true`}
+            and ${v.event_date ? sql`l.event_date = ${v.event_date}` : sql`true`}
+            and ${v.event_date_from ? sql`l.event_date >= ${v.event_date_from}` : sql`true`}
+            and ${v.event_date_to ? sql`l.event_date <= ${v.event_date_to}` : sql`true`}
+            and ${v.date_created === 'today' ? sql`l.created_at >= date_trunc('day', now())` : sql`true`}
+            and ${v.date_created === 'last7' ? sql`l.created_at >= now() - interval '7 days'` : sql`true`}
+            and ${v.date_created === 'this_month' ? sql`l.created_at >= date_trunc('month', now())` : sql`true`}
+            and ${v.date_from ? sql`l.created_at >= ${v.date_from}::timestamptz` : sql`true`}
+            and ${v.date_to ? sql`l.created_at < (${v.date_to}::date + 1)::timestamptz` : sql`true`}
+            and ${v.follow_up === 'today' ? sql`l.follow_up_at >= date_trunc('day', now()) and l.follow_up_at < date_trunc('day', now()) + interval '1 day'` : sql`true`}
+            and ${v.follow_up === 'upcoming' ? sql`l.follow_up_at >= date_trunc('day', now()) + interval '1 day'` : sql`true`}
+            and ${v.follow_up === 'overdue' ? sql`l.follow_up_at < now()` : sql`true`}
+            and ${v.follow_up === 'none' ? sql`l.follow_up_at is null` : sql`true`}
+            and ${v.assigned ? sql`l.assigned_to = ${v.assigned}` : sql`true`}
+            and ${v.unassigned ? sql`l.assigned_to is null` : sql`true`}
             and ${needle ? sql`(l.name ilike ${needle} or l.phone ilike ${needle} or l.email ilike ${needle} or l.title ilike ${needle})` : sql`true`}
           order by l.created_at desc
           limit ${limit}`,
@@ -171,6 +221,11 @@ export const crmRouter = new Hono<AppEnv>()
         if (v.city !== undefined) extra.city = v.city
         if (v.crm_company_id !== undefined) extra.crm_company_id = v.crm_company_id
         if (v.group_name !== undefined) extra.group_name = v.group_name
+        if (v.quality !== undefined) extra.quality = v.quality
+        if (v.contacted_status !== undefined) extra.contacted_status = v.contacted_status
+        // lost_reason only sticks on a lost lead; anything else is cleared by
+        // the sync trigger. Accept it here so a lost-at-birth lead is possible.
+        if (v.lost_reason !== undefined) extra.lost_reason = v.lost_reason
         // A known number hands back the existing row; only a fresh one is
         // placed in the pipeline the caller asked for.
         if (!known && v.pipeline_id !== undefined) extra.pipeline_id = v.pipeline_id
@@ -319,6 +374,24 @@ export const crmRouter = new Hono<AppEnv>()
     return c.json(unmergeLeadsResponse.parse({ restored: rows[0]?.restored ?? 0 }))
   })
 
+  // Lovable parity: keep_separate / archive without merging notes.
+  .post('/duplicates/resolve', edit, async (c) => {
+    const parsed = resolveDuplicateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Pick a lead and at least one duplicate.')
+    const { survivor_id, duplicate_ids, action } = parsed.data
+    const rows = await attempt(c, 'crm.duplicates_resolve', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ resolved: number }[]>`
+          select resolve_crm_duplicates(${survivor_id}, ${sql.array(duplicate_ids)}::uuid[], ${action}) as resolved`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not resolve those duplicates.')
+    await audit(c, { action: 'lead.duplicates_resolve', entityType: 'crm_lead', entityId: survivor_id, after: { duplicate_ids, action } })
+    return c.json(resolveDuplicateResponse.parse({ resolved: rows[0]?.resolved ?? 0 }))
+  })
+
   // ── CSV import ──────────────────────────────────────────────
   // Preview parses on the API with the same RFC 4180 parser the tests cover,
   // then asks the database one question per distinct number: is it known?
@@ -379,17 +452,17 @@ export const crmRouter = new Hono<AppEnv>()
   .post('/imports/commit', requireAction('crm', 'create'), async (c) => {
     const parsed = csvImportCommitRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Invalid import rows.')
-    const { rows, skip_duplicates } = parsed.data
+    const { rows, skip_duplicates, mode } = parsed.data
     const result = await attempt(c, 'crm.import_commit', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const out = await sql<{ r: unknown }[]>`
-          select crm_import_leads(${sql.json(rows)}, ${skip_duplicates}) as r`
+          select crm_import_leads(${sql.json(rows)}, ${skip_duplicates}, ${mode}) as r`
         return out[0]?.r ?? null
       }),
     )
     if (!result) fail(400, 'Import failed. Nothing was saved.')
     const summary = csvImportCommitResponse.parse(result)
-    await audit(c, { action: 'lead.import', entityType: 'crm_lead', after: { rows: rows.length, ...summary, ids: undefined } })
+    await audit(c, { action: 'lead.import', entityType: 'crm_lead', after: { rows: rows.length, mode, ...summary, ids: undefined } })
     return c.json(summary, 201)
   })
 
@@ -404,7 +477,72 @@ export const crmRouter = new Hono<AppEnv>()
       ),
     )
     if (!rows) fail(400, 'Stats failed.')
-    return c.json(crmStats.parse(rows[0]?.stats ?? {}))
+    const base = crmStats.parse(rows[0]?.stats ?? {})
+    // Lovable parity extras: pipeline value, quality split, 5-way
+    // follow-up health, activity + won/lost trends, proposal KPI, warnings.
+    const extras = await attempt(c, 'crm.stats_extras', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [q] = await sql<{
+          pipeline_value: number;
+          overdue: number; due_today: number; due_tomorrow: number; upcoming_7d: number; no_follow_up: number;
+          proposal_count: number; proposal_value: number;
+        }[]>`
+          select coalesce(sum(l.deal_value) filter (where l.status not in ('converted', 'lost')), 0) as pipeline_value,
+                 count(*) filter (where l.status not in ('converted', 'lost') and l.follow_up_at is not null and l.follow_up_at < now())::int as overdue,
+                 count(*) filter (where l.status not in ('converted', 'lost') and l.follow_up_at >= date_trunc('day', now()) and l.follow_up_at < date_trunc('day', now()) + interval '1 day')::int as due_today,
+                 count(*) filter (where l.status not in ('converted', 'lost') and l.follow_up_at >= date_trunc('day', now()) + interval '1 day' and l.follow_up_at < date_trunc('day', now()) + interval '2 days')::int as due_tomorrow,
+                 count(*) filter (where l.status not in ('converted', 'lost') and l.follow_up_at >= date_trunc('day', now()) + interval '2 days' and l.follow_up_at < date_trunc('day', now()) + interval '8 days')::int as upcoming_7d,
+                 count(*) filter (where l.status not in ('converted', 'lost') and l.follow_up_at is null)::int as no_follow_up,
+                 count(*) filter (where l.status = 'proposal_sent')::int as proposal_count,
+                 coalesce(sum(l.deal_value) filter (where l.status = 'proposal_sent'), 0) as proposal_value
+          from crm_leads l
+          where l.company_id = get_current_company_id() and l.is_archived = false`
+        const qb = await sql<{ quality: string | null; count: number }[]>`
+          select l.quality, count(*)::int as count from crm_leads l
+          where l.company_id = get_current_company_id() and l.is_archived = false
+          group by l.quality`
+        const quality_breakdown: Record<string, number> = {}
+        for (const r of qb) quality_breakdown[r.quality ?? 'unset'] = r.count
+        const trend = await sql<{ day: string; count: number }[]>`
+          select to_char(d, 'YYYY-MM-DD') as day, count(a.id)::int as count
+          from generate_series(${range.from}::date, ${range.to}::date, interval '1 day') d
+          left join crm_activities a on a.created_at::date = d::date
+            and a.company_id = get_current_company_id()
+          group by d order by d`
+        const wl = await sql<{ day: string; won: number; lost: number }[]>`
+          select to_char(d, 'YYYY-MM-DD') as day,
+                 count(l.id) filter (where l.status = 'converted')::int as won,
+                 count(l.id) filter (where l.status = 'lost')::int as lost
+          from generate_series(${range.from}::date, ${range.to}::date, interval '1 day') d
+          left join crm_leads l on l.company_id = get_current_company_id()
+            and coalesce(l.converted_at, l.stage_changed_at, l.updated_at)::date = d::date
+          group by d order by d`
+        return { q: q ?? null, quality_breakdown, trend, wl }
+      }),
+    )
+    const warnings: string[] = []
+    if ((extras?.q?.no_follow_up ?? 0) > 0) warnings.push(`${extras?.q?.no_follow_up} open leads have no follow-up set.`)
+    if ((extras?.q?.overdue ?? 0) > 0) warnings.push(`${extras?.q?.overdue} follow-ups are overdue.`)
+    if (base.uncontacted > 0) warnings.push(`${base.uncontacted} new leads were never contacted.`)
+    return c.json(
+      crmStats.parse({
+        ...base,
+        pipeline_value: extras?.q?.pipeline_value ?? 0,
+        quality_breakdown: extras?.quality_breakdown ?? {},
+        follow_up_health: {
+          overdue: extras?.q?.overdue ?? 0,
+          due_today: extras?.q?.due_today ?? 0,
+          due_tomorrow: extras?.q?.due_tomorrow ?? 0,
+          upcoming_7d: extras?.q?.upcoming_7d ?? 0,
+          no_follow_up: extras?.q?.no_follow_up ?? 0,
+        },
+        activity_trend: extras?.trend ?? [],
+        won_lost_trend: extras?.wl ?? [],
+        proposal_count: extras?.q?.proposal_count ?? 0,
+        proposal_value: extras?.q?.proposal_value ?? 0,
+        warnings,
+      }),
+    )
   })
 
   .get('/team-stats', async (c) => {
@@ -417,16 +555,62 @@ export const crmRouter = new Hono<AppEnv>()
       ),
     )
     if (!rows) fail(400, 'We could not load the team view.')
-    return c.json(crmTeamStatsRow.array().parse(rows))
+    const base = crmTeamStatsRow.array().parse(rows)
+    // Lovable parity: per-member outreach (whatsapp / messages / notes) +
+    // pipeline value + warnings.
+    const extra = await attempt(c, 'crm.team_stats_extras', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        return sql<{
+          user_id: string; whatsapp: number; messages: number; notes: number; pipeline_value: number;
+        }[]>`
+          select m.user_id,
+                 count(a.id) filter (where a.type = 'whatsapp')::int as whatsapp,
+                 count(a.id) filter (where a.type in ('whatsapp', 'sms', 'email'))::int as messages,
+                 count(a.id) filter (where a.type = 'note')::int as notes,
+                 coalesce(sum(l.deal_value) filter (where l.status not in ('converted', 'lost')), 0) as pipeline_value
+          from users m
+          left join crm_activities a on a.actor_id = m.user_id
+            and a.created_at >= ${range.from}::timestamptz and a.created_at < (${range.to}::date + 1)::timestamptz
+          left join crm_leads l on l.assigned_to = m.user_id
+            and l.company_id = get_current_company_id() and l.is_archived = false
+          where m.company_id = get_current_company_id() and m.deleted_at is null
+          group by m.user_id`
+      }),
+    )
+    const byId = new Map((extra ?? []).map((e) => [e.user_id, e]))
+    return c.json(
+      crmTeamStatsRow.array().parse(
+        base.map((r) => {
+          const e = byId.get(r.user_id)
+          const warn: string[] = []
+          if (r.overdue > 0) warn.push(`${r.overdue} overdue follow-ups.`)
+          if (r.uncontacted > 0) warn.push(`${r.uncontacted} leads never contacted.`)
+          if (r.open > 0 && (e?.messages ?? 0) === 0) warn.push('No outreach logged in range.')
+          return {
+            ...r,
+            whatsapp: e?.whatsapp ?? 0,
+            messages: e?.messages ?? 0,
+            notes: e?.notes ?? 0,
+            pipeline_value: e?.pipeline_value ?? 0,
+            warnings: warn,
+          }
+        }),
+      ),
+    )
   })
 
   // ── Templates ───────────────────────────────────────────────
   .get('/templates', async (c) => {
+    const includeInactive = c.req.query('include_inactive') === '1'
     const rows = await attempt(c, 'crm.templates', () =>
       withUser(
         c.env,
         c.get('auth').userId,
-        (sql) => sql`select id, name, body, kind, created_at from crm_templates order by created_at desc`,
+        (sql) => sql`
+          select id, name, body, kind, category, usage_count, is_active, created_at
+          from crm_templates
+          where ${includeInactive ? sql`true` : sql`is_active = true`}
+          order by usage_count desc, created_at desc`,
       ),
     )
     if (!rows) fail(400, 'We could not load templates.')
@@ -436,13 +620,13 @@ export const crmRouter = new Hono<AppEnv>()
   .post('/templates', edit, async (c) => {
     const parsed = createTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Check template fields.')
-    const { name, body, kind } = parsed.data
+    const { name, body, kind, category } = parsed.data
     const row = await attempt(c, 'crm.template_create', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const [r] = await sql`
-          insert into crm_templates (company_id, name, body, kind)
-          values (get_current_company_id(), ${name}, ${body}, ${kind})
-          returning id, name, body, kind, created_at`
+          insert into crm_templates (company_id, name, body, kind, category)
+          values (get_current_company_id(), ${name}, ${body}, ${kind}, ${category ?? null})
+          returning id, name, body, kind, category, usage_count, is_active, created_at`
         return r ?? null
       }),
     )
@@ -461,7 +645,7 @@ export const crmRouter = new Hono<AppEnv>()
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
           update crm_templates set ${sql(parsed.data)} where id = ${id}
-          returning id, name, body, kind, created_at`
+          returning id, name, body, kind, category, usage_count, is_active, created_at`
         return rows[0] ?? null
       }),
     )
@@ -469,6 +653,22 @@ export const crmRouter = new Hono<AppEnv>()
     const updated = crmTemplate.parse(row)
     await audit(c, { action: 'template.update', entityType: 'crm_template', entityId: id, after: parsed.data })
     return c.json(updated)
+  })
+
+  // Lovable parity: archive keeps the template (and its usage history) without deleting it.
+  .post('/templates/:id/archive', edit, async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'crm.template_archive', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`update crm_templates set is_active = false where id = ${id} returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not archive this template.')
+    if (!rows.length) fail(404, 'That template was not found.')
+    await audit(c, { action: 'template.archive', entityType: 'crm_template', entityId: id })
+    return c.body(null, 204)
   })
 
   .delete('/templates/:id', remove, async (c) => {
@@ -497,23 +697,36 @@ export const crmRouter = new Hono<AppEnv>()
 
     const result = await attempt(c, 'crm.send_template', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const [lead] = await sql<{ name: string | null; phone: string | null; phone_norm: string | null; email: string | null }[]>`
-          select name, phone, phone_norm, email from crm_leads where id = ${leadId}`
+        const [lead] = await sql<{
+          name: string | null; phone: string | null; phone_norm: string | null; email: string | null;
+          follow_up_at: string | null; city: string | null; group_name: string | null;
+          event_type: string | null; event_date: string | null; deal_value: number | null;
+          usage_bump: null;
+        }[]>`
+          select name, phone, phone_norm, email, follow_up_at, city, group_name,
+                 event_type, event_date, deal_value
+          from crm_leads where id = ${leadId}`
         if (!lead) return 'no_lead' as const
-        const [tpl] = await sql<{ name: string; body: string }[]>`
-          select name, body from crm_templates where id = ${template_id}`
+        const [tpl] = await sql<{ id: string; name: string; body: string }[]>`
+          select id, name, body from crm_templates where id = ${template_id}`
         if (!tpl) return 'no_template' as const
         const [studio] = await sql<{ name: string }[]>`select name from companies where id = get_current_company_id()`
 
         const rendered = renderTemplate(tpl.body, {
-          name: lead.name ?? '',
-          phone: lead.phone ?? '',
-          email: lead.email ?? '',
+          ...crmTemplateVars(
+            {
+              name: lead.name, phone: lead.phone, email: lead.email,
+              follow_up_at: lead.follow_up_at, city: lead.city, group_name: lead.group_name,
+              event_type: lead.event_type, event_date: lead.event_date, deal_value: lead.deal_value,
+            },
+            studio?.name ?? '',
+          ),
+          // Back-compat: the old call only filled these four.
           studio: studio?.name ?? '',
         })
         if (channel === 'whatsapp' && !lead.phone_norm) return 'no_phone' as const
         if (channel === 'email' && !lead.email) return 'no_email' as const
-        return { rendered, templateName: tpl.name, phoneNorm: lead.phone_norm, email: lead.email }
+        return { rendered, templateId: tpl.id, templateName: tpl.name, phoneNorm: lead.phone_norm, email: lead.email }
       }),
     )
     if (result === 'no_lead') fail(404, 'That lead was not found.')
@@ -543,7 +756,12 @@ export const crmRouter = new Hono<AppEnv>()
     await attempt(c, 'crm.send_template_record', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         await sql`
-          update crm_leads set last_contacted_at = coalesce(last_contacted_at, now()) where id = ${leadId}`
+          update crm_leads set last_contacted_at = coalesce(last_contacted_at, now()),
+                               contacted_status = 'contacted',
+                               quality = coalesce(quality, case when is_hot then 'hot'::text else null end)
+          where id = ${leadId}`
+        await sql`
+          update crm_templates set usage_count = usage_count + 1 where id = ${result.templateId}`
         await sql`
           insert into crm_lead_events (company_id, lead_id, from_status, to_status, actor_id, note)
           values (get_current_company_id(), ${leadId}, null, null, ${c.get('auth').userId},
@@ -561,6 +779,8 @@ export const crmRouter = new Hono<AppEnv>()
 
   // ── Lead → project ──────────────────────────────────────────
   // Winning a lead should leave a project behind, not just a status.
+  // Client-only convert (no project): the lead is won and linked to the
+  // client; converted_project_id stays null until the project comes later.
   .post('/leads/:id/convert', requireAction('crm', 'edit'), async (c) => {
     const parsed = convertLeadRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, parsed.error.issues[0]?.message ?? 'Please check the project details.')
@@ -571,38 +791,43 @@ export const crmRouter = new Hono<AppEnv>()
       'crm.convert',
       () =>
         withUser(c.env, c.get('auth').userId, async (sql) => {
-          const rows = await sql<{ client_id: string; project_id: string }[]>`
+          const rows = await sql<{ client_id: string; project_id: string | null }[]>`
             select * from convert_lead_to_project(
-              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${sql.json(v.project)}, ${v.quote_id ?? null})`
+              ${leadId}, ${v.client_id ?? null}, ${sql.json(v.client ?? {})}, ${v.project ? sql.json(v.project) : null}, ${v.quote_id ?? null})`
           return rows[0] ?? null
         }),
       { onCode: (code, err) => (code === '22023' && String((err as { message?: string })?.message ?? '').includes('already') ? ('done' as const) : undefined) },
     )
     if (row === 'done') fail(409, 'This lead has already been converted.')
     if (!row) fail(400, 'We could not convert this lead.')
-    await audit(c, { action: 'lead.convert', entityType: 'crm_lead', entityId: leadId, after: { ...row, project: v.project } })
+    await audit(c, { action: 'lead.convert', entityType: 'crm_lead', entityId: leadId, after: { ...row, client_only: !v.project && !v.quote_id } })
     return c.json(convertLeadResponse.parse(row), 201)
   })
 
   // ── Cadences ────────────────────────────────────────────────
   .get('/cadences', async (c) => {
+    const stageFilter = c.req.query('stage_filter') || null
     const rows = await attempt(c, 'crm.cadences', () =>
       withUser(
         c.env,
         c.get('auth').userId,
         (sql) => sql`
           select ca.id, ca.name, ca.is_active, ca.created_at,
-                 coalesce((
-                   select jsonb_agg(jsonb_build_object(
-                     'id', s.id, 'step_no', s.step_no, 'day_offset', s.day_offset,
-                     'template_id', s.template_id, 'template_name', t.name, 'note', s.note) order by s.step_no)
-                   from crm_cadence_steps s left join crm_templates t on t.id = s.template_id
-                   where s.cadence_id = ca.id
-                 ), '[]'::jsonb) as steps,
-                 (select count(*) from crm_lead_cadences lc
-                   where lc.cadence_id = ca.id and lc.completed_at is null and lc.stopped_at is null)::int as active_leads
-          from crm_cadences ca
-          order by ca.created_at`,
+                  ca.description, ca.stage_filter, ca.source_filter,
+                  coalesce((
+                    select jsonb_agg(jsonb_build_object(
+                      'id', s.id, 'step_no', s.step_no, 'day_offset', s.day_offset,
+                      'template_id', s.template_id, 'template_name', t.name, 'note', s.note,
+                      'recommended_delay_days', s.recommended_delay_days,
+                      'next_stage', s.next_stage, 'next_follow_up_days', s.next_follow_up_days) order by s.step_no)
+                    from crm_cadence_steps s left join crm_templates t on t.id = s.template_id
+                    where s.cadence_id = ca.id
+                  ), '[]'::jsonb) as steps,
+                  (select count(*) from crm_lead_cadences lc
+                    where lc.cadence_id = ca.id and lc.completed_at is null and lc.stopped_at is null)::int as active_leads
+           from crm_cadences ca
+           where ${stageFilter ? sql`ca.stage_filter = ${stageFilter}` : sql`true`}
+           order by ca.created_at`,
       ),
     )
     if (!rows) fail(400, 'We could not load cadences.')
@@ -616,12 +841,16 @@ export const crmRouter = new Hono<AppEnv>()
     const id = await attempt(c, 'crm.cadence_create', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const [ca] = await sql<{ id: string }[]>`
-          insert into crm_cadences (company_id, name) values (get_current_company_id(), ${v.name}) returning id`
+          insert into crm_cadences (company_id, name, description, stage_filter, source_filter)
+          values (get_current_company_id(), ${v.name}, ${v.description ?? null}, ${v.stage_filter ?? null}, ${v.source_filter ?? null})
+          returning id`
         if (!ca) return null
         for (const [i, step] of v.steps.entries()) {
           await sql`
-            insert into crm_cadence_steps (cadence_id, company_id, step_no, day_offset, template_id, note)
-            values (${ca.id}, get_current_company_id(), ${i + 1}, ${step.day_offset}, ${step.template_id ?? null}, ${step.note ?? null})`
+            insert into crm_cadence_steps (cadence_id, company_id, step_no, day_offset, template_id, note,
+                                           recommended_delay_days, next_stage, next_follow_up_days)
+            values (${ca.id}, get_current_company_id(), ${i + 1}, ${step.day_offset}, ${step.template_id ?? null}, ${step.note ?? null},
+                    ${step.recommended_delay_days ?? null}, ${step.next_stage ?? null}, ${step.next_follow_up_days ?? null})`
         }
         return ca.id
       }),
@@ -698,6 +927,54 @@ export const crmRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not stop the cadence.')
     if (!rows[0]?.ok) fail(404, 'This lead is not on a cadence.')
     await audit(c, { action: 'lead.cadence_stop', entityType: 'crm_lead', entityId: leadId })
+    return c.body(null, 204)
+  })
+
+  // Lovable parity: Mark-as-Sent — the step went out (by hand or on a call),
+  // so log the activity, stamp the contact, move the follow-up and the stage.
+  .post('/leads/:id/cadence/sent', edit, async (c) => {
+    const parsed = markCadenceSentRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Invalid mark-as-sent.')
+    const leadId = uuidParam(c)
+    const { next_follow_up_days, next_stage_id, note } = parsed.data
+    const followUpAt =
+      next_follow_up_days === null || next_follow_up_days === undefined
+        ? null
+        : new Date(Date.now() + next_follow_up_days * 86_400_000).toISOString()
+    const ok = await attempt(c, 'crm.cadence_sent', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [lead] = await sql<{ id: string; name: string | null }[]>`
+          select id, name from crm_leads where id = ${leadId}`
+        if (!lead) return 'no_lead' as const
+        if (next_stage_id) {
+          const [stage] = await sql<{ id: string }[]>`
+            select id from crm_pipeline_stages where id = ${next_stage_id}`
+          if (!stage) return 'no_stage' as const
+        }
+        await sql`
+          update crm_leads
+             set last_contacted_at = coalesce(last_contacted_at, now()),
+                 contacted_status = 'contacted',
+                 follow_up_at = coalesce(${followUpAt}::timestamptz, follow_up_at)
+           where id = ${leadId}`
+        if (next_stage_id) {
+          await sql`select crm_move_stage(${leadId}, ${next_stage_id})`
+        }
+        await sql`
+          insert into crm_activities (company_id, lead_id, type, direction, subject, body, provider, started_at)
+          values (get_current_company_id(), ${leadId}, 'note', 'out',
+                  'Marked as sent', ${note ?? 'Cadence step marked as sent.'}, 'manual', now())`
+        await sql`
+          insert into crm_lead_events (company_id, lead_id, from_status, to_status, actor_id, note)
+          values (get_current_company_id(), ${leadId}, null, null, ${c.get('auth').userId},
+                  ${`marked cadence step as sent${note ? `: ${note}` : ''}`})`
+        return true
+      }),
+    )
+    if (ok === 'no_lead') fail(404, 'That lead was not found.')
+    if (ok === 'no_stage') fail(422, 'That stage was not found.')
+    if (!ok) fail(400, 'We could not record that send.')
+    await audit(c, { action: 'lead.cadence_sent', entityType: 'crm_lead', entityId: leadId, after: parsed.data })
     return c.body(null, 204)
   })
 
@@ -835,13 +1112,14 @@ export const crmRouter = new Hono<AppEnv>()
         c.get('auth').userId,
         (sql) => sql`
           select r.id, r.user_id, r.priority, r.is_active, u.name as user_name,
-                 (
-                   select count(*) from crm_leads l
-                   where l.assigned_to = r.user_id and l.status not in ('converted', 'lost') and l.is_archived = false
-                 )::int as lead_count
-          from crm_distribution_rules r
-          left join users u on u.user_id = r.user_id
-          order by r.is_active desc, r.priority, u.name`,
+                  r.name, r.source_filter, r.strategy, r.last_assigned_at, r.assigned_count,
+                  (
+                    select count(*) from crm_leads l
+                    where l.assigned_to = r.user_id and l.status not in ('converted', 'lost') and l.is_archived = false
+                  )::int as lead_count
+           from crm_distribution_rules r
+           left join users u on u.user_id = r.user_id
+           order by r.is_active desc, r.priority, u.name`,
       ),
     )
     if (!rows) fail(400, 'We could not load the distribution rota.')
@@ -851,7 +1129,7 @@ export const crmRouter = new Hono<AppEnv>()
   .post('/distribution', edit, async (c) => {
     const parsed = createDistributionRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Pick a team member.')
-    const { user_id, priority } = parsed.data
+    const { user_id, priority, name, source_filter, strategy } = parsed.data
     const row = await attempt(
       c,
       'crm.distribution_add',
@@ -861,8 +1139,9 @@ export const crmRouter = new Hono<AppEnv>()
             select id from crm_distribution_rules where user_id = ${user_id}`
           if (exists) return 'exists' as const
           const [r] = await sql<{ id: string }[]>`
-            insert into crm_distribution_rules (company_id, user_id, priority)
-            select get_current_company_id(), ${user_id}, ${priority}
+            insert into crm_distribution_rules (company_id, user_id, priority, name, source_filter, strategy)
+            select get_current_company_id(), ${user_id}, ${priority}, ${name ?? null},
+                   ${sql.array(source_filter ?? [])}::text[], ${strategy}
             where exists (select 1 from users where user_id = ${user_id} and deleted_at is null)
             returning id`
           return r ?? null
@@ -879,12 +1158,15 @@ export const crmRouter = new Hono<AppEnv>()
     if (!parsed.success) fail(422, 'Invalid distribution patch.')
     if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
     const id = uuidParam(c)
+    const { source_filter, ...rest } = parsed.data
     const rows = await attempt(c, 'crm.distribution_update', () =>
       withUser(
         c.env,
         c.get('auth').userId,
         (sql) => sql<{ id: string }[]>`
-          update crm_distribution_rules set ${sql(parsed.data)} where id = ${id} returning id`,
+          update crm_distribution_rules
+             set ${sql({ ...rest, ...(source_filter ? { source_filter: sql.array(source_filter) } : {}) })}
+           where id = ${id} returning id`,
       ),
     )
     if (!rows) fail(400, 'We could not update the rota.')
@@ -919,14 +1201,16 @@ export const crmRouter = new Hono<AppEnv>()
         c.get('auth').userId,
         (sql) => sql`
           select s.id, s.label, s.source_key, s.kind, s.is_active, s.created_at,
-                 coalesce(l.total, 0)::int as lead_count,
-                 l.last_lead_at
-          from crm_webhook_sources s
-          left join lateral (
-            select count(*) as total, max(created_at) as last_lead_at
-            from crm_leads where source_key = s.source_key
-          ) l on true
-          order by s.is_active desc, s.created_at desc`,
+                  s.source_type, s.allowed_origin, s.default_source, s.default_stage,
+                  s.default_quality, s.default_assigned_to, s.last_received_at,
+                  coalesce(l.total, 0)::int as lead_count,
+                  l.last_lead_at
+           from crm_webhook_sources s
+           left join lateral (
+             select count(*) as total, max(created_at) as last_lead_at
+             from crm_leads where source_key = s.source_key
+           ) l on true
+           order by s.is_active desc, s.created_at desc`,
       ),
     )
     if (!rows) fail(400, 'We could not load your lead sources.')
@@ -936,14 +1220,24 @@ export const crmRouter = new Hono<AppEnv>()
   .post('/sources', requireAction('crm', 'create'), async (c) => {
     const parsed = createLeadSourceRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please name the source.')
-    const { label, kind } = parsed.data
+    const { label, kind, source_type, allowed_origin, default_source, default_quality, default_assigned_to } = parsed.data
 
     // The key is generated in SQL and never accepted from the client — it is
     // the one credential that lets an unauthenticated caller write leads here.
     const row = await attempt(c, 'crm.source_create', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const [created] = await sql`select * from create_lead_source(${label}, ${kind})`
-        return created ?? null
+        if (!created) return null
+        const [full] = await sql`
+          update crm_webhook_sources
+             set source_type = ${source_type},
+                 allowed_origin = ${allowed_origin ?? null},
+                 default_source = ${default_source ?? null},
+                 default_quality = ${default_quality ?? null},
+                 default_assigned_to = ${default_assigned_to ?? null}
+           where id = ${created.id}
+           returning *`
+        return full ?? created
       }),
     )
     if (!row) fail(400, 'We could not create this lead source.')
@@ -985,6 +1279,128 @@ export const crmRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not delete this lead source.')
     if (!rows.length) fail(404, 'We could not find that lead source.')
     await audit(c, { action: 'lead_source.delete', entityType: 'crm_webhook_source', entityId: id })
+    return c.body(null, 204)
+  })
+
+  // ── Per-source import log (fb_lead_imports) ───────────────────
+  // Every lead that arrives through a source — webhook, Meta, or the Test
+  // Center — leaves a row here, so "did the form work" is answerable.
+  .get('/sources/:id/leads', async (c) => {
+    const sourceId = uuidParam(c)
+    const q = fbImportsQuery.safeParse({
+      search: c.req.query('search'),
+      status: c.req.query('status'),
+      page: c.req.query('page'),
+      date_from: c.req.query('date_from'),
+      date_to: c.req.query('date_to'),
+      sort: c.req.query('sort'),
+      limit: c.req.query('limit'),
+    })
+    if (!q.success) fail(422, 'Invalid query.')
+    const v = q.data
+    const needle = v.search ? `%${v.search.replace(/[%_]/g, '')}%` : null
+    const rows = await attempt(c, 'crm.source_leads', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [src] = await sql<{ id: string }[]>`select id from crm_webhook_sources where id = ${sourceId}`
+        if (!src) return 'missing' as const
+        const items = await sql`
+          select id, source_id, page_id, page_name, leadgen_id, name, phone, email,
+                 status, error, lead_id, created_at
+          from fb_lead_imports
+          where source_id = ${sourceId}
+            and ${v.status ? sql`status = ${v.status}` : sql`true`}
+            and ${v.page ? sql`page_id = ${v.page}` : sql`true`}
+            and ${v.date_from ? sql`created_at >= ${v.date_from}::timestamptz` : sql`true`}
+            and ${v.date_to ? sql`created_at <= ${v.date_to}::timestamptz` : sql`true`}
+            and ${needle ? sql`(name ilike ${needle} or phone ilike ${needle} or email ilike ${needle})` : sql`true`}
+          order by ${v.sort === 'oldest' ? sql`created_at asc` : sql`created_at desc`}
+          limit ${v.limit}`
+        const [sum] = await sql<{
+          total: number; imported: number; duplicates: number; failed: number; pending: number;
+        }[]>`
+          select count(*)::int as total,
+                 count(*) filter (where status = 'imported')::int as imported,
+                 count(*) filter (where status = 'duplicate')::int as duplicates,
+                 count(*) filter (where status = 'failed')::int as failed,
+                 count(*) filter (where status = 'pending')::int as pending
+          from fb_lead_imports where source_id = ${sourceId}`
+        return { items, summary: sum ?? { total: 0, imported: 0, duplicates: 0, failed: 0, pending: 0 } }
+      }),
+    )
+    if (rows === 'missing') fail(404, 'We could not find that lead source.')
+    if (!rows) fail(400, 'We could not load the import log.')
+    return c.json({
+      items: fbLeadImport.array().parse(rows.items),
+      summary: fbImportsSummary.parse(rows.summary),
+    })
+  })
+
+  // Test Center: push a sample lead through the source's own webhook path.
+  .post('/sources/:id/leads/test', edit, async (c) => {
+    const sourceId = uuidParam(c)
+    const parsed = fbTestImportRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Give the test lead a valid phone number.')
+    const t = parsed.data
+    const row = await attempt(c, 'crm.source_lead_test', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [src] = await sql<{ id: string; source_key: string; kind: string }[]>`
+          select id, source_key, kind from crm_webhook_sources where id = ${sourceId}`
+        if (!src) return 'missing' as const
+        const [lead] = await sql<{ id: string }[]>`select capture_lead(${src.source_key}, ${t.name ?? null}, ${t.phone}, ${t.email ?? null}) as id`
+        if (!lead) return null
+        const [imp] = await sql`
+          insert into fb_lead_imports (company_id, source_id, page_id, page_name, name, phone, email, status, lead_id)
+          values (get_current_company_id(), ${sourceId}, ${t.page_id ?? null}, ${t.page_name ?? null},
+                  ${t.name ?? null}, ${t.phone}, ${t.email ?? null}, 'imported', ${lead.id})
+          returning id, source_id, page_id, page_name, leadgen_id, name, phone, email, status, error, lead_id, created_at`
+        return imp ?? null
+      }),
+    )
+    if (row === 'missing') fail(404, 'We could not find that lead source.')
+    if (!row) fail(400, 'The test lead could not be captured.')
+    await audit(c, { action: 'lead_source.test', entityType: 'crm_webhook_source', entityId: sourceId })
+    return c.json(fbLeadImport.parse(row), 201)
+  })
+
+  .post('/sources/:sourceId/leads/:importId/retry', edit, async (c) => {
+    const sourceId = uuidParam(c, 'sourceId')
+    const importId = uuidParam(c, 'importId')
+    const row = await attempt(c, 'crm.source_lead_retry', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [imp] = await sql<{
+          id: string; name: string | null; phone: string | null; email: string | null; source_id: string | null;
+        }[]>`
+          select id, name, phone, email, source_id from fb_lead_imports
+          where id = ${importId} and source_id = ${sourceId} and status = 'failed'`
+        if (!imp || !imp.phone) return null
+        const [src] = await sql<{ source_key: string }[]>`
+          select source_key from crm_webhook_sources where id = ${sourceId}`
+        if (!src) return null
+        const [lead] = await sql<{ id: string }[]>`select capture_lead(${src.source_key}, ${imp.name}, ${imp.phone}, ${imp.email}) as id`
+        if (!lead) return null
+        const [out] = await sql`
+          update fb_lead_imports set status = 'imported', error = null, lead_id = ${lead.id}
+          where id = ${importId}
+          returning id, source_id, page_id, page_name, leadgen_id, name, phone, email, status, error, lead_id, created_at`
+        return out ?? null
+      }),
+    )
+    if (!row) fail(404, 'That failed import was not found.')
+    return c.json(fbLeadImport.parse(row))
+  })
+
+  .delete('/sources/:sourceId/leads/:importId', remove, async (c) => {
+    const sourceId = uuidParam(c, 'sourceId')
+    const importId = uuidParam(c, 'importId')
+    const rows = await attempt(c, 'crm.source_lead_delete', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ id: string }[]>`delete from fb_lead_imports where id = ${importId} and source_id = ${sourceId} returning id`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not delete that import row.')
+    if (!rows.length) fail(404, 'That import row was not found.')
     return c.body(null, 204)
   })
 

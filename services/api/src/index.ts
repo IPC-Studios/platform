@@ -20,7 +20,7 @@ import { workRouter, workReminderSettingsRouter } from './modules/work/router'
 import { billingRouter } from './modules/billing/router'
 import { financialsRouter } from './modules/financials/router'
 import { crmRouter } from './modules/crm/router'
-import { webhooksRouter } from './modules/webhooks/router'
+import { webhooksRouter, metaRouter } from './modules/webhooks/router'
 import { hrRouter } from './modules/hr/router'
 import { cronRouter } from './modules/cron/router'
 import { notificationsRouter } from './modules/notifications/router'
@@ -130,6 +130,7 @@ app.route('/billing', billingRouter)
 app.route('/financials', financialsRouter)
 app.route('/crm', crmRouter)
 app.route('/webhooks', webhooksRouter)
+app.route('/meta', metaRouter)
 app.route('/hr', hrRouter)
 app.route('/cron', cronRouter)
 app.route('/notifications', notificationsRouter)

@@ -211,12 +211,48 @@ publicReferralsRouter.get('/referrals/campaign/:slug', async (c) => {
     }),
   )
   if (!row) fail(404, 'This referral link is no longer active.')
-  return c.json(publicReferralCampaign.parse(row))
+  // Lovable parity: enrich with company logo + referring-client + reward title.
+  // The RPC shape is the base; extras are best-effort so a missing column
+  // never breaks the public page.
+  let extra: Record<string, unknown> = {}
+  try {
+    const r = await withService(c.env, async (sql) => {
+      const base = row as { campaign_id?: string }
+      if (!base?.campaign_id) return null
+      const rows = await sql<Record<string, unknown>[]>`select rc.name as campaign_name,
+          (select co.logo_url from companies co
+            join referral_campaigns rc2 on rc2.company_id = co.id
+           where rc2.id = ${base.campaign_id}::uuid limit 1) as logo_url,
+          (select rs.referrer_name from referral_submissions rs
+            where rs.campaign_id = ${base.campaign_id}::uuid and rs.referrer_name is not null
+            order by rs.created_at desc limit 1) as referring_client_name
+        from referral_campaigns rc where rc.id = ${base.campaign_id}::uuid`
+      return rows[0] ?? null
+    })
+    if (r) {
+      extra = {
+        logo_url: (r['logo_url'] as string | null) ?? null,
+        referring_client_name: (r['referring_client_name'] as string | null) ?? null,
+      }
+    }
+  } catch {
+    extra = {}
+  }
+  const base = row as Record<string, unknown>
+  const rewardTitle =
+    typeof base['reward_description'] === 'string' && (base['reward_description'] as string).trim()
+      ? ((base['reward_description'] as string).split('\n')[0] ?? '').slice(0, 120)
+      : null
+  return c.json(publicReferralCampaign.parse({ ...base, ...extra, reward_title: rewardTitle }))
 })
 
 publicReferralsRouter.post('/referrals/submit', async (c) => {
   const parsed = submitReferralRequest.safeParse(await c.req.json().catch(() => ({})))
   if (!parsed.success) fail(422, 'Please check the referral details.')
+  // Lovable parity: phone with ≥7 digits is required (a studio cannot call back
+  // a 3-digit number). Email stays optional.
+  const phoneDigits = (parsed.data.client_phone ?? '').replace(/[^\d]/g, '')
+  if (phoneDigits.length < 7) fail(422, 'Please enter a valid phone number (at least 7 digits).')
   const campaignId = c.req.query('campaign_id')
   if (!campaignId) fail(422, 'Campaign ID is required.')
   const uc = z.string().uuid().safeParse(campaignId)
@@ -244,12 +280,38 @@ publicReferralsRouter.post('/referrals/submit', async (c) => {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes('campaign not found') || msg.includes('not found')) fail(404, 'Campaign not found.')
-    if (msg.includes('duplicate') || msg.includes('already exists')) fail(409, 'Duplicate referral.')
+    // Lovable parity: 409 duplicate keeps the form open (client shows a
+    // "share another friend" notice instead of closing). Match on the RPC's
+    // duplicate exception explicitly.
+    if (msg.includes('duplicate') || msg.includes('already exists') || msg.includes('23505')) {
+      return c.json({ duplicate: true, message: 'This contact has already been referred to the studio. Please share details of another friend or family member.' }, 409)
+    }
     throw e
   }
 
   if (!rows?.[0]) fail(400, 'We could not submit this referral.')
-  return c.json({ id: rows[0].submit_referral }, 201)
+  const submissionId = rows[0].submit_referral
+  // Lovable parity (best-effort, never blocks the 201): auto-create a crm_lead
+  // + notify studio admins. Failures are swallowed — the referral itself won.
+  try {
+    await withService(c.env, async (sql) => {
+      const camp = await sql<{ company_id: string }[]>`
+        select company_id from referral_campaigns where id = ${campaignId}::uuid`
+      const companyId = camp[0]?.company_id
+      if (!companyId) return
+      await sql`insert into crm_leads (company_id, name, phone, email, source, notes)
+        values (${companyId}, ${d.client_name}, ${d.client_phone ?? null},
+                ${d.client_email ?? null}, 'referral',
+                ${[`Event: ${d.event_type ?? '—'}`, `Date: ${d.event_date ?? '—'}`,
+                   d.notes ?? null].filter(Boolean).join(' · ')})`
+      await sql`insert into notifications (company_id, kind, title, body)
+        values (${companyId}, 'referral', 'New referral received',
+                ${`${d.client_name} was referred${d.event_type ? ` (${d.event_type})` : ''}.`})`
+    })
+  } catch {
+    // best-effort only
+  }
+  return c.json({ id: submissionId }, 201)
 })
 
 export { publicReferralsRouter }

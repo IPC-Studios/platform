@@ -13,25 +13,78 @@ export const clientsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
   .get('/', requireAction('clients', 'view'), async (c) => {
-    const rows = await attempt(c, 'clients.list', () =>
-      withUser(c.env, c.get('auth').userId, (sql) => sql`select * from clients order by created_at desc`),
+    const url = new URL(c.req.url)
+    const hasPaging = url.searchParams.has('page') || url.searchParams.has('page_size') || url.searchParams.has('search') || url.searchParams.has('sort')
+    if (!hasPaging) {
+      const rows = await attempt(c, 'clients.list', () =>
+        withUser(c.env, c.get('auth').userId, (sql) => sql`select * from clients order by created_at desc`),
+      )
+      if (!rows) fail(400, 'We could not load your clients.')
+      return c.json(client.array().parse(rows))
+    }
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('page_size') ?? '20') || 20))
+    const search = (url.searchParams.get('search') ?? '').trim()
+    const sort = (url.searchParams.get('sort') ?? 'recent').trim()
+    const orderBy = sort === 'name' ? 'name asc' : sort === 'city' ? 'city asc nulls last, name asc' : 'created_at desc'
+    const offset = (page - 1) * pageSize
+    const result = await attempt(c, 'clients.list.page', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const countRows = await sql<{ n: number }[]>`
+          select count(*)::int as n from clients
+          where ${search ? sql`(name ilike ${'%' + search + '%'} or coalesce(phone,'') ilike ${'%' + search + '%'} or coalesce(email,'') ilike ${'%' + search + '%'} or coalesce(city,'') ilike ${'%' + search + '%'})` : sql`true`}`
+        const rows = await sql`
+          select * from clients
+          where ${search ? sql`(name ilike ${'%' + search + '%'} or coalesce(phone,'') ilike ${'%' + search + '%'} or coalesce(email,'') ilike ${'%' + search + '%'} or coalesce(city,'') ilike ${'%' + search + '%'})` : sql`true`}
+          order by ${sql.unsafe(orderBy)} limit ${pageSize} offset ${offset}`
+        return { total: countRows[0]?.n ?? 0, rows }
+      }),
     )
-    if (!rows) fail(400, 'We could not load your clients.')
-    return c.json(client.array().parse(rows))
+    if (!result) fail(400, 'We could not load your clients.')
+    return c.json({ items: client.array().parse(result.rows), total: result.total, page, page_size: pageSize })
   })
 
   .post('/', requireAction('clients', 'create'), async (c) => {
     const parsed = createClientRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the client details and try again.')
     const auth = c.get('auth')
-    const row = await attempt(c, 'clients.create', () =>
-      withUser(c.env, auth.userId, async (sql) => {
-        const rows = await sql`
+    // Lovable parity: duplicate-by-phone returns the existing client (409 + link).
+    const phone = (parsed.data.phone ?? '').trim()
+    if (phone) {
+      const existing = await attempt(c, 'clients.dedupe', () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const rows = await sql`select * from clients where phone = ${phone} limit 1`
+          return rows[0] ?? null
+        }),
+      )
+      if (existing) {
+        return c.json({ existing_client: client.parse(existing) }, 409)
+      }
+    }
+    const row = await attempt(
+      c,
+      'clients.create',
+      () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const rows = await sql`
           insert into clients ${sql({ ...parsed.data, company_id: auth.companyId, created_by: auth.userId })}
           returning *`
-        return rows[0] ?? null
-      }),
+          return rows[0] ?? null
+        }),
+      {
+        onCode: (code) => (code === '23505' ? 'taken' : undefined),
+      },
     )
+    if (row === 'taken') {
+      const existing = await attempt(c, 'clients.dedupe.retry', () =>
+        withUser(c.env, auth.userId, async (sql) => {
+          const rows = await sql`select * from clients where phone = ${phone} limit 1`
+          return rows[0] ?? null
+        }),
+      )
+      if (existing) return c.json({ existing_client: client.parse(existing) }, 409)
+      fail(409, 'A client with this phone already exists.')
+    }
     if (!row) fail(400, 'We could not create this client.')
     const created = client.parse(row)
     await audit(c, { action: 'client.create', entityType: 'client', entityId: created.id, after: parsed.data })
@@ -48,6 +101,23 @@ export const clientsRouter = new Hono<AppEnv>()
     )
     if (!row) fail(404, 'That client was not found.')
     return c.json(client.parse(row))
+  })
+
+  // Project history for the client detail page (avoids fetching every project).
+  .get('/:id/projects', requireAction('clients', 'view'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'clients.projects', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select p.id, p.name, p.status, p.client_id, cl.name as client_name, cl.phone as client_phone,
+               p.package_cost, p.total_cost,
+               coalesce((select sum(rp.amount) from received_payments rp where rp.project_id = p.id),0) as received,
+               p.created_at, null::date as next_shoot_date, 0::int as tasks_overdue
+        from projects p left join clients cl on cl.id = p.client_id
+        where p.client_id = ${id} order by p.created_at desc`),
+    )
+    if (!rows) fail(400, 'We could not load project history.')
+    const { projectListItem } = await import('@ipc/contracts')
+    return c.json(projectListItem.array().parse(rows))
   })
 
   .patch('/:id', requireAction('clients', 'edit'), async (c) => {

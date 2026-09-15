@@ -35,7 +35,11 @@ export const dataRouter = new Hono<AppEnv>()
                  d.primary_status, d.backup_status,
                  d.primary_location_id, pl.name as primary_location_name,
                  d.backup_location_id, bl.name as backup_location_name,
-                 d.card_count, d.size_gb, d.verified_at, d.created_at
+                 d.card_count, d.size_gb, d.verified_at, d.created_at,
+                 d.folder_path, d.cloud_link, coalesce(d.file_count,0) as file_count,
+                 d.date_received, d.received_by_name, d.notes, coalesce(d.data_status,'pending') as data_status,
+                 coalesce(d.issue_found,false) as issue_found, coalesce(d.is_not_required,false) as is_not_required,
+                 d.team_member_name, d.requirement_name
           from shoot_data_records d
           left join projects p on p.id = d.project_id
           left join storage_locations pl on pl.id = d.primary_location_id
@@ -54,7 +58,7 @@ export const dataRouter = new Hono<AppEnv>()
       withUser(
         c.env,
         c.get('auth').userId,
-        (sql) => sql`select id, name, kind from storage_locations order by name`,
+        (sql) => sql`select id, name, kind, location_type, capacity_gb, owner, notes, coalesce(is_active,true) as is_active from storage_locations order by name`,
       ),
     )
     if (!rows) fail(400, 'We could not load storage locations.')
@@ -69,7 +73,7 @@ export const dataRouter = new Hono<AppEnv>()
       withUser(c.env, auth.userId, async (sql) => {
         const rows = await sql`
           insert into storage_locations ${sql({ ...parsed.data, company_id: auth.companyId })}
-          returning id, name, kind`
+          returning id, name, kind, location_type, capacity_gb, owner, notes, is_active`
         return rows[0] ?? null
       }),
     )
@@ -88,7 +92,7 @@ export const dataRouter = new Hono<AppEnv>()
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
           update storage_locations set ${sql(parsed.data)} where id = ${id}
-          returning id, name, kind`
+          returning id, name, kind, location_type, capacity_gb, owner, notes, is_active`
         return rows[0] ?? null
       }),
     )
@@ -130,7 +134,11 @@ export const dataRouter = new Hono<AppEnv>()
                  d.shoot_id, d.primary_status, d.backup_status,
                  d.primary_location_id, pl.name as primary_location_name,
                  d.backup_location_id, bl.name as backup_location_name,
-                 d.card_count, d.size_gb, d.verified_at, d.created_at
+                 d.card_count, d.size_gb, d.verified_at, d.created_at,
+                 d.folder_path, d.cloud_link, coalesce(d.file_count,0) as file_count,
+                 d.date_received, d.received_by_name, d.notes, coalesce(d.data_status,'pending') as data_status,
+                 coalesce(d.issue_found,false) as issue_found, coalesce(d.is_not_required,false) as is_not_required,
+                 d.team_member_name, d.requirement_name
           from shoot_data_records d
           left join storage_locations pl on pl.id = d.primary_location_id
           left join storage_locations bl on bl.id = d.backup_location_id
@@ -158,7 +166,11 @@ export const dataRouter = new Hono<AppEnv>()
                  d.shoot_id, d.primary_status, d.backup_status,
                  d.primary_location_id, pl.name as primary_location_name,
                  d.backup_location_id, bl.name as backup_location_name,
-                 d.card_count, d.size_gb, d.verified_at, d.created_at
+                 d.card_count, d.size_gb, d.verified_at, d.created_at,
+                 d.folder_path, d.cloud_link, coalesce(d.file_count,0) as file_count,
+                 d.date_received, d.received_by_name, d.notes, coalesce(d.data_status,'pending') as data_status,
+                 coalesce(d.issue_found,false) as issue_found, coalesce(d.is_not_required,false) as is_not_required,
+                 d.team_member_name, d.requirement_name
           from shoot_data_records d
           left join storage_locations pl on pl.id = d.primary_location_id
           left join storage_locations bl on bl.id = d.backup_location_id

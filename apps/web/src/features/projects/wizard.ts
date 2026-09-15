@@ -86,6 +86,12 @@ export interface PaymentDraft {
   paid_on: string
   mode: string
   reference: string
+  // Lovable parity: status/description/GST (all optional, additive).
+  status: 'paid' | 'pending'
+  description: string
+  is_gst: boolean
+  gst_number: string
+  notes: string
 }
 
 export interface ProjectDraft {
@@ -95,6 +101,10 @@ export interface ProjectDraft {
   client_id: string
   new_client_name: string
   new_client_phone: string
+  new_client_email: string
+  new_client_address: string
+  new_client_notes: string
+  new_client_relation: string
   package_cost: string
   shoots: ShootDraft[]
   deliverables: DeliverableDraft[]
@@ -107,6 +117,10 @@ export const EMPTY_DRAFT: ProjectDraft = {
   client_id: '',
   new_client_name: '',
   new_client_phone: '',
+  new_client_email: '',
+  new_client_address: '',
+  new_client_notes: '',
+  new_client_relation: '',
   package_cost: '',
   shoots: [],
   deliverables: [],
@@ -225,7 +239,7 @@ export const newDeliverable = (): DeliverableDraft => ({
   lead_days: '',
 })
 
-export const newPayment = (): PaymentDraft => ({ amount: '', paid_on: '', mode: '', reference: '' })
+export const newPayment = (): PaymentDraft => ({ amount: '', paid_on: '', mode: '', reference: '', status: 'paid', description: '', is_gst: false, gst_number: '', notes: '' })
 
 /** '' → 0, so a blank money field never becomes NaN in a total. */
 export const money = (v: string): number => {
@@ -302,12 +316,24 @@ export type StepErrors = Partial<Record<WizardStep, string>>
  * What still blocks each step. Only the client step is ever truly required —
  * a studio that just wants the project on the board should not have to invent
  * shoots or line items to get past step 2.
+ *
+ * Lovable parity: new-client phone is required + validated (min 7 digits),
+ * email/address/notes/relation travel with the inline create.
  */
 export function stepErrors(draft: ProjectDraft): StepErrors {
   const errors: StepErrors = {}
 
   if (!draft.name.trim()) errors.client = 'Give the project a name.'
   else if (!draft.client_id && !draft.new_client_name.trim()) errors.client = 'Pick or add a client.'
+  else if (!draft.client_id) {
+    const phoneDigits = draft.new_client_phone.replace(/\D/g, '')
+    if (!phoneDigits) errors.client = 'New client needs a phone number.'
+    else if (phoneDigits.length < 7) errors.client = 'That phone number looks too short.'
+    if (!errors.client && draft.new_client_email.trim()) {
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.new_client_email.trim())
+      if (!emailOk) errors.client = 'That email address does not look right.'
+    }
+  }
 
   if (draft.shoots.some((s) => !s.name.trim())) errors.shoots = 'Every shoot needs a name.'
 
@@ -379,7 +405,31 @@ export function toProjectRequest(draft: ProjectDraft, clientId: string): CreateP
         ...(p.paid_on ? { paid_on: p.paid_on } : {}),
         ...(p.mode.trim() ? { mode: p.mode.trim() } : {}),
         ...(p.reference.trim() ? { reference: p.reference.trim() } : {}),
+        ...(p.status && p.status !== 'paid' ? { status: p.status } : {}),
+        ...((p.description.trim() || p.notes.trim()) ? { description: (p.description.trim() || p.notes.trim()) } : {}),
+        ...(p.notes.trim() ? { notes: p.notes.trim() } : {}),
+        ...(p.is_gst ? { is_gst: true } : {}),
+        ...(p.gst_number.trim() ? { gst_number: p.gst_number.trim() } : {}),
       })),
+  }
+}
+
+/** Inline new-client payload (email/address/notes/relation travel with the create). */
+export function toNewClientRequest(draft: ProjectDraft): {
+  name: string
+  phone: string
+  email?: string
+  address?: string
+  notes?: string
+  relation?: string
+} {
+  return {
+    name: draft.new_client_name.trim(),
+    phone: draft.new_client_phone.trim(),
+    ...(draft.new_client_email.trim() ? { email: draft.new_client_email.trim() } : {}),
+    ...(draft.new_client_address.trim() ? { address: draft.new_client_address.trim() } : {}),
+    ...(draft.new_client_notes.trim() ? { notes: draft.new_client_notes.trim() } : {}),
+    ...(draft.new_client_relation.trim() ? { relation: draft.new_client_relation.trim() } : {}),
   }
 }
 
@@ -738,6 +788,7 @@ export function loadDraft(): StoredDraft | null {
         ...draft,
         shoots: draft.shoots.map((s) => ({ ...newShoot(), ...s })),
         deliverables: draft.deliverables.map((d) => ({ ...newDeliverable(), ...d })),
+        payments: (draft.payments ?? []).map((p) => ({ ...newPayment(), ...p })),
       },
       savedAt: parsed.savedAt,
     }

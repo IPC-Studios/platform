@@ -239,12 +239,18 @@ function RoleRowActions({ role }: { role: EmployeeRole }) {
   const confirm = useConfirm()
 
   async function onDelete() {
+    // Parity with Lovable: an assigned role cannot be deleted outright — unassign first.
+    if (role.member_count > 0) {
+      await confirm({
+        title: `Cannot delete ${role.type_name} yet`,
+        description: `${role.member_count} member${role.member_count === 1 ? '' : 's'} still hold${role.member_count === 1 ? 's' : ''} this role. Remove it from everyone first, then delete.`,
+        confirmLabel: 'Understood',
+      })
+      return
+    }
     const yes = await confirm({
       title: `Delete the ${role.type_name} role?`,
-      description:
-        role.member_count > 0
-          ? `${role.member_count} member${role.member_count === 1 ? '' : 's'} will lose this role. Their other roles and bookings stay.`
-          : 'Nobody holds this role.',
+      description: 'Nobody holds this role.',
       confirmLabel: 'Delete',
       destructive: true,
     })
@@ -338,9 +344,13 @@ function RoleDialog({ role }: { role?: EmployeeRole }) {
               }}
               placeholder="photographer"
               className="font-mono"
+              disabled={editing}
+              title={editing ? 'The code is immutable after creation — other records store it.' : undefined}
             />
             <p className="text-xs text-muted-foreground">
-              Lowercase letters, numbers and underscores.
+              {editing
+                ? 'The code cannot be changed after creation.'
+                : 'Lowercase letters, numbers and underscores.'}
             </p>
           </div>
           <div className="flex flex-col gap-1.5">

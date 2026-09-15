@@ -1,0 +1,104 @@
+import { z } from 'zod'
+import { uuid, isoDateTime } from './shared/primitives'
+
+/**
+ * Facebook (Meta) parity — minimal viable. OAuth URLs are derived from the
+ * existing META_* env; page + import state lives in fb_pages /
+ * fb_lead_imports (migration 0100). Tokens are never returned to the client.
+ */
+
+export const fbConnectionStatus = z.enum(['active', 'expired', 'revoked', 'error'])
+export type FbConnectionStatus = z.infer<typeof fbConnectionStatus>
+
+export const fbConnectUrlResponse = z.object({
+  connect_url: z.string().nullable(),
+  app_id: z.string().nullable(),
+  redirect_uri: z.string().nullable(),
+  missing_config: z.array(z.string()).default([]),
+})
+export type FbConnectUrlResponse = z.infer<typeof fbConnectUrlResponse>
+
+export const fbStatusResponse = z.object({
+  connected: z.boolean(),
+  page_count: z.number().int(),
+  connected_page_count: z.number().int(),
+  webhook_subscribed_count: z.number().int().default(0),
+  missing_config: z.array(z.string()).default([]),
+  last_synced_at: isoDateTime.nullable().default(null),
+  last_error: z.string().nullable().default(null),
+})
+export type FbStatusResponse = z.infer<typeof fbStatusResponse>
+
+export const fbPage = z.object({
+  id: uuid,
+  page_id: z.string(),
+  page_name: z.string(),
+  category: z.string().nullable(),
+  is_connected: z.boolean(),
+  webhook_subscribed: z.boolean(),
+  last_synced_at: isoDateTime.nullable(),
+  last_error: z.string().nullable(),
+  created_at: isoDateTime,
+})
+export type FbPage = z.infer<typeof fbPage>
+
+export const fbPageConnectRequest = z.object({
+  page_id: z.string().trim().min(1).max(64),
+  page_name: z.string().trim().min(1).max(160).optional(),
+})
+export type FbPageConnectRequest = z.infer<typeof fbPageConnectRequest>
+
+export const fbTokenRequest = z.object({
+  /** Manual long-lived page/user token (used when OAuth is not configured). */
+  token: z.string().trim().min(10).max(2000),
+})
+export type FbTokenRequest = z.infer<typeof fbTokenRequest>
+
+/** GET /crm/sources/:id/leads — the per-source FB import log. */
+export const fbImportStatus = z.enum(['imported', 'duplicate', 'failed', 'pending'])
+export type FbImportStatus = z.infer<typeof fbImportStatus>
+
+export const fbLeadImport = z.object({
+  id: uuid,
+  source_id: uuid.nullable(),
+  page_id: z.string().nullable(),
+  page_name: z.string().nullable(),
+  leadgen_id: z.string().nullable(),
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  status: fbImportStatus,
+  error: z.string().nullable(),
+  lead_id: uuid.nullable(),
+  created_at: isoDateTime,
+})
+export type FbLeadImport = z.infer<typeof fbLeadImport>
+
+export const fbImportsQuery = z.object({
+  search: z.string().trim().max(200).optional(),
+  status: fbImportStatus.optional(),
+  page: z.string().trim().max(64).optional(),
+  date_from: isoDateTime.optional(),
+  date_to: isoDateTime.optional(),
+  sort: z.enum(['newest', 'oldest']).default('newest'),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+})
+export type FbImportsQuery = z.infer<typeof fbImportsQuery>
+
+export const fbImportsSummary = z.object({
+  total: z.number().int(),
+  imported: z.number().int(),
+  duplicates: z.number().int(),
+  failed: z.number().int(),
+  pending: z.number().int(),
+})
+export type FbImportsSummary = z.infer<typeof fbImportsSummary>
+
+export const fbTestImportRequest = z.object({
+  name: z.string().trim().max(160).optional(),
+  phone: z.string().trim().min(6).max(30),
+  email: z.string().trim().max(200).optional(),
+  page_id: z.string().trim().max(64).optional(),
+  page_name: z.string().trim().max(160).optional(),
+})
+export type FbTestImportRequest = z.infer<typeof fbTestImportRequest>

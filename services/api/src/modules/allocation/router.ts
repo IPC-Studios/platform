@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { bookSlotRequest, setSlotStatusRequest, setSlotCostRequest, teamSlot } from '@ipc/contracts'
+import { bookSlotRequest, setSlotStatusRequest, setSlotCostRequest, setSlotDataRequest, teamSlot, updateSlotRequest } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireAction } from '../../middleware/permissions'
@@ -19,7 +19,9 @@ export const allocationRouter = new Hono<AppEnv>()
         c.get('auth').userId,
         (sql) => sql`
           select s.id, s.user_id, s.shoot_id, s.service_name, s.start_at, s.end_at, s.status,
-                 s.estimated_cost, s.final_cost, s.cost_status, s.cost_notes, u.name as user_name
+                 s.estimated_cost, s.final_cost, s.cost_status, s.cost_notes,
+                 coalesce(s.data_required, false) as data_required,
+                 s.data_not_required_reason, u.name as user_name
           from team_assignment_slots s
           left join users u on u.user_id = s.user_id
           order by s.start_at`,
@@ -100,5 +102,65 @@ export const allocationRouter = new Hono<AppEnv>()
     )
     if (!ok) fail(400, 'We could not update the cost.')
     await audit(c, { action: 'allocation.set_cost', entityType: 'team_assignment_slot', entityId: id, after: d })
+    return c.body(null, 204)
+  })
+
+  // Edit a booking's who/when/what (member, shoot, service, time window).
+  // Overlap guard runs in the trigger — a double-booked move is refused
+  // with 409, same as creating one.
+  .patch('/:id', requireAction('projects', 'edit'), async (c) => {
+    const parsed = updateSlotRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the booking details.')
+    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    const id = uuidParam(c)
+    const d = parsed.data
+    const outcome = await attempt(
+      c,
+      'allocation.update',
+      () =>
+        withUser(c.env, c.get('auth').userId, async (sql) => {
+          const rows = await sql<{ id: string }[]>`
+            update team_assignment_slots set ${sql({
+              ...(d.user_id !== undefined ? { user_id: d.user_id } : {}),
+              ...(d.shoot_id !== undefined ? { shoot_id: d.shoot_id } : {}),
+              ...(d.service_name !== undefined ? { service_name: d.service_name } : {}),
+              ...(d.start_at !== undefined ? { start_at: d.start_at } : {}),
+              ...(d.end_at !== undefined ? { end_at: d.end_at } : {}),
+            })} where id = ${id} returning id`
+          return rows.length ? ('ok' as const) : ('missing' as const)
+        }),
+      {
+        onCode: (code, err) =>
+          code === '23P01' || String((err as { message?: string })?.message ?? '').includes('double_booking')
+            ? 'double_booked'
+            : undefined,
+      },
+    )
+    if (outcome === 'double_booked') fail(409, 'That member is already booked during this time.')
+    if (outcome === 'missing') fail(404, 'We could not find that booking.')
+    if (!outcome) fail(400, 'We could not update the booking.')
+    await audit(c, { action: 'allocation.update', entityType: 'team_assignment_slot', entityId: id, after: d })
+    return c.body(null, 204)
+  })
+
+  // Data-required flag: does this booking still owe footage/cards?
+  .post('/:id/data', requireAction('projects', 'edit'), async (c) => {
+    const parsed = setSlotDataRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the data requirement.')
+    const id = uuidParam(c)
+    const ok = await attempt(c, 'allocation.set_data', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`
+          update team_assignment_slots set
+            data_required = ${parsed.data.data_required},
+            data_not_required_reason = ${parsed.data.data_not_required_reason ?? null}
+          where id = ${id} returning id`,
+      ),
+    )
+    if (!ok) fail(400, 'We could not update the data requirement.')
+    if (!ok.length) fail(404, 'We could not find that booking.')
+    await audit(c, { action: 'allocation.set_data', entityType: 'team_assignment_slot', entityId: id, after: parsed.data })
     return c.body(null, 204)
   })

@@ -53,10 +53,15 @@ export const enquiryList = z.object({
 export type EnquiryList = z.infer<typeof enquiryList>
 
 export const saveEnquiryRequest = z.object({
-  name: z.string().trim().min(2).max(160),
-  phone: z.string().trim().max(40).nullish(),
-  email: z.string().trim().max(200).nullish(),
-  message: z.string().trim().max(2000).nullish(),
+  name: z.string().trim().min(1).max(120),
+  phone: z.string().trim().max(30).nullish(),
+  email: z
+    .string()
+    .trim()
+    .max(160)
+    .nullish()
+    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Email format is invalid.'),
+  message: z.string().trim().max(5000).nullish(),
   source: z.string().trim().max(60).nullish(),
   enquiry_status: z.string().trim().min(1).max(60).default('new'),
   assigned_to: uuid.nullish(),
@@ -64,9 +69,13 @@ export const saveEnquiryRequest = z.object({
 export type SaveEnquiryRequest = z.infer<typeof saveEnquiryRequest>
 
 export const convertEnquiryRequest = z.object({
-  notes: z.string().trim().max(2000).nullish(),
+  notes: z.string().trim().max(5000).nullish(),
 })
 export type ConvertEnquiryRequest = z.infer<typeof convertEnquiryRequest>
 
-export const convertEnquiryResponse = z.object({ lead_id: uuid })
+export const convertEnquiryResponse = z.object({
+  lead_id: uuid,
+  already_converted: z.boolean().default(false),
+  linked_existing: z.boolean().default(false),
+})
 export type ConvertEnquiryResponse = z.infer<typeof convertEnquiryResponse>

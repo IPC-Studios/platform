@@ -69,6 +69,18 @@ function Settings() {
 
       <BrandIdentityCard readOnly={!isOwner} />
 
+      <Section
+        title="Advanced hubs"
+        description="Task bundles, attendance geo-fence, lookups and secondary tools live on their own pages."
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button variant="outline" asChild><Link to="/settings/task-bundles">Task Bundles</Link></Button>
+          <Button variant="outline" asChild><Link to="/settings/attendance-location">Attendance Location</Link></Button>
+          <Button variant="outline" asChild><Link to="/settings/lookups">Lookups</Link></Button>
+          <Button variant="outline" asChild><Link to="/settings/advanced">Advanced Tools</Link></Button>
+        </div>
+      </Section>
+
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <ThemeSummaryCard readOnly={!isOwner} className="lg:col-span-2" />
         <SecurityCard />
@@ -368,7 +380,10 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
       website: data.website ?? '',
       city: data.city ?? '',
       state: data.state ?? '',
+      country: data.country ?? '',
       avatar_url: data.avatar_url ?? '',
+      invoice_logo_url: (data as unknown as Record<string, unknown>)['invoice_logo_url'] as string ?? '',
+      document_footer_note: (data as unknown as Record<string, unknown>)['document_footer_note'] as string ?? '',
       invoice_number_prefix: data.invoice_number_prefix,
       invoice_next_number: data.invoice_next_number,
       quote_number_prefix: data.quote_number_prefix,
@@ -432,6 +447,37 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
               placeholder="https://…/logo.png"
             />
           </Field>
+          <Field label="Invoice logo URL" hint="Separate logo for invoices — falls back to the logo above.">
+            <Input
+              value={(form as unknown as Record<string, unknown>)['invoice_logo_url'] as string ?? ''}
+              onChange={(e) => set({ invoice_logo_url: e.target.value } as UpdateCompanyRequest)}
+              disabled={readOnly}
+              placeholder="https://…/invoice-logo.png"
+            />
+          </Field>
+          {!readOnly && (
+            <div className="sm:col-span-2">
+              <Field label="Upload logo (stub)" hint="PNG, JPG, WEBP or SVG. Max 5 MB. Stored as a URL — pick a file to fill the fields above.">
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (!f) return
+                    if (f.size > 5 * 1024 * 1024) {
+                      toast.error('File exceeds 5 MB limit.')
+                      return
+                    }
+                    // Stub: no storage bucket wired yet — record the file name as a
+                    // placeholder URL so the flow is exercised end to end.
+                    const stub = `upload://${f.name}`
+                    set({ avatar_url: stub } as UpdateCompanyRequest)
+                    toast.message('Upload stub: logo URL filled — wire storage to persist the file.')
+                  }}
+                />
+              </Field>
+            </div>
+          )}
           <Field label="City">
             <Input
               value={form.city ?? ''}
@@ -444,6 +490,22 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
               value={form.state ?? ''}
               onChange={(e) => set({ state: e.target.value })}
               disabled={readOnly}
+            />
+          </Field>
+          <Field label="Country">
+            <Input
+              value={form.country ?? ''}
+              onChange={(e) => set({ country: e.target.value })}
+              disabled={readOnly}
+              placeholder="India"
+            />
+          </Field>
+          <Field label="Document footer note" hint="Printed at the bottom of quotations, invoices and terms.">
+            <Input
+              value={(form as unknown as Record<string, unknown>)['document_footer_note'] as string ?? ''}
+              onChange={(e) => set({ document_footer_note: e.target.value } as UpdateCompanyRequest)}
+              disabled={readOnly}
+              placeholder="Thank you for choosing us."
             />
           </Field>
         </div>

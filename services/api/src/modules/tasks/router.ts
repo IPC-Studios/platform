@@ -39,6 +39,11 @@ interface RawTask {
   custom_priority_code: string | null
   custom_priority_label: string | null
   custom_priority_tone: string | null
+  custom_status_code: string | null
+  custom_status_label: string | null
+  deliverable_id: string | null
+  parent_task_id: string | null
+  voice_note_url: string | null
   assignee_names: string[]
   assignee_ids: string[]
 }
@@ -50,11 +55,14 @@ function toItems(rows: RawTask[], order: Map<string, number>) {
 // Flat select with the project name joined in (was PostgREST `projects(name)`).
 // `assignee` narrows to tasks assigned to one person, for an admin previewing
 // what a specific team member's board looks like. `project` narrows to one
-// project, for its detail page's own Tasks tab.
-const selectTasks = (sql: TransactionSql, assignee?: string, project?: string) => sql<RawTask[]>`
+// project, for its detail page's own Tasks tab. `deliverable` narrows to one
+// deliverable (per-deliverable tasks UI).
+const selectTasks = (sql: TransactionSql, assignee?: string, project?: string, deliverable?: string) => sql<RawTask[]>`
   select t.id, t.title, t.description, t.status, t.priority, t.due_date, t.project_id,
          p.name as project_name,
          cp.code as custom_priority_code, cp.label as custom_priority_label, cp.tone as custom_priority_tone,
+         t.custom_status_code, cs.label as custom_status_label,
+         t.deliverable_id, t.parent_task_id, t.voice_note_url,
          coalesce(
            array_agg(u.name order by u.name) filter (where u.user_id is not null),
            '{}'::text[]
@@ -68,9 +76,11 @@ const selectTasks = (sql: TransactionSql, assignee?: string, project?: string) =
   left join task_assignees a on a.task_id = t.id
   left join users u on u.user_id = a.user_id
   left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
+  left join company_deliverable_statuses cs on cs.company_id = t.company_id and cs.code = t.custom_status_code
   where ${assignee ? sql`exists (select 1 from task_assignees a2 where a2.task_id = t.id and a2.user_id = ${assignee})` : sql`true`}
     and ${project ? sql`t.project_id = ${project}` : sql`true`}
-  group by t.id, p.name, cp.code, cp.label, cp.tone
+    and ${deliverable ? sql`t.deliverable_id = ${deliverable}` : sql`true`}
+  group by t.id, p.name, cp.code, cp.label, cp.tone, cs.label
   order by t.created_at desc`
 
 export const tasksRouter = new Hono<AppEnv>()
@@ -155,17 +165,23 @@ export const tasksRouter = new Hono<AppEnv>()
   })
 
   .patch('/my/:id/status', async (c) => {
-    const parsed = updateTaskStatusRequest.safeParse(await c.req.json().catch(() => ({})))
-    if (!parsed.success) fail(422, 'Invalid status.')
+    // Lovable parity: a voice-note link can ride along with the status move.
+    const withVoice = updateTaskStatusRequest
+      .extend({ voice_note_url: z.string().trim().max(500).nullable().optional() })
+      .safeParse(await c.req.json().catch(() => ({})))
+    if (!withVoice.success) fail(422, 'Invalid status.')
     const id = uuidParam(c)
     const ok = await attempt(c, 'tasks.my_status', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        await sql`select update_my_task_status(p_task_id => ${id}, p_status => ${parsed.data.status})`
+        await sql`select update_my_task_status(p_task_id => ${id}, p_status => ${withVoice.data.status})`
+        if (withVoice.data.voice_note_url !== undefined) {
+          await sql`update tasks set voice_note_url = ${withVoice.data.voice_note_url} where id = ${id}`
+        }
         return true
       }),
     )
     if (!ok) fail(403, 'You can only update tasks assigned to you.')
-    await audit(c, { action: 'task.status', entityType: 'task', entityId: id, after: parsed.data })
+    await audit(c, { action: 'task.status', entityType: 'task', entityId: id, after: withVoice.data })
     return c.body(null, 204)
   })
 
@@ -207,7 +223,8 @@ export const tasksRouter = new Hono<AppEnv>()
     const ac = assignee ? z.string().uuid().safeParse(assignee) : null
     if (assignee && !ac?.success) fail(422, 'Invalid assignee id.')
     const project = uuidQuery(c, 'project_id') ?? undefined
-    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, (sql) => selectTasks(sql, assignee, project)))
+    const deliverable = uuidQuery(c, 'deliverable_id') ?? undefined
+    const rows = await attempt(c, 'tasks.list', () => withUser(c.env, c.get('auth').userId, (sql) => selectTasks(sql, assignee, project, deliverable)))
     if (!rows) fail(400, 'We could not load tasks.')
     return c.json(list.parse(toItems(rows, new Map())))
   })
@@ -229,13 +246,21 @@ export const tasksRouter = new Hono<AppEnv>()
             p_assignees => ${d.assignees}::uuid[]
           ) as id`
         const created = rows[0]?.id ?? null
-        // The RPC predates descriptions and custom priorities; set them
-        // alongside rather than changing a signature the board and the
-        // generator also call.
-        if (created && (d.description || d.custom_priority_code !== undefined)) {
+        // The RPC predates descriptions, custom priorities, voice notes and
+        // subtask links; set them alongside rather than changing a signature
+        // the board and the generator also call.
+        if (
+          created &&
+          (d.description ||
+            d.custom_priority_code !== undefined ||
+            d.voice_note_url !== undefined ||
+            d.parent_task_id !== undefined)
+        ) {
           await sql`update tasks set ${sql({
             ...(d.description ? { description: d.description } : {}),
             ...(d.custom_priority_code !== undefined ? { custom_priority_code: d.custom_priority_code } : {}),
+            ...(d.voice_note_url !== undefined ? { voice_note_url: d.voice_note_url } : {}),
+            ...(d.parent_task_id !== undefined ? { parent_task_id: d.parent_task_id } : {}),
           })} where id = ${created}`
         }
         return created
@@ -431,4 +456,38 @@ export const tasksRouter = new Hono<AppEnv>()
     if (created === null) fail(400, 'We could not apply this bundle.')
     await audit(c, { action: 'task_bundle.apply', entityType: 'task_bundle', entityId: id, after: { ...d, created } })
     return c.json({ created }, 201)
+  })
+
+  // Single task for the detail dialog. Registered last so the static GET
+  // shapes above (/my, /board, /priorities, /bundles) keep matching first.
+  // RLS scopes the read: assignees see their own, managers/admins the studio's.
+  .get('/:id', async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'tasks.detail', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<RawTask[]>`
+        select t.id, t.title, t.description, t.status, t.priority, t.due_date, t.project_id,
+               p.name as project_name,
+               cp.code as custom_priority_code, cp.label as custom_priority_label, cp.tone as custom_priority_tone,
+               t.custom_status_code, cs.label as custom_status_label,
+               t.deliverable_id, t.parent_task_id, t.voice_note_url,
+               coalesce(
+                 array_agg(u.name order by u.name) filter (where u.user_id is not null),
+                 '{}'::text[]
+               ) as assignee_names,
+               coalesce(
+                 array_agg(u.user_id order by u.name) filter (where u.user_id is not null),
+                 '{}'::uuid[]
+               ) as assignee_ids
+        from tasks t
+        left join projects p on p.id = t.project_id
+        left join task_assignees a on a.task_id = t.id
+        left join users u on u.user_id = a.user_id
+        left join company_task_priorities cp on cp.company_id = t.company_id and cp.code = t.custom_priority_code
+        left join company_deliverable_statuses cs on cs.company_id = t.company_id and cs.code = t.custom_status_code
+        where t.id = ${id}
+        group by t.id, p.name, cp.code, cp.label, cp.tone, cs.label`),
+    )
+    if (!rows) fail(400, 'We could not load this task.')
+    if (!rows.length) fail(404, 'That task was not found.')
+    return c.json(taskListItem.parse({ ...rows[0], sort_order: 0 }))
   })

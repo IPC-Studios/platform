@@ -133,14 +133,16 @@ const projectDetail: ProjectDetail = {
   total_cost: 227000,
   show_quotation: true,
   created_at: '2026-06-01T10:00:00Z',
+  quotation_terms: null,
+  quotation_display_prefs: {},
   deliverables: [
     delv(uid(0xd1), 'Wedding album (40 sheets)', 'client', true, 30000),
     delv(uid(0xd2), 'Highlight film', 'client', true, 12000, [{ id: uid(0x61), name: 'Engagement shoot' }]),
     delv(uid(0xd3), 'Raw footage archive', 'internal', false, 0),
   ],
   payments: [
-    { id: uid(0xf1), amount: 100000, paid_on: '2026-06-02', mode: 'upi', reference: 'TXN9931' },
-    { id: uid(0xf2), amount: 50000, paid_on: '2026-07-15', mode: 'bank', reference: 'NEFT5521' },
+    { id: uid(0xf1), amount: 100000, paid_on: '2026-06-02', mode: 'upi', reference: 'TXN9931', status: null, description: null, is_gst: false, gst_number: null },
+    { id: uid(0xf2), amount: 50000, paid_on: '2026-07-15', mode: 'bank', reference: 'NEFT5521', status: null, description: null, is_gst: false, gst_number: null },
   ],
 }
 
@@ -1818,6 +1820,8 @@ function fakeProject(
     // show rather than a wall of zeroes.
     received: Math.round(total * 0.4),
     created_at: '2026-06-01T10:00:00Z',
+    next_shoot_date: null,
+    tasks_overdue: 0,
   }
 }
 

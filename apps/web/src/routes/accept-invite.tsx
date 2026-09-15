@@ -29,7 +29,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
  * so accepting signs them straight in.
  */
 export function AcceptInvitePage() {
-  const { refresh } = useAuth()
+  const { refresh, session, signOut } = useAuth()
   const navigate = useNavigate()
   const token = new URLSearchParams(window.location.search).get('token')
   const [password, setPassword] = useState('')
@@ -46,6 +46,16 @@ export function AcceptInvitePage() {
     enabled: !!token,
     retry: false,
   })
+
+  // Lovable parity: a signed-in user opening an invite for a different email
+  // sees the mismatch and can recover by signing out first.
+  const signedEmail = session?.email?.toLowerCase() ?? null
+  const inviteEmail = preview.data?.email?.toLowerCase() ?? null
+  const differentEmail = !!session && !!inviteEmail && !!signedEmail && signedEmail !== inviteEmail
+
+  async function signOutDifferent() {
+    await signOut()
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -121,6 +131,30 @@ export function AcceptInvitePage() {
                   for {preview.data?.email}.
                 </p>
 
+                {session && !differentEmail && (
+                  <p className="mt-3 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                    You&apos;re signed in as {session.email}. Accepting links this invitation to
+                    your current session — or sign out first to accept as a different email.
+                  </p>
+                )}
+                {differentEmail && (
+                  <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+                    <p className="font-medium">Different email</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      This invite is for {preview.data?.email}, but you&apos;re signed in as{' '}
+                      {session?.email}. Sign out and continue as the invited email.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2"
+                      onClick={() => void signOutDifferent()}
+                    >
+                      Sign out and use a different email
+                    </Button>
+                  </div>
+                )}
+
                 <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
                     <Label>Password</Label>
@@ -147,7 +181,7 @@ export function AcceptInvitePage() {
               {error}
             </p>
           )}
-                  <Button type="submit" disabled={busy}>
+                  <Button type="submit" disabled={busy || differentEmail}>
                     {busy ? 'Setting up…' : 'Accept invitation'}
                   </Button>
                 </form>

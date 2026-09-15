@@ -7,11 +7,14 @@ import {
   updateInvitationRequest,
   directoryMember,
   employeeRole,
+  generateMonthlySalariesRequest,
   invitation,
   invitationLink,
   libraryRole,
+  monthlySalaryList,
   teamMember,
   updateMemberRequest,
+  updateMonthlySalaryRequest,
   upsertEmployeeRoleRequest,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
@@ -69,7 +72,20 @@ export const teamRouter = new Hono<AppEnv>()
   // The directory carries compensation, so the row is assembled once and then
   // trimmed per caller: only team_salaries sees `salary`. Filtering client-side
   // would ship every studio's payroll to every manager's browser.
+  //
+  // Lovable parity: page/page_size/search/status are honoured on the server.
+  // Without page/page_size the historical array shape is returned untouched;
+  // with them a { items, total, page, page_size } page is returned instead.
   .get('/directory', requireModule('team_directory'), async (c) => {
+    const pageRaw = c.req.query('page')
+    const sizeRaw = c.req.query('page_size')
+    const search = c.req.query('search')?.trim().toLowerCase() ?? ''
+    const status = c.req.query('status')?.trim() ?? ''
+    const paged = pageRaw !== undefined || sizeRaw !== undefined
+    const page = Math.max(1, Number(pageRaw ?? 1) || 1)
+    const pageSize = Math.min(200, Math.max(1, Number(sizeRaw ?? 25) || 25))
+    const offset = (page - 1) * pageSize
+
     const rows = await attempt(c, 'team.directory', () =>
       withUser(
         c.env,
@@ -78,6 +94,7 @@ export const teamRouter = new Hono<AppEnv>()
           select
             u.user_id, u.name, u.email, u.role, u.phone, u.alternate_phone, u.status,
             u.engagement_type, u.login_enabled, u.salary, u.address, u.created_at,
+            u.freelancer_rate,
             u.payout_type, u.commission_pct, u.commission_basis, u.stipend_amount,
             u.pay_effective_from, u.pay_effective_to, u.compensation_notes,
             u.payment_type, u.pay_components, u.payment_status,
@@ -93,25 +110,41 @@ export const teamRouter = new Hono<AppEnv>()
           left join employee_role_assignments era on era.user_id = u.user_id
           left join employee_roles er on er.id = era.role_id
           where u.deleted_at is null
+            and ${status ? sql`u.status = ${status}` : sql`true`}
+            and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`} or coalesce(u.alternate_phone, '') like ${`%${search}%`})` : sql`true`}
           group by u.user_id
-          order by u.name`,
+          order by u.name
+          ${paged ? sql`limit ${pageSize} offset ${offset}` : sql``}`,
       ),
     )
     if (!rows) fail(400, 'We could not load the team.')
 
     const canSeeSalary = c.get('auth').access.hasModule('team_salaries')
     const list = directoryMember.array().parse(rows)
-    return c.json(
-      canSeeSalary
-        ? list
-        : list.map((m) => ({
-            ...m,
-            salary: null,
-            commission_pct: null,
-            stipend_amount: null,
-            compensation_notes: null,
-          })),
+    const shaped = canSeeSalary
+      ? list
+      : list.map((m) => ({
+          ...m,
+          salary: null,
+          commission_pct: null,
+          stipend_amount: null,
+          compensation_notes: null,
+        }))
+    if (!paged) return c.json(shaped)
+
+    const counted = await attempt(c, 'team.directory_count', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ n: string }[]>`
+          select count(*)::text as n from users u
+          where u.deleted_at is null
+            and ${status ? sql`u.status = ${status}` : sql`true`}
+            and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`} or coalesce(u.alternate_phone, '') like ${`%${search}%`})` : sql`true`}`,
+      ),
     )
+    const total = Number(counted?.[0]?.n ?? shaped.length)
+    return c.json({ items: shaped, total, page, page_size: pageSize })
   })
 
   // The catalogue behind the "add from the library" chips. Declared above
@@ -191,22 +224,34 @@ export const teamRouter = new Hono<AppEnv>()
         withUser(
           c.env,
           c.get('auth').userId,
+          // role_code is immutable after creation — other records store it, so only
+          // type_name/stage are mutable. The code is still validated but ignored.
           (sql) => sql<{ id: string }[]>`
             update employee_roles
-               set type_name = ${type_name}, role_code = ${role_code}, stage = ${stage ?? null}
-             where id = ${id} returning id`,
+               set type_name = ${type_name}, stage = ${stage ?? null}
+              where id = ${id} returning id`,
         ),
       { onCode: duplicateCode },
     )
     if (rows === 'duplicate') fail(409, 'A role with that code already exists.')
     if (!rows) fail(400, 'We could not update this role.')
     if (!rows.length) fail(404, 'We could not find that role.')
-    await audit(c, { action: 'role.update', entityType: 'employee_role', entityId: id, after: parsed.data })
+    await audit(c, { action: 'role.update', entityType: 'employee_role', entityId: id, after: { type_name, role_code, stage } })
     return c.json({ ok: true })
   })
 
   .delete('/roles/:id', requireOwner(), async (c) => {
     const id = uuidParam(c)
+    // Parity with Lovable: assigned roles cannot be deleted outright.
+    const assigned = await attempt(c, 'team.role_assigned_check', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql<{ n: string }[]>`select count(*)::text as n from employee_role_assignments where role_id = ${id}`,
+      ),
+    )
+    if (assigned?.[0] && Number(assigned[0].n) > 0)
+      fail(409, 'This role is still assigned to team members. Remove it from everyone first.')
     const rows = await attempt(c, 'team.role_delete', () =>
       withUser(
         c.env,
@@ -268,6 +313,7 @@ export const teamRouter = new Hono<AppEnv>()
       create_login,
       engagement_type,
       salary,
+      freelancer_rate,
       address,
       role_ids,
       payout_type,
@@ -313,6 +359,7 @@ export const teamRouter = new Hono<AppEnv>()
               employee_type: role === 'employee' ? 1 : 2,
               engagement_type,
               salary: salary ?? null,
+              freelancer_rate: freelancer_rate ?? null,
               address: address ?? null,
               payout_type: payout_type ?? null,
               commission_pct: commission_pct ?? null,
@@ -380,7 +427,7 @@ export const teamRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not update this member.')
     if (!rows.length) fail(404, 'We could not find that team member.')
     // Pay is sensitive: record that it changed, not what it changed to.
-    const { salary, commission_pct, stipend_amount, compensation_notes, ...rest } = patch
+    const { salary, freelancer_rate, commission_pct, stipend_amount, compensation_notes, ...rest } = patch
     await audit(c, {
       action: 'member.update',
       entityType: 'user',
@@ -388,6 +435,7 @@ export const teamRouter = new Hono<AppEnv>()
       after: {
         ...rest,
         ...(salary !== undefined ||
+        freelancer_rate !== undefined ||
         commission_pct !== undefined ||
         stipend_amount !== undefined ||
         compensation_notes !== undefined ||
@@ -401,9 +449,15 @@ export const teamRouter = new Hono<AppEnv>()
 
   // Soft delete: the person stays on past shoots, tasks and payouts. Their
   // access dies at the next `authenticate()`, which reads deleted_at.
+  // An optional { reason } body is recorded in the audit trail (Lovable parity).
   .delete('/members/:id', requireOwner(), async (c) => {
     const id = uuidParam(c)
     if (id === c.get('auth').userId) fail(409, 'You cannot remove your own account.')
+    const body = await c.req.json().catch(() => ({}))
+    const reason =
+      body && typeof body === 'object' && typeof (body as { reason?: unknown }).reason === 'string'
+        ? ((body as { reason: string }).reason.trim().slice(0, 500) || null)
+        : null
 
     const rows = await attempt(c, 'team.member_remove', () =>
       withUser(
@@ -422,7 +476,7 @@ export const teamRouter = new Hono<AppEnv>()
     await attempt(c, 'team.member_remove_sessions', () =>
       withService(c.env, (sql) => sql`select revoke_all_sessions(${id})`),
     )
-    await audit(c, { action: 'member.remove', entityType: 'user', entityId: id })
+    await audit(c, { action: 'member.remove', entityType: 'user', entityId: id, after: reason ? { reason } : {} })
     return c.json({ ok: true })
   })
 
@@ -473,11 +527,18 @@ export const teamRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql`
-          select id, email, pending_name as name, role, expires_at, created_at,
-                 last_sent_at, send_count, (expires_at <= now()) as expired
+          select id, email, pending_name as name, role,
+                 pending_phone as phone, expires_at, created_at,
+                 last_sent_at, send_count, (expires_at <= now()) as expired,
+                 case
+                   when accepted_at is not null then 'accepted'
+                   when revoked_at is not null then 'revoked'
+                   when expires_at <= now() then 'expired'
+                   else 'pending'
+                 end as status
           from user_invitations
-          where accepted_at is null and revoked_at is null
-          order by created_at desc`,
+          order by created_at desc
+          limit 200`,
       ),
     )
     if (!rows) fail(400, 'We could not load the invitations.')
@@ -610,5 +671,165 @@ export const teamRouter = new Hono<AppEnv>()
     if (!rows) fail(400, 'We could not revoke this invitation.')
     if (!rows.length) fail(404, 'We could not find that invitation.')
     await audit(c, { action: 'invitation.revoke', entityType: 'user_invitation', entityId: id })
+    return c.json({ ok: true })
+  })
+
+  // ── Monthly salaries ledger ──────────────────────────────
+  // One row per person per calendar month. Managers may view; only the
+  // owner or an admin may generate or update (checked here, not just RLS).
+  .get('/monthly-salaries', requireModule('team_salaries'), async (c) => {
+    const month = c.req.query('month')
+    const year = c.req.query('year')
+    const status = c.req.query('status')
+    const search = c.req.query('search')?.trim().toLowerCase() ?? ''
+    const userId = c.req.query('user_id')
+    const monthNum = month ? Number(month) : null
+    const yearNum = year ? Number(year) : null
+    if (month && !(monthNum && monthNum >= 1 && monthNum <= 12)) fail(422, 'Invalid month.')
+    if (year && !(yearNum && yearNum >= 2000 && yearNum <= 2100)) fail(422, 'Invalid year.')
+
+    const rows = await attempt(c, 'team.salaries_list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select ms.id, ms.user_id, u.name, u.email, u.phone, u.engagement_type,
+               coalesce(ms.pay_month, extract(month from ms.month)::int) as month,
+               coalesce(ms.pay_year, extract(year from ms.month)::int) as year,
+               coalesce(ms.base_amount, ms.gross, 0) as base_amount,
+               coalesce(ms.paid_amount, 0) as paid_amount,
+               case ms.status
+                 when 'paid' then 'paid'::text
+                 when 'partially_paid' then 'partially_paid'::text
+                 when 'partial' then 'partial'::text
+                 when 'finalised' then 'paid'::text
+                 else 'unpaid'::text
+               end as status,
+               ms.generated_at as created_at
+        from monthly_salaries ms
+        join users u on u.user_id = ms.user_id
+        where ${monthNum ? sql`coalesce(ms.pay_month, extract(month from ms.month)::int) = ${monthNum}` : sql`true`}
+          and ${yearNum ? sql`coalesce(ms.pay_year, extract(year from ms.month)::int) = ${yearNum}` : sql`true`}
+          and ${userId ? sql`ms.user_id = ${userId}` : sql`true`}
+        order by u.name`),
+    )
+    if (!rows) fail(400, 'We could not load salaries.')
+    let items = (rows as Record<string, unknown>[]).map((r) => ({
+      ...r,
+      month: Number((r as { month: unknown }).month),
+      year: Number((r as { year: unknown }).year),
+      base_amount: Number((r as { base_amount: unknown }).base_amount ?? 0),
+      paid_amount: Number((r as { paid_amount: unknown }).paid_amount ?? 0),
+    }))
+    if (status && status !== 'all') {
+      items = items.filter((r) => {
+        const s = String((r as unknown as { status: unknown }).status)
+        if (status === 'partial') return s === 'partial' || s === 'partially_paid'
+        return s === status
+      })
+    }
+    if (search) {
+      items = items.filter((r) => {
+        const hay = [ (r as { name?: unknown }).name, (r as { email?: unknown }).email, (r as { phone?: unknown }).phone ]
+          .filter(Boolean).map((v) => String(v).toLowerCase()).join(' ')
+        return hay.includes(search)
+      })
+    }
+    const base = items.reduce((n, r) => n + Number((r as { base_amount: number }).base_amount ?? 0), 0)
+    const paid = items.reduce((n, r) => n + Number((r as { paid_amount: number }).paid_amount ?? 0), 0)
+    const countStatus = (s: string) => items.filter((r) => String((r as unknown as { status: unknown }).status) === s).length
+    const partial = countStatus('partial') + countStatus('partially_paid')
+    return c.json(
+      monthlySalaryList.parse({
+        items,
+        totals: {
+          base, paid, pending: Math.max(0, base - paid), count: items.length,
+          paid_count: countStatus('paid'), partial_count: partial,
+          unpaid_count: countStatus('unpaid'),
+        },
+      }),
+    )
+  })
+
+  .post('/monthly-salaries/generate', requireModule('team_salaries'), async (c) => {
+    const auth = c.get('auth')
+    if (!auth.isOwner && auth.role !== 'admin') fail(403, 'You do not have access to this action.')
+    const parsed = generateMonthlySalariesRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'A month and year are required.')
+    const { month, year } = parsed.data
+
+    const result = await attempt(c, 'team.salaries_generate', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const members = await sql<{ user_id: string; salary: string | null }[]>`
+          select user_id, salary::text as salary from users
+          where deleted_at is null and status = 'active' and role <> 'super_admin'`
+        let created = 0
+        let skipped = 0
+        for (const m of members) {
+          const base = m.salary === null ? 0 : Number(m.salary)
+          const first = `${year}-${String(month).padStart(2, '0')}-01`
+          const existing = await sql<{ id: string }[]>`
+            select id from monthly_salaries
+            where user_id = ${m.user_id}
+              and ((pay_year = ${year} and pay_month = ${month})
+                or (pay_year is null and pay_month is null and month = ${first}::date))`
+          if (existing.length) {
+            skipped += 1
+            continue
+          }
+          await sql`
+            insert into monthly_salaries ${sql({
+              company_id: auth.companyId,
+              user_id: m.user_id,
+              month: first,
+              pay_month: month,
+              pay_year: year,
+              gross: base,
+              deductions: 0,
+              net: base,
+              base_amount: base,
+              paid_amount: 0,
+              status: 'unpaid',
+            })}`
+          created += 1
+        }
+        return { created, skipped }
+      }),
+    )
+    if (!result) fail(400, 'We could not generate salaries.')
+    await audit(c, { action: 'salary.generate', entityType: 'monthly_salary', entityId: `${year}-${month}`, after: { ...parsed.data, ...result } })
+    return c.json({ created_count: result.created, skipped_existing_count: result.skipped, errors: [] as string[] }, 201)
+  })
+
+  .patch('/monthly-salaries/:id', requireModule('team_salaries'), async (c) => {
+    const auth = c.get('auth')
+    if (!auth.isOwner && auth.role !== 'admin') fail(403, 'You do not have access to this action.')
+    const id = uuidParam(c)
+    const parsed = updateMonthlySalaryRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the paid amount.')
+    if (parsed.data.paid_amount === undefined && parsed.data.status === undefined)
+      fail(422, 'Nothing to change.')
+
+    const row = await attempt(c, 'team.salaries_update', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const found = await sql<{ id: string; base_amount: string | null; gross: string | null; paid_amount: string | null }[]>`
+          select id, base_amount::text, gross::text, paid_amount::text from monthly_salaries where id = ${id}`
+        if (!found.length) return 'missing' as const
+        const base = Number(found[0]!.base_amount ?? found[0]!.gross ?? 0)
+        const nextPaid = parsed.data.paid_amount ?? Number(found[0]!.paid_amount ?? 0)
+        if (nextPaid < 0) throw Object.assign(new Error('overpay'), { code: 'NEG' })
+        // Overpay guard: refuse unless the caller already set status paid —
+        // the UI confirms first, then resends with status paid to confirm.
+        if (nextPaid > base + 0.001 && parsed.data.status !== 'paid') return 'overpay' as const
+        const nextStatus =
+          parsed.data.status ??
+          (nextPaid <= 0.001 ? 'unpaid' : nextPaid + 0.001 >= base ? 'paid' : 'partial')
+        await sql`
+          update monthly_salaries set ${sql({ paid_amount: nextPaid, status: nextStatus })} where id = ${id}`
+        return 'ok' as const
+      }),
+    )
+    if (row === 'missing') fail(404, 'We could not find that salary row.')
+    if (row === 'overpay')
+      fail(409, 'Paid amount exceeds the base salary. Confirm the overpayment to save it.')
+    if (!row) fail(400, 'We could not update this salary.')
+    await audit(c, { action: 'salary.update', entityType: 'monthly_salary', entityId: id, after: parsed.data })
     return c.json({ ok: true })
   })

@@ -40,6 +40,8 @@ import {
   useDeleteBundle,
   useDeleteTask,
   useSetTaskStatus,
+  useSubtasks,
+  useTask,
   useTaskPriorities,
   useTasks,
   useUpdateBundle,
@@ -284,6 +286,7 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
   const deleteTask = useDeleteTask()
   const confirm = useConfirm()
   const isMobile = useIsMobile()
+  const [detailId, setDetailId] = useState<string | null>(null)
 
   async function onDelete(t: TaskListItem) {
     const yes = await confirm({
@@ -313,11 +316,18 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
 
   if (isMobile) {
     return (
+      <>
       <div className="flex flex-col gap-3">
         {rows.map((t) => (
           <div key={t.id} className="rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-2">
-              <p className="font-medium">{t.title}</p>
+              <button
+                type="button"
+                onClick={() => setDetailId(t.id)}
+                className="text-left font-medium hover:text-primary hover:underline"
+              >
+                {t.title}
+              </button>
               <PriorityBadge task={t} />
             </div>
             {t.project_name && (
@@ -343,10 +353,13 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
           </div>
         ))}
       </div>
+      {detailId && <TaskDetailDialog taskId={detailId} onClose={() => setDetailId(null)} />}
+      </>
     )
   }
 
   return (
+    <>
     <div className="table-wrap rounded-lg border border-border">
       <table className="table-sticky w-full text-sm">
         <thead className="bg-muted/50 text-left text-muted-foreground">
@@ -364,11 +377,29 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
           {rows.map((t) => (
             <tr key={t.id} className="border-t border-border hover:bg-muted/30">
               <td className="px-4 py-2">
-                <p className={cn('font-medium', t.status === 'completed' && 'text-muted-foreground line-through')}>
+                <button
+                  type="button"
+                  onClick={() => setDetailId(t.id)}
+                  className={cn(
+                    'text-left font-medium hover:text-primary hover:underline',
+                    t.status === 'completed' && 'text-muted-foreground line-through',
+                  )}
+                >
                   {t.title}
-                </p>
+                </button>
                 {t.description && (
                   <p className="truncate text-xs text-muted-foreground">{t.description}</p>
+                )}
+                {t.voice_note_url && (
+                  <a
+                    href={t.voice_note_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Voice note
+                  </a>
                 )}
               </td>
               <td className="px-4 py-2 text-muted-foreground">{t.project_name ?? '—'}</td>
@@ -411,6 +442,102 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
         </tbody>
       </table>
     </div>
+    {detailId && <TaskDetailDialog taskId={detailId} onClose={() => setDetailId(null)} />}
+    </>
+  )
+}
+
+/**
+ * Task detail dialog (Lovable parity with _app.tasks.$taskId): full header,
+ * status move, voice note, and the subtask list. Subtasks are a client-side
+ * slice on parent_task_id until a dedicated subtask API lands.
+ */
+function TaskDetailDialog({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+  const { data: task, isLoading } = useTask(taskId)
+  const subtasks = useSubtasks(taskId)
+  const setStatus = useSetTaskStatus()
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent
+        title={task?.title ?? 'Task'}
+        description={task?.project_name ? `Project · ${task.project_name}` : 'Task details'}
+        className="max-h-[85vh] max-w-2xl overflow-y-auto"
+      >
+        {isLoading || !task ? (
+          <SkeletonList rows={4} columns={2} />
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'info' : 'neutral'}>
+                {STATUS_LABEL[task.status]}
+              </StatusBadge>
+              <PriorityBadge task={task} />
+              <DueBadge task={task} today={todayISO()} />
+            </div>
+
+            {task.description && (
+              <p className="whitespace-pre-wrap text-sm">{task.description}</p>
+            )}
+
+            {task.assignee_names.length > 0 && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <AvatarGroup names={task.assignee_names} />
+                <span>{task.assignee_names.join(', ')}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted-foreground">Status:</span>
+              <Select
+                value={task.status}
+                onChange={(e) => setStatus.mutate({ id: task.id, status: e.target.value as TaskStatus })}
+                disabled={setStatus.isPending}
+                aria-label={`Status for ${task.title}`}
+                className="h-8 w-40"
+              >
+                {(['to_do', 'in_progress', 'completed', 'cancelled'] as TaskStatus[]).map((s) => (
+                  <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                ))}
+              </Select>
+              {task.voice_note_url && (
+                <a
+                  href={task.voice_note_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-primary hover:underline"
+                >
+                  Voice note
+                </a>
+              )}
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <p className="mb-2 text-sm font-medium">
+                Subtasks {subtasks.length > 0 && <span className="text-muted-foreground">({subtasks.length})</span>}
+              </p>
+              {subtasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No subtasks yet. Subtask creation lands with the dedicated subtask API.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {subtasks.map((s) => (
+                    <li key={s.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate font-medium">{s.title}</span>
+                      <StatusBadge tone={s.status === 'completed' ? 'success' : 'neutral'}>
+                        {STATUS_LABEL[s.status]}
+                      </StatusBadge>
+                      <DueBadge task={s} today={todayISO()} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -462,6 +589,7 @@ function NewTaskDialog() {
   const [priority, setPriority] = useState<TaskPriority>('medium')
   const [customPriorityCode, setCustomPriorityCode] = useState('')
   const [dueDate, setDueDate] = useState('')
+  const [voiceNoteUrl, setVoiceNoteUrl] = useState('')
   const [assignees, setAssignees] = useState<string[]>([])
 
   function reset() {
@@ -471,6 +599,7 @@ function NewTaskDialog() {
     setPriority('medium')
     setCustomPriorityCode('')
     setDueDate('')
+    setVoiceNoteUrl('')
     setAssignees([])
   }
 
@@ -487,6 +616,7 @@ function NewTaskDialog() {
         assignees,
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
+        ...(voiceNoteUrl.trim() ? { voice_note_url: voiceNoteUrl.trim() } : {}),
       },
       {
         onSuccess: () => {
@@ -561,6 +691,15 @@ function NewTaskDialog() {
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Voice note URL (optional)</Label>
+            <Input
+              value={voiceNoteUrl}
+              onChange={(e) => setVoiceNoteUrl(e.target.value)}
+              placeholder="https://…"
+              type="url"
+            />
+          </div>
           {customPriorities && customPriorities.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <Label>Custom label (optional)</Label>
@@ -602,6 +741,7 @@ function EditTaskDialog({ task, trigger }: { task: TaskListItem; trigger: ReactN
   const [priority, setPriority] = useState<TaskPriority>(task.priority)
   const [customPriorityCode, setCustomPriorityCode] = useState(task.custom_priority_code ?? '')
   const [dueDate, setDueDate] = useState(task.due_date ?? '')
+  const [voiceNoteUrl, setVoiceNoteUrl] = useState(task.voice_note_url ?? '')
   const [assignees, setAssignees] = useState<string[]>(task.assignee_ids)
 
   function onSubmit(e: FormEvent) {
@@ -616,6 +756,7 @@ function EditTaskDialog({ task, trigger }: { task: TaskListItem; trigger: ReactN
           custom_priority_code: customPriorityCode || null,
           due_date: dueDate || null,
           description: description.trim() || null,
+          voice_note_url: voiceNoteUrl.trim() || null,
           assignees,
         },
       },
@@ -670,6 +811,15 @@ function EditTaskDialog({ task, trigger }: { task: TaskListItem; trigger: ReactN
               <Label>Due date</Label>
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Voice note URL (optional)</Label>
+            <Input
+              value={voiceNoteUrl}
+              onChange={(e) => setVoiceNoteUrl(e.target.value)}
+              placeholder="https://…"
+              type="url"
+            />
           </div>
           {customPriorities && customPriorities.length > 0 && (
             <div className="flex flex-col gap-1.5">

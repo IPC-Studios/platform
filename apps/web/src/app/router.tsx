@@ -12,10 +12,14 @@ import { CompleteSetupPage } from '@/routes/complete-setup'
 import { VerifyEmailPage } from '@/routes/verify'
 import { ResetPasswordPage } from '@/routes/reset-password'
 import { AcceptInvitePage } from '@/routes/accept-invite'
+import { NoAccountPage } from '@/routes/no-account'
+import { PlanExpiredPage } from '@/routes/plan-expired'
 import { DashboardPage } from '@/routes/dashboard'
 import { ProjectsListPage } from '@/routes/projects/list'
 import { NewProjectPage } from '@/routes/projects/new'
 import { ProjectDetailPage } from '@/routes/projects/detail'
+import { ProjectEditPage } from '@/routes/projects/$id.edit'
+import { ProjectQuotationPage } from '@/routes/projects/$id.quotation'
 import { ProjectTrackingPage } from '@/routes/project-tracking'
 import { LeadSourcesPage } from '@/routes/lead-sources'
 import { ShootsPage } from '@/routes/shoots'
@@ -29,6 +33,7 @@ import { BillingPage } from '@/routes/billing'
 import { InvoiceDetailPage } from '@/routes/invoice-detail'
 import { CompanyExpensesPage } from '@/routes/company-expenses'
 import { FinancialsPage } from '@/routes/financials'
+import { MonthlyProfitPage } from '@/routes/financials/profit'
 import { GopoPage } from '@/routes/financials/gopo'
 import { GstAnalysisPage } from '@/routes/financials/gst-analysis'
 import { CalculatedExpensesPage } from '@/routes/financials/calculated-expenses'
@@ -38,6 +43,7 @@ import { CrmCompaniesPage } from '@/routes/crm/companies'
 import { AttendancePage } from '@/routes/attendance'
 import { NotificationsPage } from '@/routes/notifications'
 import { EmployeesPage } from '@/routes/employees'
+import { EmployeeDetailPage } from '@/routes/employees/$id'
 import { SubscriptionPage } from '@/routes/subscription'
 import { SettingsPage } from '@/routes/settings'
 import { RolesAccessPage } from '@/routes/settings/roles'
@@ -57,6 +63,10 @@ import { TeamWorkPreviewPage } from '@/routes/team-work-preview'
 import { PlatformStudiosPage } from '@/routes/platform/studios'
 import { PlatformUsagePage } from '@/routes/platform/usage'
 import { SystemPage } from '@/routes/settings/system'
+import { AdvancedSettingsPage } from '@/routes/settings/advanced'
+import { TaskBundlesPage } from '@/routes/settings/task-bundles'
+import { AttendanceLocationPage } from '@/routes/settings/attendance-location'
+import { LookupsPage } from '@/routes/settings/lookups'
 import { ReferralsPage } from '@/routes/referrals'
 import { ProjectTemplatesPage } from '@/routes/project-templates'
 import { TeamPayoutsPage } from '@/routes/team-payouts'
@@ -65,6 +75,10 @@ import { ActivityPage } from '@/routes/activity'
 import { InvoiceTemplatesPage } from '@/routes/billing/templates'
 import { MyTasksPage } from '@/routes/tasks/my'
 import { MyShootsPage } from '@/routes/shoots/my'
+import { ShootDetailPage } from '@/routes/shoots/$shootId'
+import { AttendanceUidPage } from '@/routes/attendance/$uid'
+import { AllocationMemberPage } from '@/routes/team-allocation/member/$uid'
+import { MyWorkProjectPage } from '@/routes/my-work/project/$projectId'
 import { RequireAuth } from '@/shared/auth/guards'
 import { AppShell } from '@/shared/layout/AppShell'
 
@@ -132,6 +146,7 @@ const routeTree = rootRoute.addChildren([
   publicRoute('/verify', VerifyEmailPage),
   publicRoute('/reset-password', ResetPasswordPage),
   publicRoute('/accept-invite', AcceptInvitePage),
+  publicRoute('/no-account', NoAccountPage),
   publicRoute('/terms/acknowledge', TermsAcknowledgePage),
   publicRoute('/quote/accept', QuoteAcceptPage),
   publicRoute('/team-terms', TeamTermsAcknowledgePage),
@@ -146,6 +161,11 @@ const routeTree = rootRoute.addChildren([
       path: '/settings/subscription',
       component: SubscriptionPage,
     }),
+    createRoute({
+      getParentRoute: () => renewalLayout,
+      path: '/plan-expired',
+      component: PlanExpiredPage,
+    }),
   ]),
 
   authedLayout.addChildren([
@@ -155,6 +175,8 @@ const routeTree = rootRoute.addChildren([
   route('/projects', ProjectsListPage),
   route('/projects/new', NewProjectPage),
   route('/projects/$id', ProjectDetailPage),
+  route('/projects/$id/edit', ProjectEditPage),
+  route('/projects/$id/quotation', ProjectQuotationPage),
   route('/project-tracking', ProjectTrackingPage),
   route('/project-documents', ProjectDocumentsPage),
   route('/team/work-preview', TeamWorkPreviewPage),
@@ -162,12 +184,15 @@ const routeTree = rootRoute.addChildren([
 
   route('/shoots', ShootsPage),
   route('/shoots/my', MyShootsPage),
+  route('/shoots/$shootId', ShootDetailPage),
   route('/tasks', TasksPage),
   route('/tasks/my', MyTasksPage),
   route('/my-work', MyWorkPage),
+  route('/my-work/project/$projectId', MyWorkProjectPage),
   route('/production-board', ProductionBoardPage),
   route('/data-management', DataManagementPage),
   route('/team-allocation', TeamAllocationPage),
+  route('/team-allocation/member/$uid', AllocationMemberPage),
   route('/follow-ups', FollowUpsPage),
   route('/crm/contacts', CrmContactsPage),
   route('/crm/companies', CrmCompaniesPage),
@@ -176,12 +201,15 @@ const routeTree = rootRoute.addChildren([
   // Phase 2; keep it working rather than breaking anyone's bookmark.
   route('/facebook', LeadSourcesPage),
   route('/employees', EmployeesPage),
+  route('/employees/$id', EmployeeDetailPage),
   route('/attendance', AttendancePage),
+  route('/attendance/$uid', AttendanceUidPage),
   route('/billing', BillingPage),
   route('/billing/templates', InvoiceTemplatesPage),
   route('/billing/invoices/$id', InvoiceDetailPage),
   route('/company-expenses', CompanyExpensesPage),
   route('/financials', FinancialsPage),
+  route('/financials/profit', MonthlyProfitPage),
   route('/financials/gopo', GopoPage),
   route('/financials/gst-analysis', GstAnalysisPage),
   route('/financials/calculated-expenses', CalculatedExpensesPage),
@@ -189,6 +217,10 @@ const routeTree = rootRoute.addChildren([
   route('/settings/company', SettingsPage),
   route('/settings/roles', RolesAccessPage),
   route('/settings/team-terms', TeamTermsPage),
+  route('/settings/task-bundles', TaskBundlesPage),
+  route('/settings/attendance-location', AttendanceLocationPage),
+  route('/settings/lookups', LookupsPage),
+  route('/settings/advanced', AdvancedSettingsPage),
   route('/enquiries', EnquiriesPage),
   route('/personal-expenses', PersonalExpensesPage),
   route('/settings/appearance', AppearancePage),

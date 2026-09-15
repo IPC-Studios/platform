@@ -613,6 +613,7 @@ function WorkflowPanel({ lead }: { lead: CrmLead }) {
 function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
   const convert = useConvertLead()
   const { data: clients } = useClients()
+  const clientList = Array.isArray(clients) ? clients : []
   const { data: quotes } = useQuotes(lead.id)
   const [open, setOpen] = useState(false)
   const [clientId, setClientId] = useState('')
@@ -623,7 +624,7 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
 
   // A client with this number is very likely the same person.
   const digits = (lead.phone ?? '').replace(/\D/g, '').slice(-10)
-  const match = digits ? (clients ?? []).find((c) => (c.phone ?? '').replace(/\D/g, '').endsWith(digits)) : undefined
+  const match = digits ? clientList.find((c) => (c.phone ?? '').replace(/\D/g, '').endsWith(digits)) : undefined
   const rows = (quotes ?? []).filter((q) => q.lead_id === lead.id)
   const accepted = rows.find((q) => q.status === 'accepted')
 
@@ -681,7 +682,7 @@ function ConvertPanel({ lead, onDone }: { lead: CrmLead; onDone: () => void }) {
           <Label htmlFor="conv-client">Client</Label>
           <Select id="conv-client" value={clientId} onChange={(e) => setClientId(e.target.value)}>
             <option value="">Create “{lead.name ?? lead.phone ?? 'New client'}”</option>
-            {(clients ?? []).map((c) => (
+            {clientList.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
                 {c.phone ? ` · ${c.phone}` : ''}

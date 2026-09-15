@@ -6,9 +6,13 @@ import {
   AlertTriangle,
   ArrowRight,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   Database,
   Eye,
   Target,
+  Users,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 import { projectTrackingRow } from '@ipc/contracts'
@@ -230,6 +234,7 @@ function UrgentCard({ project, className }: { project: TrackedProject | null; cl
 }
 
 function ProjectRow({ project: p }: { project: TrackedProject }) {
+  const [open, setOpen] = useState(false)
   const pct = Math.round(p.health.completion * 100)
   const chips: string[] = []
   if (p.tasks_overdue) chips.push(`${p.tasks_overdue} overdue`)
@@ -302,20 +307,130 @@ function ProjectRow({ project: p }: { project: TrackedProject }) {
           </p>
         </div>
 
-        <Link
-          to="/projects/$id"
-          params={{ id: p.id }}
-          className="flex min-w-56 items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs text-muted-foreground">Next action</span>
-            <span className="block truncate font-medium">
-              {NEXT_ACTION_LABEL[p.health.next_action]}
+        <div className="flex min-w-56 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+          <Link
+            to="/projects/$id"
+            params={{ id: p.id }}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs text-muted-foreground">Next action</span>
+              <span className="block truncate font-medium">
+                {NEXT_ACTION_LABEL[p.health.next_action]}
+              </span>
             </span>
-          </span>
-          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-        </Link>
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            Details
+          </button>
+        </div>
       </CardContent>
+      {open && <DetailsPanel project={p} />}
     </Card>
+  )
+}
+
+/** Expandable health breakdown: team load, data, delivery and money. */
+function DetailsPanel({ project: p }: { project: TrackedProject }) {
+  const teamDone = p.tasks_done
+  const teamTotal = p.tasks_total
+  return (
+    <div className="border-t border-border bg-muted/20 px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Health breakdown
+      </p>
+      <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-2">
+        <HealthRow
+          icon={Users}
+          label="Team"
+          value={
+            teamTotal === 0
+              ? 'No tasks yet'
+              : p.tasks_overdue > 0
+                ? `${p.tasks_overdue} overdue · ${teamDone}/${teamTotal} done`
+                : `On track (${teamDone}/${teamTotal} done)`
+          }
+          tone={teamTotal === 0 ? 'neutral' : p.tasks_overdue > 0 ? 'danger' : 'success'}
+          projectId={p.id}
+        />
+        <HealthRow
+          icon={Database}
+          label="Data"
+          value={
+            p.data_records_total === 0
+              ? 'No data records'
+              : p.data_records_unverified > 0
+                ? `${p.data_records_unverified} of ${p.data_records_total} unverified`
+                : `Verified (${p.data_records_total})`
+          }
+          tone={p.data_records_unverified > 0 ? 'warning' : 'success'}
+          projectId={p.id}
+        />
+        <HealthRow
+          icon={Eye}
+          label="Delivery"
+          value={
+            p.deliverables_total === 0
+              ? 'No deliverables'
+              : p.pending_reviews > 0
+                ? `${p.deliverables_done}/${p.deliverables_total} done · ${p.pending_reviews} to review`
+                : `${p.deliverables_done}/${p.deliverables_total} done`
+          }
+          tone={p.pending_reviews > 0 ? 'info' : 'neutral'}
+          projectId={p.id}
+        />
+        <HealthRow
+          icon={Wallet}
+          label="Payments"
+          value={`${formatINR(p.total_cost)} project value`}
+          tone="neutral"
+          projectId={p.id}
+        />
+      </div>
+    </div>
+  )
+}
+
+function HealthRow({
+  icon: Icon,
+  label,
+  value,
+  tone,
+  projectId,
+}: {
+  icon: LucideIcon
+  label: string
+  value: string
+  tone: 'danger' | 'warning' | 'success' | 'info' | 'neutral'
+  projectId: string
+}) {
+  const toneClass =
+    tone === 'danger'
+      ? 'text-destructive'
+      : tone === 'warning'
+        ? 'text-warning'
+        : tone === 'success'
+          ? 'text-success'
+          : tone === 'info'
+            ? 'text-primary'
+            : 'text-muted-foreground'
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 text-xs">
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className={cn('truncate font-medium', toneClass)}>{value}</span>
+      </span>
+      <Link to="/projects/$id" params={{ id: projectId }} className="shrink-0 font-medium text-primary hover:underline">
+        Open
+      </Link>
+    </div>
   )
 }

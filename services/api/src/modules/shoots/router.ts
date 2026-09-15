@@ -296,3 +296,19 @@ export const shootsRouter = new Hono<AppEnv>()
     await audit(c, { action: 'shoot.update', entityType: 'shoot', entityId: id, after: parsed.data })
     return c.body(null, 204)
   })
+
+  // Delete a shoot outright. Bookings release (their shoot link is set null)
+  // rather than vanish; requirements go with the shoot.
+  .delete('/:id', requireAction('projects', 'edit'), async (c) => {
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'shoots.delete', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        await sql`update team_assignment_slots set shoot_id = null where shoot_id = ${id}`
+        return sql<{ id: string }[]>`delete from shoots where id = ${id} returning id`
+      }),
+    )
+    if (!rows) fail(400, 'We could not delete this shoot.')
+    if (!rows.length) fail(404, 'That shoot was not found.')
+    await audit(c, { action: 'shoot.delete', entityType: 'shoot', entityId: id })
+    return c.body(null, 204)
+  })

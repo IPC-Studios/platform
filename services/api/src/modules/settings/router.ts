@@ -31,6 +31,15 @@ const COMPANY_COLUMNS = [
   'invoice_next_number',
   'quote_number_prefix',
   'quote_next_number',
+  'invoice_address',
+  'invoice_phone',
+  'invoice_email',
+  'invoice_upi_id',
+  'invoice_bank_details',
+  'invoice_default_notes',
+  'invoice_default_terms',
+  'document_footer_note',
+  'invoice_logo_url',
 ]
 
 export const settingsRouter = new Hono<AppEnv>()

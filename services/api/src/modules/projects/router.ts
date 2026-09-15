@@ -8,11 +8,18 @@ import {
   paymentInput,
   projectDetail,
   projectListItem,
+  projectListPage,
   projectTrackingRow,
   saveDeliverableSetRequest,
   updateProjectRequest,
   createProjectTemplateRequest,
   projectTemplateList,
+  createShootTypeRequest,
+  createDeliverableTemplateRequest,
+  createWorkflowPresetRequest,
+  shootTypeItem,
+  deliverableTemplateItem,
+  workflowPresetItem,
   z,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
@@ -28,27 +35,80 @@ export const projectsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
   .get('/', requireAction('projects', 'view'), async (c) => {
-    const rows = await attempt(c, 'projects.list', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        // The money is rolled up here rather than fetched per row: the list
-        // shows received and pending on every project, and doing that from the
-        // client would be one request per project.
-        (sql) => sql`
+    const url = new URL(c.req.url)
+    const hasPaging = url.searchParams.has('page') || url.searchParams.has('page_size') || url.searchParams.has('search') || url.searchParams.has('status') || url.searchParams.has('sort')
+    if (!hasPaging) {
+      const rows = await attempt(c, 'projects.list', () =>
+        withUser(
+          c.env,
+          c.get('auth').userId,
+          // The money is rolled up here rather than fetched per row: the list
+          // shows received and pending on every project, and doing that from the
+          // client would be one request per project.
+          (sql) => sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost, p.total_cost, p.created_at,
                  cl.name as client_name, cl.phone as client_phone,
                  coalesce(
                    (select sum(rp.amount) from received_payments rp where rp.project_id = p.id),
                    0
-                 ) as received
+                 ) as received,
+                 (select min(shoot_date) from shoots where project_id = p.id and shoot_date >= current_date and status <> 'cancelled') as next_shoot_date,
+                 coalesce((select count(*)::int from tasks where project_id = p.id and status not in ('completed','cancelled') and due_date is not null and due_date < current_date), 0) as tasks_overdue
           from projects p
           left join clients cl on cl.id = p.client_id
           order by p.created_at desc`,
-      ),
+        ),
+      )
+      if (!rows) fail(400, 'We could not load your projects.')
+      return c.json(projectListItem.array().parse(rows))
+    }
+    // Paginated + filtered list (Lovable parity): page/page_size + search/status + sort.
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('page_size') ?? '20') || 20))
+    const status = (url.searchParams.get('status') ?? '').trim()
+    const search = (url.searchParams.get('search') ?? '').trim()
+    const sort = (url.searchParams.get('sort') ?? 'recent').trim()
+    const orderBy = (() => {
+      switch (sort) {
+        case 'oldest': return 'p.created_at asc'
+        case 'value_desc': return 'p.total_cost desc'
+        case 'pending_desc':
+        case 'risk':
+        case 'overdue': return '(p.total_cost - coalesce((select sum(rp.amount) from received_payments rp where rp.project_id = p.id),0)) desc'
+        case 'received_desc': return 'coalesce((select sum(rp.amount) from received_payments rp where rp.project_id = p.id),0) desc'
+        case 'name': return 'p.name asc'
+        case 'completion': return 'coalesce((select sum(rp.amount) from received_payments rp where rp.project_id = p.id),0) / nullif(p.total_cost,0) asc'
+        case 'upcoming': return '(select min(shoot_date) from shoots where project_id = p.id and shoot_date >= current_date and status <> \'cancelled\') asc nulls last'
+        default: return 'p.created_at desc'
+      }
+    })()
+    const offset = (page - 1) * pageSize
+    const result = await attempt(c, 'projects.list.page', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const countRows = await sql<{ n: number }[]>`
+          select count(*)::int as n from projects p
+          left join clients cl on cl.id = p.client_id
+          where ${status && status !== 'all' ? sql`p.status = ${status}` : sql`true`}
+            and ${search ? sql`(p.name ilike ${'%' + search + '%'} or coalesce(cl.name,'') ilike ${'%' + search + '%'} or coalesce(cl.phone,'') ilike ${'%' + search + '%'})` : sql`true`}`
+        const total = countRows[0]?.n ?? 0
+        // orderBy is an allow-listed fragment (see switch above), never user input.
+        const rows = await sql`
+          select p.id, p.name, p.status, p.client_id, p.package_cost, p.total_cost, p.created_at,
+                 cl.name as client_name, cl.phone as client_phone,
+                 coalesce((select sum(rp.amount) from received_payments rp where rp.project_id = p.id),0) as received,
+                 (select min(shoot_date) from shoots where project_id = p.id and shoot_date >= current_date and status <> 'cancelled') as next_shoot_date,
+                 coalesce((select count(*)::int from tasks where project_id = p.id and status not in ('completed','cancelled') and due_date is not null and due_date < current_date),0) as tasks_overdue
+          from projects p
+          left join clients cl on cl.id = p.client_id
+          where ${status && status !== 'all' ? sql`p.status = ${status}` : sql`true`}
+            and ${search ? sql`(p.name ilike ${'%' + search + '%'} or coalesce(cl.name,'') ilike ${'%' + search + '%'} or coalesce(cl.phone,'') ilike ${'%' + search + '%'})` : sql`true`}
+          order by ${sql.unsafe(orderBy)}
+          limit ${pageSize} offset ${offset}`
+        return { total, rows }
+      }),
     )
-    if (!rows) fail(400, 'We could not load your projects.')
-    return c.json(projectListItem.array().parse(rows))
+    if (!result) fail(400, 'We could not load your projects.')
+    return c.json(projectListPage.parse({ items: result.rows, total: result.total, page, page_size: pageSize }))
   })
 
   // Tracking: one aggregate row per project. Counting happens here — it is a
@@ -304,6 +364,95 @@ export const projectsRouter = new Hono<AppEnv>()
     return c.json({ project_id: rows[0].create_project_from_template }, 201)
   })
 
+  // Board deliverables: every deliverable with project context (for the production board).
+  // Declared before /:id so "board" is never read as a project id.
+  .get('/board/deliverables', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.board_deliverables', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select d.id, d.title, d.status, coalesce(d.custom_status_code, d.status) as board_status,
+               d.project_id, p.name as project_name, d.estimated_date as due_date,
+               coalesce((select s.name from deliverable_shoot_links l join shoots s on s.id = l.shoot_id where l.deliverable_id = d.id order by s.name limit 1), null) as shoot_name
+        from deliverables d join projects p on p.id = d.project_id
+        order by d.created_at desc limit 500`),
+    )
+    if (!rows) fail(400, 'We could not load board deliverables.')
+    return c.json(rows)
+  })
+
+  // Granular catalog: shoot types / deliverable templates / workflow presets.
+  // Kept separate from generic project_templates (which stays as apply-with-start-date).
+  .get('/catalog/shoot-types', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.catalog.shoot_types.list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, name, category, usage_count, is_archived from shoot_types order by usage_count desc, name asc`),
+    )
+    if (!rows) fail(400, 'We could not load shoot types.')
+    return c.json(shootTypeItem.array().parse(rows))
+  })
+
+  .post('/catalog/shoot-types', requireAction('projects', 'edit'), async (c) => {
+    const parsed = createShootTypeRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please name the shoot type.')
+    const auth = c.get('auth')
+    const row = await attempt(c, 'projects.catalog.shoot_types.create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const rows = await sql`insert into shoot_types ${sql({ company_id: auth.companyId, name: parsed.data.name, category: parsed.data.category ?? null })} returning id, name, category, usage_count, is_archived`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not add this shoot type.')
+    await audit(c, { action: 'shoot_type.create', entityType: 'shoot_type', entityId: row.id, after: parsed.data })
+    return c.json(shootTypeItem.parse(row), 201)
+  })
+
+  .get('/catalog/deliverable-templates', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.catalog.deliverable_templates.list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, title, shoot_type, delivery_days, due_basis, brief, is_combined, usage_count, is_archived from deliverable_templates order by usage_count desc, title asc`),
+    )
+    if (!rows) fail(400, 'We could not load deliverable templates.')
+    return c.json(deliverableTemplateItem.array().parse(rows))
+  })
+
+  .post('/catalog/deliverable-templates', requireAction('projects', 'edit'), async (c) => {
+    const parsed = createDeliverableTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the template.')
+    const auth = c.get('auth')
+    const row = await attempt(c, 'projects.catalog.deliverable_templates.create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const rows = await sql`insert into deliverable_templates ${sql({ company_id: auth.companyId, title: parsed.data.title, shoot_type: parsed.data.shoot_type ?? null, delivery_days: parsed.data.delivery_days ?? null, due_basis: parsed.data.due_basis ?? null, brief: parsed.data.brief ?? null, is_combined: parsed.data.is_combined ?? false })} returning id, title, shoot_type, delivery_days, due_basis, brief, is_combined, usage_count, is_archived`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not add this template.')
+    await audit(c, { action: 'deliverable_template.create', entityType: 'deliverable_template', entityId: row.id, after: parsed.data })
+    return c.json(deliverableTemplateItem.parse(row), 201)
+  })
+
+  .get('/catalog/workflow-presets', requireAction('projects', 'view'), async (c) => {
+    const rows = await attempt(c, 'projects.catalog.workflow_presets.list', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql`
+        select id, name, shoot_type, shoot_time, shoot_city, requirements, deliverables, usage_count, is_archived from workflow_presets order by usage_count desc, name asc`),
+    )
+    if (!rows) fail(400, 'We could not load workflow presets.')
+    return c.json(workflowPresetItem.array().parse(rows))
+  })
+
+  .post('/catalog/workflow-presets', requireAction('projects', 'edit'), async (c) => {
+    const parsed = createWorkflowPresetRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the preset.')
+    const auth = c.get('auth')
+    const row = await attempt(c, 'projects.catalog.workflow_presets.create', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        const rows = await sql`insert into workflow_presets ${sql({ company_id: auth.companyId, name: parsed.data.name, shoot_type: parsed.data.shoot_type ?? null, shoot_time: parsed.data.shoot_time ?? null, shoot_city: parsed.data.shoot_city ?? null, requirements: sql.json(parsed.data.requirements ?? []), deliverables: sql.json(parsed.data.deliverables ?? []) })} returning id, name, shoot_type, shoot_time, shoot_city, requirements, deliverables, usage_count, is_archived`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not add this preset.')
+    await audit(c, { action: 'workflow_preset.create', entityType: 'workflow_preset', entityId: row.id, after: parsed.data })
+    return c.json(workflowPresetItem.parse(row), 201)
+  })
+
   .get('/:id', requireAction('projects', 'view'), async (c) => {
     const id = uuidParam(c)
     const row = await attempt(c, 'projects.get', () =>
@@ -311,6 +460,7 @@ export const projectsRouter = new Hono<AppEnv>()
         const rows = await sql`
           select p.id, p.name, p.status, p.client_id, p.package_cost,
                  p.additional_deliverables_cost, p.total_cost, p.show_quotation, p.created_at,
+                 p.quotation_terms, coalesce(p.quotation_display_prefs,'{}'::jsonb) as quotation_display_prefs,
                  cl.name as client_name, cl.phone as client_phone,
                  coalesce((
                    select jsonb_agg(
@@ -329,7 +479,9 @@ export const projectsRouter = new Hono<AppEnv>()
                  coalesce((
                    select jsonb_agg(jsonb_build_object(
                      'id', rp.id, 'amount', rp.amount, 'paid_on', rp.paid_on,
-                     'mode', rp.mode, 'reference', rp.reference) order by rp.paid_on)
+                     'mode', rp.mode, 'reference', rp.reference,
+                     'status', coalesce(rp.status,'paid'), 'description', rp.description,
+                     'is_gst', coalesce(rp.is_gst,false), 'gst_number', rp.gst_number) order by rp.paid_on)
                    from received_payments rp where rp.project_id = p.id
                  ), '[]'::jsonb) as payments
           from projects p
@@ -419,7 +571,13 @@ export const projectsRouter = new Hono<AppEnv>()
   .patch('/:id/deliverables/:did', requireAction('projects', 'edit'), async (c) => {
     const parsed = updateDeliverableRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Please check the deliverable details.')
-    if (Object.keys(parsed.data).length === 0) fail(422, 'Nothing to change.')
+    // due_days is the form-level alias for delivery_days_after_start; fold it in.
+    const { due_days, due_basis, ...rest } = parsed.data
+    const patch: Record<string, unknown> = { ...rest }
+    if (due_days !== undefined) patch.delivery_days_after_start = due_days
+    // due_basis is resolved to estimated_date client-side; ignore server-side (kept for compat).
+    void due_basis
+    if (Object.keys(patch).length === 0) fail(422, 'Nothing to change.')
     const projectId = uuidParam(c)
     const did = uuidParam(c, 'did')
     const rows = await attempt(c, 'projects.deliverable_update', () =>
@@ -427,7 +585,7 @@ export const projectsRouter = new Hono<AppEnv>()
         c.env,
         c.get('auth').userId,
         (sql) => sql<{ id: string }[]>`
-          update deliverables set ${sql(parsed.data)} where id = ${did} and project_id = ${projectId} returning id`,
+          update deliverables set ${sql(patch)} where id = ${did} and project_id = ${projectId} returning id`,
       ),
     )
     if (!rows) fail(400, 'We could not update the deliverable.')
@@ -498,7 +656,11 @@ export const projectsRouter = new Hono<AppEnv>()
             paid_on: parsed.data.paid_on ?? new Date().toISOString().slice(0, 10),
             mode: parsed.data.mode ?? null,
             reference: parsed.data.reference ?? null,
-            notes: parsed.data.notes ?? null,
+            notes: parsed.data.notes ?? parsed.data.description ?? null,
+            status: (parsed.data as { status?: string }).status ?? 'paid',
+            description: (parsed.data as { description?: string }).description ?? null,
+            is_gst: (parsed.data as { is_gst?: boolean }).is_gst ?? false,
+            gst_number: (parsed.data as { gst_number?: string }).gst_number ?? null,
             recorded_by: auth.userId,
           })}
           returning id`
@@ -508,6 +670,41 @@ export const projectsRouter = new Hono<AppEnv>()
     if (!row) fail(400, 'We could not record the payment.')
     await audit(c, { action: 'project.payment', entityType: 'project', entityId: projectId, after: parsed.data })
     return c.json({ id: row.id }, 201)
+  })
+
+  // Delete a payment (Lovable parity: billing tab receipt management).
+  .delete('/:id/payments/:pid', requireAction('projects', 'edit'), async (c) => {
+    const projectId = uuidParam(c)
+    const pid = uuidParam(c, 'pid')
+    const rows = await attempt(c, 'projects.payment_delete', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        delete from received_payments where id = ${pid} and project_id = ${projectId} returning id`),
+    )
+    if (!rows) fail(400, 'We could not delete this payment.')
+    if (!rows.length) fail(404, 'That payment was not found.')
+    await audit(c, { action: 'project.payment_delete', entityType: 'project', entityId: projectId, before: { payment_id: pid } })
+    return c.body(null, 204)
+  })
+
+  // Quotation prefs + terms (persisted on projects; display prefs also cached locally).
+  .patch('/:id/quotation', requireAction('projects', 'edit'), async (c) => {
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = z.object({
+      quotation_terms: z.string().max(10000).nullable().optional(),
+      quotation_display_prefs: z.record(z.string(), z.boolean()).optional(),
+      show_quotation: z.boolean().optional(),
+    }).safeParse(body)
+    if (!parsed.success) fail(422, 'Please check the quotation details.')
+    if (Object.keys(parsed.data).length === 0) return c.body(null, 204)
+    const id = uuidParam(c)
+    const rows = await attempt(c, 'projects.quotation_update', () =>
+      withUser(c.env, c.get('auth').userId, (sql) => sql<{ id: string }[]>`
+        update projects set ${sql(parsed.data)} where id = ${id} returning id`),
+    )
+    if (!rows) fail(400, 'We could not save the quotation.')
+    if (!rows.length) fail(404, 'That project was not found.')
+    await audit(c, { action: 'project.quotation_update', entityType: 'project', entityId: id, after: parsed.data })
+    return c.body(null, 204)
   })
 
 

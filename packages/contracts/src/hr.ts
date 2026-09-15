@@ -60,6 +60,15 @@ export const attendanceDayRow = z.object({
 })
 export type AttendanceDayRow = z.infer<typeof attendanceDayRow>
 
+/** Paginated day-roster response — returned when page/page_size are requested. Array shape is kept otherwise. */
+export const attendanceDayPage = z.object({
+  items: attendanceDayRow.array(),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+export type AttendanceDayPage = z.infer<typeof attendanceDayPage>
+
 /** An owner or admin fixing one person's day: forgot to tap in, wrong side of the fence. */
 export const setAttendanceRequest = z
   .object({

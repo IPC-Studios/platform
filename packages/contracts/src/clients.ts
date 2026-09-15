@@ -49,3 +49,24 @@ export const updateClientRequest = z.object({
   notes: z.string().trim().max(2000).nullable().optional(),
 })
 export type UpdateClientRequest = z.infer<typeof updateClientRequest>
+
+export const clientListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().max(200).optional(),
+  sort: z.enum(['recent', 'name', 'city']).optional(),
+})
+export type ClientListQuery = z.infer<typeof clientListQuery>
+
+export const clientListPage = z.object({
+  items: z.array(client),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+export type ClientListPage = z.infer<typeof clientListPage>
+
+export const duplicateClientResponse = z.object({
+  existing_client: client,
+})
+export type DuplicateClientResponse = z.infer<typeof duplicateClientResponse>
