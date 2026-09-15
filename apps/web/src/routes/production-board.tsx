@@ -67,6 +67,53 @@ const PRIORITY_TONE: Record<string, 'danger' | 'warning' | 'info' | 'neutral'> =
   low: 'neutral',
 }
 
+const today = () => new Date().toISOString().slice(0, 10)
+const isLive = (t: TaskListItem) => t.status !== 'completed' && t.status !== 'cancelled'
+
+function matchesDue(t: TaskListItem, mode: 'overdue' | 'today' | 'week' | 'none'): boolean {
+  if (mode === 'none') return !t.due_date
+  if (!t.due_date) return false
+  const d = t.due_date
+  if (mode === 'overdue') return d < today() && isLive(t)
+  if (mode === 'today') return d === today()
+  const week = new Date()
+  week.setDate(week.getDate() + 7)
+  return d >= today() && d <= week.toISOString().slice(0, 10)
+}
+
+/**
+ * The six piles a studio triages by, mirroring the old board's strip.
+ * "Needs attention" is the catch-all a morning stand-up actually looks at:
+ * live work that is late, or has nobody on it.
+ */
+type FocusKey = 'overdue' | 'today' | 'pending_review' | 'in_progress' | 'completed' | 'attention' | null
+
+const BUCKETS: ReadonlyArray<{ key: Exclude<FocusKey, null>; label: string; hint: string; empty: string }> = [
+  { key: 'overdue', label: 'Overdue', hint: 'Past the due date', empty: 'Nothing late' },
+  { key: 'today', label: 'Due today', hint: 'Due before tonight', empty: 'No items due today' },
+  { key: 'pending_review', label: 'Pending review', hint: 'Waiting on a reviewer', empty: 'Nothing to review' },
+  { key: 'in_progress', label: 'In progress', hint: 'Active work', empty: 'Nothing started' },
+  { key: 'completed', label: 'Completed', hint: 'Done & delivered', empty: 'Nothing finished yet' },
+  { key: 'attention', label: 'Needs attention', hint: 'Late or unowned', empty: 'All clear' },
+]
+
+function inBucket(t: TaskListItem, key: Exclude<FocusKey, null>): boolean {
+  switch (key) {
+    case 'overdue':
+      return !!t.due_date && t.due_date < today() && isLive(t)
+    case 'today':
+      return t.due_date === today() && isLive(t)
+    case 'pending_review':
+      return t.custom_status_code === 'pending_review'
+    case 'in_progress':
+      return t.status === 'in_progress'
+    case 'completed':
+      return t.status === 'completed'
+    case 'attention':
+      return isLive(t) && ((!!t.due_date && t.due_date < today()) || t.assignee_names.length === 0)
+  }
+}
+
 type Lanes = Record<TaskStatus, TaskListItem[]>
 
 export function ProductionBoardPage() {
@@ -95,6 +142,10 @@ function Board() {
   const [project, setProject] = useState('all')
   const [priority, setPriority] = useState('all')
   const [assignee, setAssignee] = useState('all')
+  const [due, setDue] = useState<'all' | 'overdue' | 'today' | 'week' | 'none'>('all')
+  const [assignment, setAssignment] = useState<'all' | 'assigned' | 'unassigned'>('all')
+  /** The KPI chip currently acting as a filter, if any. */
+  const [focus, setFocus] = useState<FocusKey>(null)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [lanes, setLanes] = useState<Lanes>(() => groupByLane([]))
 
@@ -116,10 +167,35 @@ function Board() {
       if (project !== 'all' && t.project_id !== project) return false
       if (priority !== 'all' && t.priority !== priority) return false
       if (assignee !== 'all' && !t.assignee_names.includes(assignee)) return false
+      if (assignment === 'assigned' && t.assignee_names.length === 0) return false
+      if (assignment === 'unassigned' && t.assignee_names.length > 0) return false
+      if (due !== 'all' && !matchesDue(t, due)) return false
+      if (focus && !inBucket(t, focus)) return false
       if (q && !`${t.title} ${t.project_name ?? ''}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [data, search, project, priority, assignee])
+  }, [data, search, project, priority, assignee, assignment, due, focus])
+
+  /**
+   * Counts for the KPI strip. Computed over everything the other filters
+   * allow but WITHOUT the chip's own filter applied — otherwise selecting
+   * "Overdue" would drop every other count to zero and the strip would stop
+   * being a way to navigate.
+   */
+  const buckets = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const base = (data ?? []).filter((t) => {
+      if (project !== 'all' && t.project_id !== project) return false
+      if (priority !== 'all' && t.priority !== priority) return false
+      if (assignee !== 'all' && !t.assignee_names.includes(assignee)) return false
+      if (assignment === 'assigned' && t.assignee_names.length === 0) return false
+      if (assignment === 'unassigned' && t.assignee_names.length > 0) return false
+      if (due !== 'all' && !matchesDue(t, due)) return false
+      if (q && !`${t.title} ${t.project_name ?? ''}`.toLowerCase().includes(q)) return false
+      return true
+    })
+    return BUCKETS.map((b) => ({ ...b, count: base.filter((t) => inBucket(t, b.key)).length }))
+  }, [data, search, project, priority, assignee, assignment, due])
 
   // Selection never points at rows the filters have hidden.
   const visibleIds = useMemo(() => new Set(filtered.map((t) => t.id)), [filtered])
@@ -267,11 +343,62 @@ function Board() {
           <option value="all">Any assignee</option>
           {assigneeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
         </Select>
-        {(search || project !== 'all' || priority !== 'all' || assignee !== 'all') && (
-          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setProject('all'); setPriority('all'); setAssignee('all') }}>
+        <Select value={due} onChange={(e) => setDue(e.target.value as typeof due)} aria-label="Filter by due date" className="w-40">
+          <option value="all">Any due</option>
+          <option value="overdue">Overdue</option>
+          <option value="today">Due today</option>
+          <option value="week">Due this week</option>
+          <option value="none">No due date</option>
+        </Select>
+        <Select
+          value={assignment}
+          onChange={(e) => setAssignment(e.target.value as typeof assignment)}
+          aria-label="Filter by assignment"
+          className="w-48"
+        >
+          <option value="all">Assigned + Unassigned</option>
+          <option value="assigned">Assigned only</option>
+          <option value="unassigned">Unassigned only</option>
+        </Select>
+        {(search || project !== 'all' || priority !== 'all' || assignee !== 'all' || due !== 'all' || assignment !== 'all' || focus) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearch('')
+              setProject('all')
+              setPriority('all')
+              setAssignee('all')
+              setDue('all')
+              setAssignment('all')
+              setFocus(null)
+            }}
+          >
             <X /> Clear
           </Button>
         )}
+      </div>
+
+      {/* The triage strip: how much is on fire, and a way into each pile. */}
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {buckets.map((b) => (
+          <button
+            key={b.key}
+            type="button"
+            aria-pressed={focus === b.key}
+            onClick={() => setFocus((f) => (f === b.key ? null : b.key))}
+            className={cn(
+              'rounded-lg border p-3 text-left transition',
+              focus === b.key ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/40',
+            )}
+          >
+            <span className="block text-xs text-muted-foreground">{b.label}</span>
+            <span className="mt-0.5 block text-xl font-semibold tabular-nums">{b.count}</span>
+            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+              {b.count === 0 ? b.empty : b.hint}
+            </span>
+          </button>
+        ))}
       </div>
 
       <DeliverablesStrip />

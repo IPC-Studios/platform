@@ -193,6 +193,19 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
       token_type: 'bearer',
       expires_in: 1800,
     }
+  // The directory pages, so it asks for `/clients?page=…` and expects
+  // {items,total}. Matching only the bare path left the page erroring in mock
+  // mode, which is the opposite of what a preview is for.
+  if (method === 'GET' && path.startsWith('/clients?')) {
+    const rows = atStage(clients, 'partial')
+    const q = new URLSearchParams(path.split('?')[1] ?? '')
+    return {
+      items: rows,
+      total: rows.length,
+      page: Number(q.get('page') ?? 1),
+      page_size: Number(q.get('page_size') ?? 25),
+    }
+  }
   if (method === 'GET' && path === '/clients') return atStage(clients, 'partial')
   if (method === 'GET' && path === '/projects') return atStage(projects, 'partial')
   if (method === 'GET' && path === '/projects/tracking') return atStage(trackingRows, 'partial')

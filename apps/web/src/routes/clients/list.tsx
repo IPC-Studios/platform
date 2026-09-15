@@ -30,6 +30,8 @@ const SORTS = [
   { value: 'city', label: 'City (A–Z)' },
 ] as const
 
+const added = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+
 function ClientsList() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'recent' | 'name' | 'city'>('recent')
@@ -189,7 +191,7 @@ function ClientsList() {
           </div>
         ) : (
           <div className="table-wrap rounded-lg border border-border">
-            <table className="table-sticky w-full min-w-[44rem] text-sm">
+            <table className="table-sticky w-full min-w-[60rem] text-sm">
               <thead className="bg-muted/50 text-left text-muted-foreground">
                 <tr>
                   <th className="w-10 px-3 py-2">
@@ -200,6 +202,8 @@ function ClientsList() {
                   <th className="px-4 py-2 font-medium">City</th>
                   <th className="px-4 py-2 font-medium">Relation</th>
                   <th className="px-4 py-2 font-medium">Email</th>
+                  <th className="px-4 py-2 font-medium">Address</th>
+                  <th className="px-4 py-2 font-medium">Added</th>
                   <th className="px-4 py-2 font-medium" />
                 </tr>
               </thead>
@@ -221,6 +225,10 @@ function ClientsList() {
                       {c.relation ? <StatusBadge tone="neutral">{c.relation}</StatusBadge> : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-2 text-muted-foreground">{c.email ?? '—'}</td>
+                    <td className="max-w-48 truncate px-4 py-2 text-muted-foreground" title={c.address ?? undefined}>
+                      {c.address ?? '—'}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">{added.format(new Date(c.created_at))}</td>
                     <td className="px-4 py-2">
                       <div className="flex justify-end gap-1">
                         <Button variant="outline" size="icon" aria-label={`View ${c.name}`} onClick={() => setViewing(c)}>
