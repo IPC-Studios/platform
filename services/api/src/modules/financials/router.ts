@@ -385,15 +385,41 @@ export const financialsRouter = new Hono<AppEnv>()
     const warnings: string[] = []
     if (denom > 0 && (net / denom) * 100 < 15) warnings.push('Net margin below 15% for this month.')
     if (Number(base['salary_cost'] ?? 0) > denom * 0.5 && denom > 0) warnings.push('Salary cost exceeds 50% of revenue.')
-    // Salary buckets (5): full-time / contract / freelance / intern / other.
-    let buckets: Record<string, unknown>[] = []
-    try {
-      const b = await withUser(c.env, c.get('auth').userId, async (sql) => {
-        return sql<Record<string, unknown>[]>`select coalesce(employment_type, 'other') as bucket, coalesce(sum(amount), 0) as total
-          from team_payouts where company_id = ${c.get('auth').companyId} group by 1 limit 5`
-      })
-      buckets = b ?? []
-    } catch { buckets = [] }
+    // Monthly team cost, split five ways.
+    //
+    // This used to group team_payouts by `employment_type` — a column that
+    // exists on no table. Every call threw, a bare catch swallowed it, and the
+    // card rendered five ₹0 tiles under a non-zero salary figure for as long
+    // as it has shipped. It also had no month filter under a month picker, and
+    // a `limit 5` that would have dropped a sixth group silently.
+    //
+    // How someone is paid lives on `users` (0026/0069/0101). The window is the
+    // same one monthly_profit_summary uses for salary_cost — payouts created
+    // in the month — so the five tiles add up to the figure above them.
+    const monthEnd = new Date(`${month.slice(0, 7)}-01T00:00:00Z`)
+    monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1)
+    const buckets =
+      (await attempt(c, 'financials.salary_buckets', () =>
+        withUser(c.env, c.get('auth').userId, (sql) =>
+          sql<Record<string, unknown>[]>`
+            select case
+                     when coalesce(u.stipend_amount, 0) > 0 then 'intern'
+                     when u.payout_type = 'salary'
+                       or (u.payout_type is null and u.engagement_type = 'in_house') then 'salaried'
+                     when u.engagement_type = 'freelancer'
+                       or u.payout_type in ('per_shoot', 'per_day', 'per_project') then 'contractor'
+                     when coalesce(u.commission_pct, 0) > 0 then 'commission'
+                     else 'other'
+                   end as bucket,
+                   coalesce(sum(tp.amount), 0) as total
+              from team_payouts tp
+              join users u on u.user_id = tp.user_id
+             where tp.company_id = ${c.get('auth').companyId}
+               and tp.created_at >= ${month.slice(0, 7) + '-01'}::date
+               and tp.created_at < ${monthEnd.toISOString().slice(0, 10)}::date
+             group by 1`,
+        ),
+      )) ?? []
     return c.json(monthlyProfitSummary.parse({
       ...base,
       margin_cash: Number(base['cash_received'] ?? 0) > 0 ? (Number(base['net_cash'] ?? 0) / Number(base['cash_received'])) * 100 : null,
