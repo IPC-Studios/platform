@@ -349,3 +349,40 @@ seven behaviours, and only then do the builders show them.
 The `plans` table is empty and nothing in the app can create a plan, so
 Subscription correctly reports "No plans are on offer yet". Pricing is the
 studio's call, not something to invent.
+
+### A third scan: what the read path drops
+
+Found by opening a seeded rule in the browser rather than by any scan — which
+is why it is written down here.
+
+The workflow editor showed "For information" over the "Hot lead has no
+follow-up" rule, which 0105 seeds as `critical`, routed to admins.
+`selectWorkflows` never selected `severity`, `cooldown_hours`,
+`notify_assignee` or `notify_roles`, so the contract's defaults filled in on
+read. The create path omitted them too. The PATCH path did write them — which
+made it worse than cosmetic: opening that rule and saving it for any reason
+would have written the defaults the form was showing back over its real
+values, turning critical into info and dropping the routing.
+
+**A field is only real when the READ path returns it.** A read schema field
+carrying `.default()` or `.nullish()` absorbs a missing column in silence
+instead of erroring, so the UI shows a plausible wrong value.
+
+Scanning for the pattern — for every `X.parse(...)` in a router, check each
+forgiving field of schema X appears in that file's SQL — returns 16 candidates
+and no further real ones: `companyProfile` selects via a JS column array,
+`publicReceipt`/`publicDelivery` come from the token RPCs repaired in 0126,
+`crmUserPrefs` parses a jsonb blob, and `workflow.rule_key` is unused by the
+web app. Too noisy to keep as a gate, so the durable protection is the
+targeted assertion in `workflow-routing.test.ts` that pins the read query to
+those four columns.
+
+### Verified in the browser, on the deployed app
+
+Subscription loads; the lead-source Kind dropdown swaps the fields above it;
+the cadence builder shows both filters; the workflow editor reads the seeded
+`critical` / admin routing; a lead created as Warm saves, shows Warm in the
+drawer, and is the only row the inbox's Warm filter returns; the task
+deliverable picker enables on project choice and lists that project's real
+deliverables; data-management chip counts, both status filters and the date
+range render; the project-tracking row carries its five figures.
