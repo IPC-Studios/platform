@@ -12,6 +12,8 @@ if (!API) {
 }
 
 const rand = () => Math.random().toString(36).slice(2, 10)
+/** Registration requires a phone. Distinct per studio so no dedupe rule can join them. */
+const randPhone = () => `9${Math.floor(Math.random() * 1e9).toString().padStart(9, '0')}`
 let pass = 0
 let fail = 0
 const check = (name, ok) => {
@@ -40,6 +42,7 @@ async function makeStudio(label) {
       company_name: `RLS ${label} ${rand()}`,
       admin_name: `Owner ${label}`,
       email,
+      phone: randPhone(),
       password: 'Testpass12345!',
     },
   })
