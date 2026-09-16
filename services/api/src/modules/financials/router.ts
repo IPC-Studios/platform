@@ -426,25 +426,13 @@ export const financialsRouter = new Hono<AppEnv>()
     }))
   })
 
-  .get('/salary-summary', requireModule('financials'), async (c) => {
-    const month = c.req.query('month') || new Date().toISOString().slice(0, 7) + '-01'
-    const rows = await attempt(c, 'financials.salary_summary', () =>
-      withUser(c.env, c.get('auth').userId, async (sql) => {
-        try {
-          return await sql<Record<string, unknown>[]>`select coalesce(employment_type, 'other') as bucket,
-              count(*)::int as headcount, coalesce(sum(amount), 0) as total
-            from team_payouts where company_id = ${c.get('auth').companyId}
-              and created_at >= date_trunc('month', ${month}::date)
-              and created_at < date_trunc('month', ${month}::date) + interval '1 month'
-            group by 1 order by 3 desc limit 5`
-        } catch {
-          return []
-        }
-      }),
-    )
-    if (!rows) fail(400, 'We could not load salary summary.')
-    return c.json(rows)
-  })
+  // `/salary-summary` used to live here. It grouped team_payouts by
+  // `employment_type` -- a column on no table -- inside a catch that returned
+  // [] on the error, so it answered "no salaries" forever. Nothing in the web
+  // app ever called it; the five team-cost buckets on /financials/profit come
+  // from the monthly summary above, which reads how people are paid off
+  // `users` and is covered by tests. A broken endpoint nobody calls is worse
+  // than no endpoint, so it is gone rather than repaired twice.
 
   // FixedOverheads CRUD (9 cats + 4 alloc bases).
   .get('/fixed-overheads', requireModule('financials'), async (c) => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { IndianRupee, TrendingUp, Wallet, Building2, Users, ChevronDown, ChevronRight, Sigma } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -160,11 +160,17 @@ function Profit() {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="w-8 pb-2" />
                     <th className="pb-2 font-medium">Project</th>
-                    <th className="pb-2 text-right font-medium">Paid</th>
+                    {/* The page promises cash and booked side by side. It used
+                        to show whichever one the basis picker was on, so you
+                        could never see the two together -- which is the only
+                        reason to put them on one page. */}
+                    <th className="pb-2 text-right font-medium">Booked revenue</th>
+                    <th className="pb-2 text-right font-medium">Payments</th>
                     <th className="pb-2 text-right font-medium">Variable</th>
-                    <th className="pb-2 text-right font-medium">Allocated</th>
-                    <th className="pb-2 text-right font-medium">Actual</th>
-                    <th className="pb-2 text-right font-medium">Profit</th>
+                    <th className="pb-2 text-right font-medium">Allocated fixed</th>
+                    <th className="pb-2 text-right font-medium">Actual cost</th>
+                    <th className="pb-2 text-right font-medium">Cash profit</th>
+                    <th className="pb-2 text-right font-medium">Booked profit</th>
                     <th className="pb-2 text-right font-medium">Margin</th>
                   </tr>
                 </thead>
@@ -173,11 +179,18 @@ function Profit() {
                     const variable = r.company_expense_total
                     const allocated = allocatedFor(r.paid_income)
                     const actual = variable + allocated
-                    const profit = (basis === 'cash' ? r.paid_income : r.project_total_value) - actual
+                    const cashProfit = r.paid_income - actual
+                    const bookedProfit = r.project_total_value - actual
+                    const profit = basis === 'cash' ? cashProfit : bookedProfit
+                    // The margin column used to come straight from the API's
+                    // gross_margin, which knows nothing about the allocated
+                    // fixed cost in the row beside it. The two disagreed.
+                    const revenue = basis === 'cash' ? r.paid_income : r.project_total_value
+                    const margin = revenue > 0 ? (profit / revenue) * 100 : null
                     const isOpen = expanded.has(r.project_id)
                     return (
-                      <>
-                        <tr key={r.project_id} className="cursor-pointer border-b last:border-0 hover:bg-muted/40" onClick={() => setExpanded((prev) => {
+                      <Fragment key={r.project_id}>
+                        <tr className="cursor-pointer border-b last:border-0 hover:bg-muted/40" onClick={() => setExpanded((prev) => {
                           const next = new Set(prev)
                           if (next.has(r.project_id)) next.delete(r.project_id)
                           else next.add(r.project_id)
@@ -185,17 +198,19 @@ function Profit() {
                         })}>
                           <td className="py-2">{isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</td>
                           <td className="py-2 font-medium">{r.project_name}<span className="ml-2 text-xs font-normal text-muted-foreground">{r.project_status ?? ''}</span></td>
+                          <td className="py-2 text-right tabular-nums text-muted-foreground">{formatINR(r.project_total_value)}</td>
                           <td className="py-2 text-right tabular-nums">{formatINR(r.paid_income)}</td>
                           <td className="py-2 text-right tabular-nums text-muted-foreground">{formatINR(variable)}</td>
                           <td className="py-2 text-right tabular-nums text-muted-foreground">{formatINR(allocated)}</td>
                           <td className="py-2 text-right tabular-nums">{formatINR(actual)}</td>
-                          <td className={`py-2 text-right font-semibold tabular-nums ${profit < 0 ? 'text-destructive' : 'text-success'}`}>{formatINR(profit)}</td>
-                          <td className="py-2 text-right tabular-nums">{r.gross_margin.toFixed(1)}%</td>
+                          <td className={`py-2 text-right tabular-nums ${basis === 'cash' ? 'font-semibold' : 'text-muted-foreground'} ${cashProfit < 0 ? 'text-destructive' : ''}`}>{formatINR(cashProfit)}</td>
+                          <td className={`py-2 text-right tabular-nums ${basis === 'booked' ? 'font-semibold' : 'text-muted-foreground'} ${bookedProfit < 0 ? 'text-destructive' : ''}`}>{formatINR(bookedProfit)}</td>
+                          <td className="py-2 text-right tabular-nums">{margin === null ? '—' : `${margin.toFixed(1)}%`}</td>
                         </tr>
                         {isOpen && (
-                          <tr key={`${r.project_id}-detail`} className="bg-muted/20">
+                          <tr className="bg-muted/20">
                             <td />
-                            <td colSpan={7} className="space-y-2 py-3 text-xs">
+                            <td colSpan={9} className="space-y-2 py-3 text-xs">
                               <div className="rounded-md border border-border bg-card p-3">
                                 <p className="font-semibold">Variable cost — {formatINR(variable)}</p>
                                 <p className="mt-1 text-muted-foreground">Project-level company expenses booked to {r.project_name} in range.</p>
@@ -220,7 +235,7 @@ function Profit() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     )
                   })}
                 </tbody>
@@ -265,7 +280,7 @@ function Profit() {
           ) : (
             <ul className="divide-y divide-border text-sm">
               {overheads.data.map((o) => (
-                <OverheadRow key={o.id} id={o.id} category={o.category} label={o.label} amount={o.amount} alloc={o.alloc_basis} month={month} />
+                <OverheadRow key={o.id} id={o.id} category={o.category} label={o.label} amount={o.amount} alloc={o.alloc_basis} month={month} appliesTo={o.month} />
               ))}
             </ul>
           )}
@@ -275,14 +290,18 @@ function Profit() {
   )
 }
 
-function OverheadRow({ id, category, label, amount, alloc, month }: { id: string; category: string; label: string | null; amount: number; alloc: string; month: string }) {
+function OverheadRow({ id, category, label, amount, alloc, month, appliesTo }: { id: string; category: string; label: string | null; amount: number; alloc: string; month: string; appliesTo?: string }) {
   const del = useDeleteFixedOverhead()
   const [editing, setEditing] = useState(false)
   return (
     <li className="flex items-center justify-between gap-3 py-2">
-      <span>
+      <span className="min-w-0">
         <span className="font-medium">{label ?? category}</span>{' '}
         <StatusBadge>{alloc}</StatusBadge>
+        <span className="block text-xs text-muted-foreground">
+          {category}
+          {appliesTo ? ` · ${new Date(appliesTo).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}` : ''}
+        </span>
       </span>
       <span className="flex items-center gap-2">
         <span className="tabular-nums">{formatINR(amount)}</span>
