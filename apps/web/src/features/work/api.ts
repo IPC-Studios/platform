@@ -118,3 +118,27 @@ export function useMarkClientSent() {
     onError: () => {},
   })
 }
+
+/**
+ * Pull a client delivery link back.
+ *
+ * `/work/submissions/:id/revoke-delivery` has existed since 0010 and nothing
+ * called it, so "a client link you can revoke later" was a promise the app
+ * had no way to keep. Revoking expires the token, marks the delivery row and
+ * makes the public page refuse it.
+ */
+export function useRevokeDelivery() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      callApi(`/work/submissions/${id}/revoke-delivery`, {
+        method: 'POST',
+        responseSchema: z.object({ ok: z.boolean() }),
+      }),
+    onSuccess: () => {
+      toast.success('Link revoked. The client can no longer open it.')
+      void qc.invalidateQueries({ queryKey: ['work', 'submissions'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}

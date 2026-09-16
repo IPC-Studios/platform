@@ -16,6 +16,12 @@ export const workSubmission = z.object({
   review_state: z.string().nullable().default(null),
   version: z.number().int().default(1),
   client_sent_at: z.string().nullable().default(null),
+  /**
+   * When the client link was pulled. The send dialog promises the link can be
+   * revoked; without this the app could not say whether it had been, so the
+   * promise had nothing behind it.
+   */
+  revoked_at: z.string().nullable().default(null),
   client_channel: z.string().nullable().default(null),
   submission_link: z.string().nullable(),
   location_note: z.string().nullable(),

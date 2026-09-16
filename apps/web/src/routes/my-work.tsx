@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Bell, CalendarDays, CheckCircle2, Clock, ExternalLink, Layers, Mic, Plus, Pencil, Send } from 'lucide-react'
+import { AlertCircle, Ban, Bell, CalendarDays, CheckCircle2, Clock, ExternalLink, Layers, Mic, Plus, Pencil, Send } from 'lucide-react'
 import { shootListItem, workSubmission, type SubmitWorkRequest, type TaskListItem, type TaskStatus, type UpdateWorkSubmissionRequest, type WorkSubmission, z } from '@ipc/contracts'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
@@ -18,8 +18,9 @@ import { humanize } from '@/shared/ui/format'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { useMyTasks, useUpdateMyTaskStatus } from '@/features/tasks/api'
 import { useProjects } from '@/features/projects/api'
-import { useWorkReminderSettings } from '@/features/work/api'
+import { useRevokeDelivery, useWorkReminderSettings } from '@/features/work/api'
 import { SendWorkToClientDialog } from '@/features/work/SendWorkToClientDialog'
+import { useConfirm } from '@/shared/ui/confirm'
 import { todayISO } from '@/features/tasks/board'
 
 const list = workSubmission.array()
@@ -404,6 +405,21 @@ function TabButton({ active, onClick, label }: { active: boolean; onClick: () =>
 }
 
 function SubmissionsSection({ submissions, onSend }: { submissions: WorkSubmission[]; onSend: (s: WorkSubmission) => void }) {
+  const revoke = useRevokeDelivery()
+  const confirm = useConfirm()
+
+  // Revoking is not undoable — the token is expired, not paused — and the
+  // client loses a link they may be using right now.
+  async function onRevoke(s: WorkSubmission) {
+    const yes = await confirm({
+      title: 'Revoke this client link?',
+      description: `${s.title ?? 'This submission'} will stop opening for the client. Sending again issues a new link.`,
+      destructive: true,
+      confirmLabel: 'Revoke link',
+    })
+    if (yes) revoke.mutate(s.id)
+  }
+
   if (submissions.length === 0) return null
   return (
     <div className="mt-8 flex flex-col gap-2">
@@ -424,7 +440,10 @@ function SubmissionsSection({ submissions, onSend }: { submissions: WorkSubmissi
                 <p className="mt-1 text-sm text-muted-foreground">Review: {s.review_notes}</p>
               )}
               {s.client_sent_at && (
-                <p className="mt-1 text-xs text-muted-foreground">Sent to client{s.client_channel ? ` via ${s.client_channel}` : ''}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Sent to client{s.client_channel ? ` via ${s.client_channel}` : ''}
+                  {s.revoked_at ? ' · link revoked' : ''}
+                </p>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -433,7 +452,21 @@ function SubmissionsSection({ submissions, onSend }: { submissions: WorkSubmissi
               )}
               {s.status === 'approved' && s.submission_link && (
                 <Button size="sm" variant="outline" onClick={() => onSend(s)}>
-                  <Send /> Send
+                  <Send /> {s.client_sent_at ? 'Send again' : 'Send'}
+                </Button>
+              )}
+              {/* The send dialog promises the link can be pulled back. This is
+                  the control that keeps the promise — the wrong cut of a film
+                  sitting on a link the client still has is the case it is for. */}
+              {s.client_sent_at && !s.revoked_at && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={revoke.isPending}
+                  onClick={() => void onRevoke(s)}
+                >
+                  <Ban /> Revoke link
                 </Button>
               )}
               <StatusBadge tone={TONE[s.status]}>{humanize(s.status)}</StatusBadge>

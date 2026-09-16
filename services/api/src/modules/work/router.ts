@@ -43,7 +43,7 @@ export const workRouter = new Hono<AppEnv>()
         (sql) =>
           sql`select id, project_id, task_id, title, work_type, method, storage_ref,
                       hard_disk_label, review_required, review_state, version,
-                      client_sent_at, client_channel,
+                      client_sent_at, client_channel, revoked_at,
                       submission_link, location_note, notes, status, review_notes, created_at,
                       disk_name, disk_location, folder_path
               from team_work_submissions
