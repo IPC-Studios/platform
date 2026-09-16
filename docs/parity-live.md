@@ -552,3 +552,35 @@ Production does (00_bootstrap.sql); without it any policy calling `auth.uid()`
 fails with "permission denied for schema auth", which reads as a policy
 rejection and is not one. It cost a wrong diagnosis here before the probe
 showed `is_platform_admin()` returning true all along.
+
+## Round: project tab CONTENTS, not affordances (2026-09-16)
+
+The earlier crawl captured buttons, tabs and headings. That is why it reported
+the project tabs at parity and was wrong: it could see "Billing exists, has
+Payments" but never "the report inside it has five cards ours does not". This
+round compares what each tab actually says.
+
+| Tab | What ours was missing |
+| --- | --- |
+| Billing | The whole **Monthly Profitability Report** — month picker, allocation method, and booked revenue / variable / allocated fixed / actual cost / profit. Ours listed package cost, received and balance: the money in, nothing about what the project cost to run. Also the Quotation card with its visibility toggle, which lived only behind a Quick action |
+| Overview | The client's **email** and **address** — the detail query never selected them, so reaching a client from their own project meant another screen. And no way to add a reminder: the card linked to the board, where you had to re-attach it by hand |
+| Completed Work | Every row read "Open submission" — a column of identical links. Now the title, work type, version, and the **hard-disk handover** (which disk, where, which folder) the old app's own description promises. Plus a status filter and the reason a sent-back row came back |
+| Data | No summary. The question that tab answers is "is any of this still in one place only", so it now opens with six figures |
+| Tasks | No distinction between a deliverable the studio promised the client and an extra added mid-project — possible now that a task carries `deliverable_id` |
+| Referrals | Nothing. Ours has the campaign picker, reward, share link and received list against a one-line description in the old app |
+
+### The lesson about the crawler
+
+An affordance crawl is good at "is this screen here" and blind to "does this
+screen say enough". Both passes are needed, and the content one cannot be
+automated the same way — it needs the two screens side by side and a read of
+what each is actually for.
+
+### One place ours deliberately differs
+
+The old app says a project is eligible for fixed-cost allocation if it has at
+least one shoot in the month. Ours does not work that way:
+`project_profitability_report`'s date window scopes payments and expenses only
+and returns every project that is not cancelled, with booked revenue always the
+project's whole value. The copy says what ours does rather than repeating a
+rule we do not implement.
