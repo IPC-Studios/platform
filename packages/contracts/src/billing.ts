@@ -237,8 +237,15 @@ export type ReceivedPaymentSortBy = z.infer<typeof receivedPaymentSortBy>
 
 export const receivedPayment = z.object({
   id: uuid,
-  project_id: uuid,
+  /**
+   * Nullable since 0145: a payment can be against an invoice that has no
+   * project. One of project_id / invoice_id is always set — the database
+   * refuses money that belongs to nothing.
+   */
+  project_id: uuid.nullable(),
   project_name: z.string().nullable(),
+  invoice_id: uuid.nullable().default(null),
+  invoice_number: z.string().nullable().default(null),
   client_id: uuid.nullable(),
   client_name: z.string().nullable(),
   client_phone: z.string().nullable(),
@@ -304,7 +311,9 @@ export type ReceivedPaymentListResponse = z.infer<typeof receivedPaymentListResp
 
 export const createReceivedPaymentRequest = z
   .object({
-    project_id: uuid,
+    /** Optional since 0145 — but see the refine below: one link is required. */
+    project_id: uuid.nullable().optional(),
+    invoice_id: uuid.nullable().optional(),
     client_id: uuid.nullable().optional(),
     amount: money.refine((v) => v > 0, 'amount must be greater than zero'),
     description: z.string().trim().max(500).nullish(),
@@ -315,6 +324,16 @@ export const createReceivedPaymentRequest = z
     file_url: z.string().trim().max(1000).nullish(),
   })
   .superRefine((v, ctx) => {
+    // Money has to belong to something, or it can never be reconciled. The
+    // database says the same thing (received_payments_linked_check); this is
+    // so the person gets a sentence instead of a constraint name.
+    if (!v.project_id && !v.invoice_id) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['project_id'],
+        message: 'Choose the project or the invoice this payment is against.',
+      })
+    }
     if (v.is_gst) {
       const g = (v.gst_number ?? '').trim()
       if (!g) {

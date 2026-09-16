@@ -261,12 +261,16 @@ export const billingRouter = new Hono<AppEnv>()
                      'cgst', it.cgst, 'sgst', it.sgst, 'igst', it.igst) order by it.id)
                    from invoice_items it where it.invoice_id = i.id
                  ), '[]'::jsonb) as items,
+                  -- From the ledger (0145), not the retired invoice_payments
+                  -- table: a payment recorded on the project against this
+                  -- invoice has to appear here too, or the two screens go on
+                  -- telling different stories about the same money.
                   coalesce((
                     select jsonb_agg(jsonb_build_object(
                       'id', pmt.id, 'amount', pmt.amount, 'paid_on', pmt.paid_on, 'mode', pmt.mode,
-                      'reference', pmt.reference, 'notes', pmt.notes)
+                      'reference', pmt.reference, 'notes', pmt.notes, 'status', pmt.status)
                       order by pmt.paid_on)
-                    from invoice_payments pmt where pmt.invoice_id = i.id
+                    from received_payments pmt where pmt.invoice_id = i.id
                   ), '[]'::jsonb) as payments
            from invoices i
           left join clients cl on cl.id = i.client_id
@@ -430,19 +434,25 @@ export const billingRouter = new Hono<AppEnv>()
     const rows = await attempt(c, 'billing.payments_list', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const base = await sql`
+          -- LEFT join, deliberately: since 0145 a payment can be against an
+          -- invoice with no project, and an inner join would drop those rows
+          -- from the list entirely -- money that exists and cannot be seen.
           select rp.id, rp.project_id, p.name as project_name,
-                 coalesce(rp.client_id, p.client_id) as client_id,
+                 rp.invoice_id, i.invoice_number,
+                 coalesce(rp.client_id, p.client_id, i.client_id) as client_id,
                  cl.name as client_name, cl.phone as client_phone, cl.email as client_email,
                  rp.amount, rp.description, rp.status,
                  coalesce(rp.is_gst, false) as is_gst, rp.gst_number,
                  coalesce(to_char(rp.date_received, 'YYYY-MM-DD'), to_char(rp.paid_on, 'YYYY-MM-DD')) as date_received,
                  rp.file_url, rp.created_at
             from received_payments rp
-            join projects p on p.id = rp.project_id
-            left join clients cl on cl.id = coalesce(rp.client_id, p.client_id)
+            left join projects p on p.id = rp.project_id
+            left join invoices i on i.id = rp.invoice_id
+            left join clients cl on cl.id = coalesce(rp.client_id, p.client_id, i.client_id)
            where rp.company_id = ${c.get('auth').companyId}`
         type R = {
-          id: string; project_id: string; project_name: string | null; client_id: string | null;
+          id: string; project_id: string | null; project_name: string | null;
+          invoice_id: string | null; invoice_number: string | null; client_id: string | null;
           client_name: string | null; client_phone: string | null; client_email: string | null;
           amount: string | number; description: string | null; status: string;
           is_gst: boolean; gst_number: string | null; date_received: string | null;
@@ -536,16 +546,21 @@ export const billingRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'billing.payment_get', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
+          -- LEFT join, deliberately: since 0145 a payment can be against an
+          -- invoice with no project, and an inner join would drop those rows
+          -- from the list entirely -- money that exists and cannot be seen.
           select rp.id, rp.project_id, p.name as project_name,
-                 coalesce(rp.client_id, p.client_id) as client_id,
+                 rp.invoice_id, i.invoice_number,
+                 coalesce(rp.client_id, p.client_id, i.client_id) as client_id,
                  cl.name as client_name, cl.phone as client_phone, cl.email as client_email,
                  rp.amount, rp.description, rp.status,
                  coalesce(rp.is_gst, false) as is_gst, rp.gst_number,
                  coalesce(to_char(rp.date_received, 'YYYY-MM-DD'), to_char(rp.paid_on, 'YYYY-MM-DD')) as date_received,
                  rp.file_url, rp.created_at
             from received_payments rp
-            join projects p on p.id = rp.project_id
-            left join clients cl on cl.id = coalesce(rp.client_id, p.client_id)
+            left join projects p on p.id = rp.project_id
+            left join invoices i on i.id = rp.invoice_id
+            left join clients cl on cl.id = coalesce(rp.client_id, p.client_id, i.client_id)
            where rp.id = ${id} and rp.company_id = ${c.get('auth').companyId}`
         const r = rows[0] as Record<string, unknown> | undefined
         if (!r) return null
@@ -569,21 +584,41 @@ export const billingRouter = new Hono<AppEnv>()
     const auth = c.get('auth')
     const row = await attempt(c, 'billing.payment_create', () =>
       withUser(c.env, auth.userId, async (sql) => {
-        const proj = await sql<{ id: string; client_id: string | null }[]>`
-          select id, client_id from projects where id = ${d.project_id} and company_id = ${auth.companyId}`
-        if (!proj[0]) return 'bad_project' as const
+        // Either link, or both. The contract already refused neither; each one
+        // given still has to belong to this studio.
+        let projectClient: string | null = null
+        if (d.project_id) {
+          const proj = await sql<{ id: string; client_id: string | null }[]>`
+            select id, client_id from projects where id = ${d.project_id} and company_id = ${auth.companyId}`
+          if (!proj[0]) return 'bad_project' as const
+          projectClient = proj[0].client_id
+        }
+        let invoiceClient: string | null = null
+        let invoiceProject: string | null = null
+        if (d.invoice_id) {
+          const inv = await sql<{ id: string; client_id: string | null; project_id: string | null }[]>`
+            select id, client_id, project_id from invoices
+             where id = ${d.invoice_id} and company_id = ${auth.companyId}`
+          if (!inv[0]) return 'bad_invoice' as const
+          invoiceClient = inv[0].client_id
+          invoiceProject = inv[0].project_id
+        }
         if (d.client_id) {
           const cl = await sql<{ id: string }[]>`
             select id from clients where id = ${d.client_id} and company_id = ${auth.companyId}`
           if (!cl[0]) return 'bad_client' as const
         }
-        const clientId = d.client_id ?? proj[0]?.client_id ?? null
+        // A payment against an invoice belongs to that invoice's project too,
+        // unless one was named — otherwise settling an invoice would leave the
+        // project's own figures untouched, which is the split this replaced.
+        const projectId = d.project_id ?? invoiceProject ?? null
+        const clientId = d.client_id ?? projectClient ?? invoiceClient ?? null
         const dateReceived = d.date_received ?? new Date().toISOString().slice(0, 10)
         const gst = (d.gst_number ?? '').trim() || null
         const made = await sql<{ id: string }[]>`
           insert into received_payments
-            (company_id, project_id, client_id, amount, description, status, is_gst, gst_number, date_received, file_url, paid_on, recorded_by)
-          values (${auth.companyId}, ${d.project_id}, ${clientId}, ${d.amount},
+            (company_id, project_id, invoice_id, client_id, amount, description, status, is_gst, gst_number, date_received, file_url, paid_on, recorded_by)
+          values (${auth.companyId}, ${projectId}, ${d.invoice_id ?? null}, ${clientId}, ${d.amount},
                   ${d.description?.trim() || null}, ${d.status}, ${d.is_gst}, ${gst},
                   ${dateReceived}, ${d.file_url?.trim() || null}, ${dateReceived}, ${auth.userId})
           returning id`
@@ -591,6 +626,7 @@ export const billingRouter = new Hono<AppEnv>()
       }),
     )
     if (row === 'bad_project') fail(422, 'Selected project does not belong to this studio.')
+    if (row === 'bad_invoice') fail(422, 'Selected invoice does not belong to this studio.')
     if (row === 'bad_client') fail(422, 'Selected client does not belong to this studio.')
     if (!row) fail(400, 'We could not save this payment.')
     await audit(c, { action: 'received_payment.create', entityType: 'received_payment', entityId: row.id, after: d })
