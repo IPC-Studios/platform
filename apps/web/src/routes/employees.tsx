@@ -280,7 +280,13 @@ function Directory({ onAdd }: { onAdd: () => void }) {
         ) : rows.length === 0 ? (
           <Card>
             <CardContent className="py-4">
-              {total === 0 ? (
+              {/* "No employees yet" and "none match this filter" are different
+                  sentences, and the wrong one is worse than none: a studio of
+                  forty told to add its first employee assumes the list broke.
+                  This used to read `total === 0`, which worked only while the
+                  total ignored the filters -- now that it follows them, the
+                  question has to be asked directly. */}
+              {total === 0 && !hasActiveFilters(filters) && tab === 'all' ? (
                 <EmptyState
                   title="No employees found yet."
                   description="Add your first employee to start building your team."
