@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { companyProfile } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Eye,
@@ -106,6 +107,23 @@ function ProjectQuotation() {
   if (isLoading) return <SkeletonCards count={2} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
   const project = data
+
+  /**
+   * What the client will notice is absent. Named in the studio's words rather
+   * than as column names — "GST number", not invoice_gst_number.
+   */
+  const c = company
+  const missingBranding = c
+    ? ([
+        [!c.invoice_logo_url && !c.avatar_url, 'logo'],
+        [!c.invoice_gst_number, 'GST number'],
+        [!c.invoice_address, 'address'],
+        [!c.invoice_phone, 'phone'],
+        [!c.invoice_email, 'email'],
+      ] as const)
+        .filter(([missing]) => missing)
+        .map(([, label]) => label)
+    : []
 
   const show = (key: string) => prefs[key] ?? true
   const received = project.payments.reduce((s, p) => s + p.amount, 0)
@@ -257,6 +275,22 @@ function ProjectQuotation() {
           </StatusBadge>
         )}
       </div>
+
+      {/* A quotation with no logo, GST number or address goes out looking like
+          a draft. The studio cannot see that from here — they are reading their
+          own document and their eye fills in what is missing. */}
+      {missingBranding.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+          <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
+          <span className="min-w-0 flex-1">
+            Complete your studio branding to make quotations look professional. Missing:{' '}
+            {missingBranding.join(', ')}.
+          </span>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/settings/company">Open settings</Link>
+          </Button>
+        </div>
+      )}
 
       {/* Acknowledgement state: what the client sees and how they answer. */}
       {!project.show_quotation ? (
