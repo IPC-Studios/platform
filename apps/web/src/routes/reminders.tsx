@@ -9,6 +9,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Select } from '@/shared/ui/select'
 import {
+  type ReminderFilters,
   useReminders,
   useSaveReminder,
   useUpdateReminderStatus,
@@ -111,7 +112,13 @@ function RemindersContent() {
   })
 
   const { session } = useAuth()
-  const { data } = useReminders()
+  // The board listed everything, always. The API has taken a status,
+  // priority, entity, due range and overdue-only filter since 0107.
+  const [filters, setFilters] = useState<ReminderFilters>({})
+  const { data } = useReminders(filters)
+  const setFilter = (patch: Partial<ReminderFilters>) => setFilters((f) => ({ ...f, ...patch }))
+  const anyFilter =
+    !!filters.status || !!filters.priority || !!filters.entity_type || !!filters.due_from || !!filters.due_to || !!filters.overdue
   const saveReminder = useSaveReminder()
   const updateStatus = useUpdateReminderStatus()
   const deleteReminder = useDeleteReminder()
@@ -175,6 +182,102 @@ function RemindersContent() {
           </Button>
         }
       />
+
+      {/* Narrow the board down to the ones being asked about. */}
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground" htmlFor="rf-status">
+            Status
+          </label>
+          <Select
+            id="rf-status"
+            value={filters.status ?? ''}
+            onChange={(e) => setFilter({ status: e.target.value || undefined })}
+            className="w-36"
+          >
+            <option value="">Any status</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option value="dismissed">Dismissed</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground" htmlFor="rf-priority">
+            Priority
+          </label>
+          <Select
+            id="rf-priority"
+            value={filters.priority ?? ''}
+            onChange={(e) => setFilter({ priority: e.target.value || undefined })}
+            className="w-36"
+          >
+            <option value="">Any priority</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground" htmlFor="rf-entity">
+            Linked to
+          </label>
+          <Select
+            id="rf-entity"
+            value={filters.entity_type ?? ''}
+            onChange={(e) => setFilter({ entity_type: e.target.value || undefined })}
+            className="w-36"
+          >
+            <option value="">Any entity</option>
+            <option value="lead">Lead</option>
+            <option value="project">Project</option>
+            <option value="client">Client</option>
+            <option value="invoice">Invoice</option>
+            <option value="enquiry">Enquiry</option>
+            <option value="task">Task</option>
+            <option value="shoot">Shoot</option>
+            <option value="custom">Not linked</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground" htmlFor="rf-from">
+            Due from
+          </label>
+          <Input
+            id="rf-from"
+            type="date"
+            className="w-40"
+            value={(filters.due_from ?? '').slice(0, 10)}
+            onChange={(e) => setFilter({ due_from: e.target.value || undefined })}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground" htmlFor="rf-to">
+            Due to
+          </label>
+          <Input
+            id="rf-to"
+            type="date"
+            className="w-40"
+            value={(filters.due_to ?? '').slice(0, 10)}
+            onChange={(e) => setFilter({ due_to: e.target.value || undefined })}
+          />
+        </div>
+        <label className="flex items-center gap-2 pb-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4"
+            checked={filters.overdue ?? false}
+            onChange={(e) => setFilter({ overdue: e.target.checked || undefined })}
+          />
+          Overdue only
+        </label>
+        {anyFilter && (
+          <Button variant="ghost" size="sm" className="mb-1" onClick={() => setFilters({})}>
+            Clear
+          </Button>
+        )}
+      </div>
 
       {summary && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

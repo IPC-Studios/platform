@@ -12,15 +12,28 @@ const created = z.object({ id: z.string().uuid() })
 /** Mutation responses whose body the UI discards; unknown keeps `any` out of the app. */
 const anySchema = z.unknown()
 
-export function useReminders(filters?: { status?: string; priority?: string }) {
+export type ReminderFilters = {
+  status?: string | undefined
+  priority?: string | undefined
+  entity_type?: string | undefined
+  due_from?: string | undefined
+  due_to?: string | undefined
+  overdue?: boolean | undefined
+}
+
+export function useReminders(filters?: ReminderFilters) {
   const { session } = useAuth()
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   if (filters?.priority) params.set('priority', filters.priority)
+  if (filters?.entity_type) params.set('entity_type', filters.entity_type)
+  if (filters?.due_from) params.set('due_from', filters.due_from)
+  if (filters?.due_to) params.set('due_to', filters.due_to)
+  if (filters?.overdue) params.set('overdue', 'true')
   const qs = params.toString()
 
   return useQuery({
-    queryKey: ['reminders', filters?.status ?? 'all', filters?.priority ?? 'all'],
+    queryKey: ['reminders', qs],
     queryFn: () => callApi(`/reminders${qs ? `?${qs}` : ''}`, { responseSchema: reminderList }),
     enabled: !!session,
     staleTime: 15_000,

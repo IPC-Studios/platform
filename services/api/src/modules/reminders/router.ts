@@ -34,6 +34,18 @@ export const remindersRouter = new Hono<AppEnv>()
     const status = rawStatus || null
     const priority = rawPriority || null
     const userId = rawUserId || null
+    // list_reminders has taken these since 0107. The router passed three of
+    // eleven arguments, so the board could only ever be filtered by status
+    // and priority -- and the web app had no filter bar at all.
+    const entityType = c.req.query('entity_type') || null
+    const dueFrom = c.req.query('due_from') || null
+    const dueTo = c.req.query('due_to') || null
+    const overdue = c.req.query('overdue') === 'true' ? true : null
+    const search = c.req.query('q') || null
+    if (entityType && !/^[a-z_]{1,32}$/.test(entityType)) fail(422, 'Invalid entity type.')
+    for (const [name, v] of [['due_from', dueFrom], ['due_to', dueTo]] as const) {
+      if (v && Number.isNaN(new Date(v).getTime())) fail(422, `Invalid ${name} date.`)
+    }
 
     const rows = await attempt(c, 'reminders.list', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
@@ -41,7 +53,12 @@ export const remindersRouter = new Hono<AppEnv>()
           select list_reminders(
             p_status => ${status}::text,
             p_priority => ${priority}::text,
-            p_user_id => ${userId}::uuid
+            p_user_id => ${userId}::uuid,
+            p_entity_type => ${entityType}::text,
+            p_due_from => ${dueFrom}::timestamptz,
+            p_due_to => ${dueTo}::timestamptz,
+            p_overdue => ${overdue}::boolean,
+            p_search => ${search}::text
           ) as list_reminders`
         return rpcJson(result[0]?.list_reminders, {
           items: [],
