@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Plus, IndianRupee, Download, ChevronLeft, ChevronRight, Eye, Pencil, Trash2, Copy, Mail, MessageCircle, Receipt, Settings2 } from 'lucide-react'
+import { Plus, IndianRupee, Download, ChevronLeft, ChevronRight, Eye, Pencil, Trash2, Copy, Mail, MessageCircle, Landmark, Receipt, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { buildMailtoUrl, friendlyInvoiceError, type ReceivedPayment } from '@ipc/contracts'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -26,6 +26,7 @@ import {
   useCreateInvoice,
   useRecordPayment,
   useReceivedPayments,
+  useSetPaymentCleared,
   type ReceivedPaymentFilters,
 } from '@/features/billing/api'
 import { emptyInvoiceForm, useInvoiceForm, InvoiceFormFields } from '@/features/billing/InvoiceForm'
@@ -603,6 +604,33 @@ type PaymentStatusFilter = 'all' | 'paid' | 'pending' | 'gst'
 const PAYMENT_TONE = { paid: 'success', pending: 'warning' } as const
 
 /** Standalone received-payments tab (Lovable billing parity). Invoices stay untouched above. */
+/**
+ * Whether this money has been confirmed as reaching the bank.
+ *
+ * A separate fact from "paid": paid is what the studio recorded, banked is
+ * what somebody checked against the account. Keeping them apart is what lets
+ * the reconciliation screen show a payment that never actually arrived.
+ * Only a paid row can be banked — there is nothing to confirm about a promise.
+ */
+function BankedCell({ row }: { row: ReceivedPayment }) {
+  const set = useSetPaymentCleared()
+  if (row.status !== 'paid') return <span className="text-xs text-muted-foreground">—</span>
+  const banked = !!row.cleared_at
+  return (
+    <button
+      type="button"
+      disabled={set.isPending}
+      onClick={() => set.mutate({ id: row.id, cleared: !banked })}
+      className="inline-flex items-center gap-1.5 text-xs disabled:opacity-60"
+      title={banked ? 'Confirmed in the bank — click to undo' : 'Mark as reaching the bank'}
+    >
+      <StatusBadge tone={banked ? 'success' : 'neutral'}>
+        {banked ? <><Landmark className="size-3" /> Banked</> : 'Not confirmed'}
+      </StatusBadge>
+    </button>
+  )
+}
+
 function PaymentsSection() {
   const isMobile = useIsMobile()
   const [searchInput, setSearchInput] = useState('')
@@ -788,6 +816,7 @@ function PaymentsSection() {
                     <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort('project_name')} className="hover:text-foreground">Project {sortBy === 'project_name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button></th>
                     <th className="px-3 py-2 text-right font-medium"><button type="button" onClick={() => toggleSort('amount')} className="hover:text-foreground">Amount {sortBy === 'amount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button></th>
                     <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort('status')} className="hover:text-foreground">Status {sortBy === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</button></th>
+                    <th className="px-3 py-2 font-medium">Banked</th>
                     <th className="px-3 py-2 font-medium">GST</th>
                     <th className="px-3 py-2 text-right font-medium">Actions</th>
                   </tr>
@@ -800,6 +829,7 @@ function PaymentsSection() {
                       <td className="px-3 py-2 text-muted-foreground">{r.project_name ?? '—'}</td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatINR(r.amount)}</td>
                       <td className="px-3 py-2"><StatusBadge tone={PAYMENT_TONE[r.status]}>{humanize(r.status)}</StatusBadge></td>
+                      <td className="px-3 py-2"><BankedCell row={r} /></td>
                       <td className="px-3 py-2 text-muted-foreground">{r.is_gst ? (<span className="inline-flex items-center gap-1 text-xs"><Receipt className="size-3" /> {r.gst_number ?? 'GST'}</span>) : '—'}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-1">

@@ -36,6 +36,7 @@ import { FinancialsPage } from '@/routes/financials'
 import { MonthlyProfitPage } from '@/routes/financials/profit'
 import { GopoPage } from '@/routes/financials/gopo'
 import { GstAnalysisPage } from '@/routes/financials/gst-analysis'
+import { ReconciliationPage } from '@/routes/financials/reconciliation'
 import { CalculatedExpensesPage } from '@/routes/financials/calculated-expenses'
 import { FollowUpsPage } from '@/routes/follow-ups'
 import { CrmContactsPage } from '@/routes/crm/contacts'
@@ -224,6 +225,7 @@ const routeTree = rootRoute.addChildren([
   route('/financials/profit', MonthlyProfitPage),
   route('/financials/gopo', GopoPage),
   route('/financials/gst-analysis', GstAnalysisPage),
+  route('/financials/reconciliation', ReconciliationPage),
   route('/financials/calculated-expenses', CalculatedExpensesPage),
   route('/notifications', NotificationsPage),
   route('/notifications/generate', () => <NotificationsPage generate />),

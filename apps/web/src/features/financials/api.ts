@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   expense,
+  reconciliationSummary,
   projectFinancials,
   profitabilityReport,
   financialOverview,
@@ -301,5 +302,21 @@ export function useExpenseSummary(filters: ExpenseFilters = {}) {
       callApi(`/financials/expenses/summary${qs ? `?${qs}` : ''}`, { responseSchema: expenseSummary }),
     enabled: !!session && access.hasModule('company_expenses'),
     staleTime: 15_000,
+  })
+}
+
+/**
+ * The reconciliation report: every figure a difference between two
+ * independently-computed numbers. Short staleTime because the whole value of
+ * the page is that a divergence is noticed the day it appears.
+ */
+export function useReconciliation() {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['financials', 'reconciliation'],
+    queryFn: () => callApi('/financials/reconciliation', { responseSchema: reconciliationSummary }),
+    enabled: !!session && access.hasModule('financials'),
+    staleTime: 30_000,
   })
 }

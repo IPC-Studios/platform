@@ -4,6 +4,7 @@ import {
   createInvoiceBankAccountRequest,
   createInvoiceRequest,
   createReceivedPaymentRequest,
+  setPaymentClearedRequest,
   updateInvoiceRequest,
   updateReceivedPaymentRequest,
   gstState,
@@ -444,7 +445,7 @@ export const billingRouter = new Hono<AppEnv>()
                  rp.amount, rp.description, rp.status,
                  coalesce(rp.is_gst, false) as is_gst, rp.gst_number,
                  coalesce(to_char(rp.date_received, 'YYYY-MM-DD'), to_char(rp.paid_on, 'YYYY-MM-DD')) as date_received,
-                 rp.file_url, rp.created_at
+                 rp.file_url, rp.cleared_at, rp.created_at
             from received_payments rp
             left join projects p on p.id = rp.project_id
             left join invoices i on i.id = rp.invoice_id
@@ -456,7 +457,7 @@ export const billingRouter = new Hono<AppEnv>()
           client_name: string | null; client_phone: string | null; client_email: string | null;
           amount: string | number; description: string | null; status: string;
           is_gst: boolean; gst_number: string | null; date_received: string | null;
-          file_url: string | null; created_at: string;
+          file_url: string | null; cleared_at: string | null; created_at: string;
         }
         let filtered = (base as unknown as R[]).filter((r) => {
           if (status === 'paid' || status === 'pending') {
@@ -520,6 +521,7 @@ export const billingRouter = new Hono<AppEnv>()
           gst_number: r.gst_number,
           date_received: r.date_received,
           file_url: r.file_url,
+          cleared_at: r.cleared_at ? new Date(r.cleared_at).toISOString() : null,
           created_at: new Date(r.created_at).toISOString(),
         }))
       }),
@@ -563,7 +565,7 @@ export const billingRouter = new Hono<AppEnv>()
                  rp.amount, rp.description, rp.status,
                  coalesce(rp.is_gst, false) as is_gst, rp.gst_number,
                  coalesce(to_char(rp.date_received, 'YYYY-MM-DD'), to_char(rp.paid_on, 'YYYY-MM-DD')) as date_received,
-                 rp.file_url, rp.created_at
+                 rp.file_url, rp.cleared_at, rp.created_at
             from received_payments rp
             left join projects p on p.id = rp.project_id
             left join invoices i on i.id = rp.invoice_id
@@ -582,6 +584,39 @@ export const billingRouter = new Hono<AppEnv>()
     )
     if (!row) fail(404, 'That payment was not found.')
     return c.json(receivedPayment.parse(row))
+  })
+
+  /**
+   * Confirm that a recorded payment actually reached the bank — or take that
+   * confirmation back.
+   *
+   * `received` is what the studio wrote down; `banked` is what it has checked.
+   * Keeping them apart is what lets the reconciliation screen show a cheque
+   * that never cleared, instead of counting it as money twice over.
+   */
+  .post('/payments/:id/cleared', requireAction('billing', 'edit'), async (c) => {
+    const parsed = setPaymentClearedRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Say whether this payment has cleared.')
+    const id = uuidParam(c)
+    const auth = c.get('auth')
+    const row = await attempt(c, 'billing.payment_cleared', () =>
+      withUser(c.env, auth.userId, async (sql) => {
+        // Only money the studio says it has can be confirmed as arrived.
+        const rows = await sql<{ id: string }[]>`
+          update received_payments
+             set cleared_at = ${parsed.data.cleared ? sql`now()` : sql`null`}
+           where id = ${id} and company_id = ${auth.companyId} and status = 'paid'
+          returning id`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(404, 'That payment was not found, or is still pending.')
+    await audit(c, {
+      action: parsed.data.cleared ? 'received_payment.cleared' : 'received_payment.uncleared',
+      entityType: 'received_payment',
+      entityId: id,
+    })
+    return c.json({ ok: true })
   })
 
   .post('/payments', requireAction('billing', 'create'), async (c) => {

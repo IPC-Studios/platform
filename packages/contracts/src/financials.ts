@@ -161,3 +161,68 @@ export const financialOverview = z.object({
   salaries_warning: z.string().nullable().nullish(),
 })
 export type FinancialOverview = z.infer<typeof financialOverview>
+
+// ── reconciliation ────────────────────────────────────────────────
+/**
+ * The screen where two derivations of the same rupee have to agree.
+ *
+ * Every figure is a difference between two independently-computed numbers:
+ * invoiced vs received, received vs banked, project value vs invoiced, owed vs
+ * settled. A split like the two payment ledgers shows up here as a column
+ * rather than as two screens nobody compares.
+ */
+const reconProject = z.object({
+  project_id: uuid,
+  name: z.string(),
+  status: z.string().nullable(),
+  project_value: money,
+  invoiced: money,
+  received: money,
+  banked: money,
+  outstanding: money,
+  unbilled: money,
+  unbanked: money,
+})
+export type ReconProject = z.infer<typeof reconProject>
+
+const reconMember = z.object({
+  user_id: uuid,
+  name: z.string().nullable(),
+  due: money,
+  settled: money,
+  outstanding: money,
+  overpaid: money,
+})
+export type ReconMember = z.infer<typeof reconMember>
+
+export const reconciliationSummary = z.object({
+  money_in: z.object({
+    project_value: money,
+    invoiced: money,
+    received: money,
+    banked: money,
+    /** Invoiced and not yet received — what clients still owe on sent bills. */
+    outstanding: money,
+    /** Sold and never billed. Nothing else in the app shows this. */
+    unbilled: money,
+    /** Recorded but not confirmed in the bank. */
+    unbanked: money,
+    projects: z.array(reconProject).default([]),
+  }),
+  money_out: z.object({
+    due: money,
+    settled: money,
+    outstanding: money,
+    /** Settled beyond what the booking was costed at. */
+    overpaid: money,
+    members: z.array(reconMember).default([]),
+  }),
+  /** Rules the schema is supposed to hold, counted rather than trusted. */
+  health: z.object({
+    payments_linked_to_nothing: z.coerce.number().int().default(0),
+    invoices_paid_with_balance: z.coerce.number().int().default(0),
+    invoices_unpaid_but_settled: z.coerce.number().int().default(0),
+    payments_client_mismatch: z.coerce.number().int().default(0),
+  }),
+})
+export type ReconciliationSummary = z.infer<typeof reconciliationSummary>

@@ -16,6 +16,7 @@ import {
   gstAnalysisRequest,
   profitabilityReportQuery,
   profitabilityReport,
+  reconciliationSummary,
 } from '@ipc/contracts'
 import { grossProfit, balancePending } from '@ipc/domain'
 import type { AppEnv } from '../../context'
@@ -560,6 +561,21 @@ export const financialsRouter = new Hono<AppEnv>()
     )
     if (!data) fail(400, 'We could not load GST analysis.')
     return c.json(gstAnalysis.parse(data))
+  })
+
+  // ── Reconciliation (financials module) ──────────────────────
+  // One read, every difference. See 0147 for why this screen exists.
+  .get('/reconciliation', requireModule('financials'), async (c) => {
+    const row = await attempt(c, 'financials.reconciliation', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<{ reconciliation_summary: unknown }[]>`
+          select reconciliation_summary() as reconciliation_summary`
+        return { data: rpcJson(rows[0]?.reconciliation_summary, null) }
+      }),
+    )
+    if (!row) fail(400, 'We could not work out the reconciliation.')
+    if (!row.data) fail(400, 'We could not work out the reconciliation.')
+    return c.json(reconciliationSummary.parse(row.data))
   })
 
   // ── Project profitability report (financials module) ───────

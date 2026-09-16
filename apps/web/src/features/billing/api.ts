@@ -436,3 +436,28 @@ export function useDeleteReceivedPayment() {
 }
 
 export type { ReceivedPayment }
+
+/**
+ * Confirm a recorded payment actually reached the bank, or take it back.
+ *
+ * `received` is what the studio wrote down; `banked` is what it has checked.
+ * The reconciliation screen reads the gap between them, which is where a
+ * cheque that never cleared shows up instead of being counted as money.
+ */
+export function useSetPaymentCleared() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, cleared }: { id: string; cleared: boolean }) =>
+      callApi(`/billing/payments/${id}/cleared`, {
+        method: 'POST',
+        body: { cleared },
+        responseSchema: z.object({ ok: z.boolean() }),
+      }),
+    onSuccess: (_r, v) => {
+      toast.success(v.cleared ? 'Marked as banked.' : 'Bank confirmation removed.')
+      void qc.invalidateQueries({ queryKey: ['billing', 'payments'] })
+      void qc.invalidateQueries({ queryKey: ['financials', 'reconciliation'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}

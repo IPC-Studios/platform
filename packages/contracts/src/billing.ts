@@ -257,9 +257,21 @@ export const receivedPayment = z.object({
   gst_number: z.string().nullable(),
   date_received: isoDate.nullable(),
   file_url: z.string().nullable(),
+  /**
+   * When a person confirmed this money reached the bank. Not a statement
+   * import — `received` is what the studio recorded, `banked` is what it has
+   * confirmed, and the gap between them is the point.
+   */
+  cleared_at: isoDateTime.nullable().default(null),
   created_at: isoDateTime,
 })
 export type ReceivedPayment = z.infer<typeof receivedPayment>
+
+export const setPaymentClearedRequest = z.object({
+  /** True marks it confirmed in the bank; false takes the confirmation back. */
+  cleared: z.boolean(),
+})
+export type SetPaymentClearedRequest = z.infer<typeof setPaymentClearedRequest>
 
 const booleanFromQuery = z.preprocess(
   (v) => {
