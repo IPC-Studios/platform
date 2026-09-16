@@ -145,6 +145,46 @@ describe('money in', () => {
     expect(n((await moneyIn())['outstanding'])).toBe(0)
   })
 
+  it('counts money that belongs to no project', async () => {
+    // 0147 built every total by summing per project, so a payment against a
+    // project-less invoice — ordinary since 0145 — was money the report could
+    // not see. Found by marking a real one banked and watching the total stay
+    // at zero. A reconciliation screen blind to some of the money is worse
+    // than none, because it reports a clean bill it never checked.
+    const orphan = (
+      await db.query<{ id: string }>(
+        `insert into invoices (company_id, client_id, invoice_number, invoice_date,
+                               subtotal, taxable, tax, total, status)
+         values ('${COMPANY}', '${CLIENT}', 'INV-ORPH', current_date, 9000, 9000, 0, 9000, 'sent')
+         returning id;`,
+      )
+    ).rows[0]!.id
+    await db.exec(`insert into received_payments
+                     (company_id, invoice_id, client_id, amount, paid_on, status, cleared_at)
+                   values ('${COMPANY}', '${orphan}', '${CLIENT}', 9000, current_date, 'paid', now());`)
+    const m = await moneyIn()
+    expect(n(m['invoiced'])).toBe(9000)
+    expect(n(m['received'])).toBe(9000)
+    expect(n(m['banked'])).toBe(9000)
+    expect(n(m['unassigned_received'])).toBe(9000)
+    expect(n(m['unassigned_invoiced'])).toBe(9000)
+  })
+
+  it('takes what clients owe from the balance the trigger maintains', async () => {
+    // Rather than recomputing invoiced-minus-received per project, which is a
+    // second derivation that can disagree with the first.
+    const inv = await invoice(60000)
+    await payment(20000, { invoice: inv })
+    expect(n((await moneyIn())['outstanding'])).toBe(40000)
+  })
+
+  it('does not let an over-billed project mask one that was never billed', async () => {
+    // Unbilled stays a sum of per-project differences on purpose: netting it
+    // off overall would hide the project nobody invoiced.
+    await invoice(250000) // more than the project's ₹2,00,000 value
+    expect(n((await moneyIn())['unbilled'])).toBe(0)
+  })
+
   it('lists only the projects with something to answer for', async () => {
     // A fully billed, fully paid, fully banked project is noise on a page
     // whose whole job is to show differences.

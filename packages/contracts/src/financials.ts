@@ -207,6 +207,13 @@ export const reconciliationSummary = z.object({
     unbilled: money,
     /** Recorded but not confirmed in the bank. */
     unbanked: money,
+    /**
+     * Money tied to no project — a payment against a project-less invoice, or
+     * such an invoice itself. Both are ordinary since 0145, and the first
+     * version of this report could not see either.
+     */
+    unassigned_received: money.default(0),
+    unassigned_invoiced: money.default(0),
     projects: z.array(reconProject).default([]),
   }),
   money_out: z.object({
