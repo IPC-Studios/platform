@@ -48,18 +48,20 @@ import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
 import { Input, Label, Select, Textarea } from '@/shared/ui/input'
 import { useCreateTask } from '@/features/tasks/api'
+import { MonthlyProfitabilityReport } from '@/features/projects/MonthlyProfitabilityReport'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
 import {
-  useProject,
-  useUpdateProject,
   useAddDeliverable,
-  useUpdateDeliverable,
-  useSetDeliverableSources,
-  useDeleteDeliverable,
   useAddPayment,
+  useDeleteDeliverable,
   useDeletePayment,
   useDeleteProject,
+  useProject,
+  useSetDeliverableSources,
+  useUpdateDeliverable,
+  useUpdateProject,
+  useUpdateQuotation,
 } from '@/features/projects/api'
 import { useReferralCampaigns, useReferralSubmissions } from '@/features/referrals/api'
 import { useProjectFinancials } from '@/features/financials/api'
@@ -137,6 +139,7 @@ function ProjectDetail() {
   const updateDeliverable = useUpdateDeliverable(id)
   const setDeliverableSources = useSetDeliverableSources(id)
   const update = useUpdateProject(id)
+  const updateQuotation = useUpdateQuotation(id)
   const removeProject = useDeleteProject()
   const confirm = useConfirm()
   const [tab, setTab] = useState<Tab>('overview')
@@ -459,6 +462,52 @@ function ProjectDetail() {
           received={received}
           balance={balance}
         />
+        {/* What the project cost to run, not just what came in. */}
+        <MonthlyProfitabilityReport projectId={id} bookedRevenue={data.total_cost} />
+
+        {/* The quotation lived only behind a Quick action, so whether the
+            client could currently see it was invisible from the tab that is
+            about this project's money. */}
+        <Card>
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 font-semibold tracking-tight">
+                  <FileText className="size-4 text-muted-foreground" aria-hidden />
+                  Quotation
+                </p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  A printable quotation built from this project&apos;s details, deliverables and shoots.
+                </p>
+              </div>
+              <StatusBadge tone={data.show_quotation ? 'success' : 'neutral'}>
+                {data.show_quotation ? 'Visible to client' : 'Hidden from client'}
+              </StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              {canEdit && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={data.show_quotation}
+                    onChange={(e) => updateQuotation.mutate({ show_quotation: e.target.checked })}
+                  />
+                  Show quotation to client
+                </label>
+              )}
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/projects/$id/quotation" params={{ id }}>
+                  <FileText /> Open quotation
+                </Link>
+              </Button>
+            </div>
+            {!data.show_quotation && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                The public link shows a &ldquo;hidden by the studio&rdquo; notice until this is switched on.
+              </p>
+            )}
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Payments</CardTitle>
