@@ -26,6 +26,38 @@ const issueTermsRequest = z.object({
   template_id: z.string().uuid().nullish(),
 })
 
+/**
+ * A draft carries everything the issue payload does, except that the body may
+ * still be empty — the point is to save work that is not finished. project_id
+ * is required: a draft belongs to the project you are writing it for, and that
+ * is what it is looked up by.
+ */
+const saveTermsDraftRequest = z.object({
+  project_id: z.string().uuid(),
+  rendered_body: z.string().max(100_000).default(''),
+  title: z.string().trim().max(200).nullish(),
+  payment_summary: z.string().trim().max(2000).nullish(),
+  sections: z.array(z.record(z.string(), z.unknown())).nullish(),
+  payment_terms: z.array(z.record(z.string(), z.unknown())).max(20).nullish(),
+  total_cost: z.number().nonnegative().nullish(),
+  legal_note: z.string().trim().max(2000).nullish(),
+  template_id: z.string().uuid().nullish(),
+})
+
+const termsDraft = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid().nullable(),
+  rendered_body: z.string(),
+  title: z.string().nullable(),
+  payment_summary: z.string().nullable(),
+  sections: z.array(z.record(z.string(), z.unknown())).nullable(),
+  payment_terms: z.array(z.record(z.string(), z.unknown())).nullable(),
+  total_cost: z.number().nullable(),
+  legal_note: z.string().nullable(),
+  template_id: z.string().uuid().nullable(),
+  updated_at: z.string().nullable(),
+})
+
 const termsTemplate = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -202,6 +234,77 @@ export const termsRouter = new Hono<AppEnv>()
     return c.json({ seeded })
   })
 
+  // ── drafts ──────────────────────────────────────────────────
+  // Same table as a real document, minus the access token: nothing has been
+  // sent, so there is nothing for a client to open.
+  .get('/draft', requireAction('projects', 'view'), async (c) => {
+    const projectId = c.req.query('project_id') ?? ''
+    if (!/^[0-9a-f-]{36}$/i.test(projectId)) fail(422, 'A project is required.')
+    const row = await attempt(c, 'terms.draft_get', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<Record<string, unknown>[]>`
+          select id, project_id, rendered_body, title, payment_summary, sections,
+                 payment_terms, total_cost, legal_note, template_id,
+                 created_at::text as updated_at
+            from project_terms_documents
+           where project_id = ${projectId} and is_draft
+           limit 1`
+        return rows[0] ?? null
+      }),
+    )
+    // No draft is the normal case, not an error.
+    if (!row) return c.json(null)
+    return c.json(termsDraft.parse(row))
+  })
+
+  .put('/draft', requireAction('projects', 'edit'), async (c) => {
+    const parsed = saveTermsDraftRequest.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) fail(422, 'Please check the draft.')
+    const d = parsed.data
+    const row = await attempt(c, 'terms.draft_save', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql<Record<string, unknown>[]>`
+          insert into project_terms_documents
+            (company_id, project_id, is_draft, rendered_body, title, payment_summary,
+             sections, payment_terms, total_cost, legal_note, template_id)
+          values (get_current_company_id(), ${d.project_id}, true, ${d.rendered_body},
+                  ${d.title ?? null}, ${d.payment_summary ?? null},
+                  ${d.sections ? sql.json(d.sections as never) : null}::jsonb,
+                  ${d.payment_terms ? sql.json(d.payment_terms as never) : null}::jsonb,
+                  ${d.total_cost ?? null}, ${d.legal_note ?? null}, ${d.template_id ?? null})
+          on conflict (company_id, project_id) where is_draft and project_id is not null
+          do update set rendered_body = excluded.rendered_body,
+                        title = excluded.title,
+                        payment_summary = excluded.payment_summary,
+                        sections = excluded.sections,
+                        payment_terms = excluded.payment_terms,
+                        total_cost = excluded.total_cost,
+                        legal_note = excluded.legal_note,
+                        template_id = excluded.template_id
+          returning id, project_id, rendered_body, title, payment_summary, sections,
+                    payment_terms, total_cost, legal_note, template_id,
+                    created_at::text as updated_at`
+        return rows[0] ?? null
+      }),
+    )
+    if (!row) fail(400, 'We could not save the draft.')
+    return c.json(termsDraft.parse(row))
+  })
+
+  .delete('/draft', requireAction('projects', 'edit'), async (c) => {
+    const projectId = c.req.query('project_id') ?? ''
+    if (!/^[0-9a-f-]{36}$/i.test(projectId)) fail(422, 'A project is required.')
+    const ok = await attempt(c, 'terms.draft_delete', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`delete from project_terms_documents where project_id = ${projectId} and is_draft`,
+      ),
+    )
+    if (!ok) fail(400, 'We could not discard the draft.')
+    return c.body(null, 204)
+  })
+
   .post('/issue', requireAction('projects', 'edit'), async (c) => {
     const parsed = issueTermsRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Terms text is required.')
@@ -230,6 +333,18 @@ export const termsRouter = new Hono<AppEnv>()
           where id = ${row.document_id}`
       })
     } catch { /* extras never fail issuance */ }
+    // The draft became this document. Leaving it behind would offer the studio
+    // a half-finished copy of something they have already sent.
+    if (parsed.data.project_id) {
+      await attempt(c, 'terms.draft_clear', () =>
+        withUser(
+          c.env,
+          c.get('auth').userId,
+          (sql) => sql`delete from project_terms_documents
+                        where project_id = ${parsed.data.project_id} and is_draft`,
+        ),
+      )
+    }
     await audit(c, {
       action: 'terms.issue',
       entityType: 'terms_document',

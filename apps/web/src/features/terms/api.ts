@@ -107,10 +107,70 @@ export function useIssueTerms() {
   return useMutation({
     mutationFn: (input: IssueTermsInput) =>
       callApi('/terms/issue', { method: 'POST', body: input, responseSchema: issued }),
-    onSuccess: () => {
+    onSuccess: (_d, v) => {
       toast.success('Terms link issued')
       void qc.invalidateQueries({ queryKey: ['terms', 'documents'] })
+      // The server clears the draft on issue; drop our copy so reopening the
+      // wizard does not offer to resume something already sent.
+      if (v.project_id) void qc.invalidateQueries({ queryKey: ['terms', 'draft', v.project_id] })
     },
+  })
+}
+
+/**
+ * A terms sheet saved part-way through. One per project: "save draft" means
+ * "keep where I am", not "keep every version of where I have been".
+ */
+export const termsDraft = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid().nullable(),
+  rendered_body: z.string(),
+  title: z.string().nullable(),
+  payment_summary: z.string().nullable(),
+  sections: z.array(z.record(z.string(), z.unknown())).nullable(),
+  payment_terms: z.array(z.record(z.string(), z.unknown())).nullable(),
+  total_cost: z.number().nullable(),
+  legal_note: z.string().nullable(),
+  template_id: z.string().uuid().nullable(),
+  updated_at: z.string().nullable(),
+})
+export type TermsDraft = z.infer<typeof termsDraft>
+
+export function useTermsDraft(projectId: string | null) {
+  const { session } = useAuth()
+  const access = useAccess()
+  return useQuery({
+    queryKey: ['terms', 'draft', projectId],
+    // Null is the ordinary answer, not a failure — most projects have no draft.
+    queryFn: () => callApi(`/terms/draft?project_id=${projectId}`, { responseSchema: termsDraft.nullable() }),
+    enabled: !!session && !!projectId && access.hasModule('projects'),
+    staleTime: 10_000,
+  })
+}
+
+export function useSaveTermsDraft() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: Record<string, unknown> & { project_id: string }) =>
+      callApi('/terms/draft', { method: 'PUT', body: input, responseSchema: termsDraft }),
+    onSuccess: (_d, v) => {
+      toast.success('Draft saved')
+      void qc.invalidateQueries({ queryKey: ['terms', 'draft', v.project_id] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useDiscardTermsDraft() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      callApi(`/terms/draft?project_id=${projectId}`, { method: 'DELETE', responseSchema: z.unknown() }),
+    onSuccess: (_d, projectId) => {
+      toast.success('Draft discarded')
+      void qc.invalidateQueries({ queryKey: ['terms', 'draft', projectId] })
+    },
+    onError: (e: Error) => toast.error(e.message),
   })
 }
 

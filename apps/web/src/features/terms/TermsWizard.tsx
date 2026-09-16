@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileText, Link2, Mail, MessageCircle, Printer, RefreshCw, Sparkles, Send } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileText, Link2, Mail, MessageCircle, Printer, RefreshCw, Save, Sparkles, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -15,6 +15,9 @@ import {
   useSeedTermsTemplates,
   useTermsEmailLogs,
   useTermsTemplates,
+  useDiscardTermsDraft,
+  useSaveTermsDraft,
+  useTermsDraft,
   type PaymentTermDraft,
 } from './api'
 import { useClient } from '@/features/clients/api'
@@ -93,6 +96,11 @@ export function TermsWizard({
   const seed = useSeedTermsTemplates()
   const saveTemplate = useSaveTermsTemplate()
   const issue = useIssueTerms()
+  const draft = useTermsDraft(projectId)
+  const saveDraft = useSaveTermsDraft()
+  const discardDraft = useDiscardTermsDraft()
+  /** Only ever restore once, or typing would be overwritten on every refetch. */
+  const [restored, setRestored] = useState(false)
 
   const [step, setStep] = useState<Step>(1)
   const [title, setTitle] = useState('Terms & Conditions')
@@ -107,6 +115,24 @@ export function TermsWizard({
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [sending, setSending] = useState(false)
+
+  /**
+   * Pick the draft back up. Guarded on `restored` rather than on the fields
+   * being empty: a studio that deliberately cleared the terms text would
+   * otherwise have the draft poured back in under them on the next refetch.
+   */
+  useEffect(() => {
+    const d = draft.data
+    if (!d || restored) return
+    setRestored(true)
+    if (d.title) setTitle(d.title)
+    if (d.rendered_body) setTerms(d.rendered_body)
+    if (d.legal_note) setLegalNote(d.legal_note)
+    if (d.template_id) setTemplateId(d.template_id)
+    if (Array.isArray(d.payment_terms) && d.payment_terms.length) {
+      setParts(d.payment_terms as unknown as PaymentTermDraft[])
+    }
+  }, [draft.data, restored])
 
   const total = project.data?.total_cost ?? 0
   const client = project.data?.client_name ?? null
@@ -146,6 +172,21 @@ export function TermsWizard({
     }
     setTerms(t.body)
     toast.success(`Applied "${t.name}"`)
+  }
+
+  function onSaveDraft() {
+    saveDraft.mutate({
+      project_id: projectId,
+      rendered_body: terms,
+      title: title.trim() || 'Terms & Conditions',
+      payment_summary: parts.length
+        ? parts.map((p) => `${p.label}: ${formatINR(amountFor(p))}`).join(' · ')
+        : null,
+      payment_terms: parts.length ? parts : null,
+      total_cost: total || null,
+      legal_note: legalNote.trim() || null,
+      ...(templateId ? { template_id: templateId } : {}),
+    })
   }
 
   function onIssue() {
@@ -237,7 +278,26 @@ export function TermsWizard({
             Create, review and send client terms in a few steps.
             {project.data ? ` — ${project.data.name}${client ? ` · ${client}` : ''}` : ''}
           </p>
+          {/* Resuming is only worth saying while there is something to resume. */}
+          {draft.data && !issued && (
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Save className="size-3.5" />
+              Picked up from your saved draft.
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => discardDraft.mutate(projectId)}
+              >
+                Discard it
+              </button>
+            </p>
+          )}
         </div>
+        {!issued && (
+          <Button variant="outline" size="sm" onClick={onSaveDraft} disabled={saveDraft.isPending}>
+            <Save /> {saveDraft.isPending ? 'Saving…' : 'Save draft'}
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={() => window.print()}>
           <Printer /> Print / PDF
         </Button>
