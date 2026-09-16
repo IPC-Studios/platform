@@ -23,10 +23,10 @@ import { formatINR } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
 import { useSlots, useMembers, useBookSlot, useSetSlotStatus, useSetSlotCost, useUpdateSlot, ApiError } from '@/features/allocation/api'
 
-export function TeamAllocationPage() {
+export function TeamAllocationPage({ initialTab }: { initialTab?: Tab } = {}) {
   return (
     <AuthedPage module="projects">
-      <TeamBooking />
+      <TeamBooking initialTab={initialTab} />
     </AuthedPage>
   )
 }
@@ -68,10 +68,10 @@ const same = (a: string | null, b: string | null) =>
  * photographers, has it got them?" — so the requirements recorded on the shoot
  * are the frame, and bookings are filled against them.
  */
-function TeamBooking() {
+function TeamBooking({ initialTab }: { initialTab?: Tab | undefined }) {
   const { session } = useAuth()
   const access = useAccess()
-  const [tab, setTab] = useState<Tab>('calendar')
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'calendar')
   const [view, setView] = useState<CalendarView>('month')
   const today = new Date()
   /**

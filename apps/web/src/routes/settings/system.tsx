@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2, Pencil } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
@@ -42,16 +42,26 @@ const ENTITY_FILTERS = [
   ['employee_role', 'Roles'],
 ] as const
 
-export function SystemPage() {
+export function SystemPage({ focus }: { focus?: 'services' | 'work-submissions' } = {}) {
   return (
     <AuthedPage module="settings">
-      <System />
+      <System focus={focus} />
     </AuthedPage>
   )
 }
 
-function System() {
+function System({ focus }: { focus?: 'services' | 'work-submissions' | undefined }) {
   const { session } = useAuth()
+  // The old app had /settings/services and /settings/work-submissions as
+  // pages of their own. Both now live on this one; a bookmark should still
+  // put you in front of the right part of it.
+  useEffect(() => {
+    if (!focus) return
+    const id = window.setTimeout(() => {
+      document.getElementById(focus)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 200)
+    return () => window.clearTimeout(id)
+  }, [focus])
   return (
     <>
       <PageHeader
@@ -68,9 +78,13 @@ function System() {
       {session?.is_owner ? (
         <>
           <CustomLookups />
-          <Services />
+          <div id="services">
+            <Services />
+          </div>
           <TaskPriorities />
-          <WorkReminders />
+          <div id="work-submissions">
+            <WorkReminders />
+          </div>
           <AuditLog />
           <CronRuns />
         </>

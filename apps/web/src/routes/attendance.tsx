@@ -66,10 +66,10 @@ const idOnly = z.object({ id: z.string() })
 
 type Tab = 'dashboard' | 'mine'
 
-export function AttendancePage() {
+export function AttendancePage({ initialTab }: { initialTab?: Tab } = {}) {
   return (
     <AuthedPage module="attendance">
-      <Attendance />
+      <Attendance initialTab={initialTab} />
     </AuthedPage>
   )
 }
@@ -97,13 +97,13 @@ function useAttendanceStreak() {
   })
 }
 
-function Attendance() {
+function Attendance({ initialTab }: { initialTab?: Tab | undefined }) {
   const { session } = useAuth()
   const { data: streak } = useAttendanceStreak()
   // Everyone can see their own record; only the people who run the studio have
   // a roster to look at, so employees land straight on their own history.
   const canSeeTeam = ['super_admin', 'admin', 'manager'].includes(session?.role ?? '')
-  const [tab, setTab] = useState<Tab>(canSeeTeam ? 'dashboard' : 'mine')
+  const [tab, setTab] = useState<Tab>(initialTab ?? (canSeeTeam ? 'dashboard' : 'mine'))
 
   return (
     <>

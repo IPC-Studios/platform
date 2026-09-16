@@ -44,16 +44,18 @@ const SEVERITY_TONE: Record<NotificationSeverity, 'neutral' | 'warning' | 'dange
 }
 
 /** Every member has alerts of their own; there is no module to gate this on. */
-export function NotificationsPage() {
-  return <Notifications />
+export function NotificationsPage({ generate }: { generate?: boolean } = {}) {
+  return <Notifications generate={generate} />
 }
 
-function Notifications() {
+function Notifications({ generate }: { generate?: boolean | undefined }) {
   const { session } = useAuth()
   const canGenerate = (session?.is_owner ?? false) || session?.role === 'admin' || session?.role === 'manager'
 
   const [filters, setFilters] = useState<NotificationFilters>({})
-  const [showCentre, setShowCentre] = useState(false)
+  // /notifications/generate used to be its own page; the link should still
+  // land with the generator open rather than on the plain list.
+  const [showCentre, setShowCentre] = useState(generate ?? false)
   const { data, isLoading, isError, refetch } = useNotifications(filters)
   const markRead = useMarkNotificationRead()
   const dismiss = useDismissNotification()

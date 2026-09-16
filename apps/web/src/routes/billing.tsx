@@ -45,15 +45,15 @@ const PAGE_SIZE = 25
 
 type StatusFilter = 'all' | 'paid' | 'pending' | 'partial' | 'overdue' | 'draft' | 'sent' | 'cancelled'
 
-export function BillingPage() {
+export function BillingPage({ newInvoice }: { newInvoice?: boolean } = {}) {
   return (
     <AuthedPage module="billing">
-      <Billing />
+      <Billing newInvoice={newInvoice} />
     </AuthedPage>
   )
 }
 
-function Billing() {
+function Billing({ newInvoice }: { newInvoice?: boolean | undefined }) {
   const [tab, setTab] = useState<'invoices' | 'payments'>('invoices')
   return (
     <>
@@ -71,7 +71,7 @@ function Billing() {
                 <Settings2 /> Invoice settings
               </Link>
             </Button>
-            <NewInvoiceDialog />
+            <NewInvoiceDialog autoOpen={newInvoice} />
           </div>
         }
       />
@@ -377,10 +377,12 @@ function InvoicesSection() {
   )
 }
 
-function NewInvoiceDialog() {
+function NewInvoiceDialog({ autoOpen }: { autoOpen?: boolean | undefined } = {}) {
   const create = useCreateInvoice()
   const { data: states } = useStates()
-  const [open, setOpen] = useState(false)
+  // /billing/invoices/new was its own page in the old app; landing on that
+  // link should still put the form in front of you.
+  const [open, setOpen] = useState(autoOpen ?? false)
   const form = useInvoiceForm(emptyInvoiceForm())
   const [error, setError] = useState<string | null>(null)
 

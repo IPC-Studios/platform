@@ -73,22 +73,22 @@ function isAtRisk(r: DataRecord): boolean {
     (r.backup_status === 'verified' && r.primary_status === 'pending')
 }
 
-export function DataManagementPage() {
+export function DataManagementPage({ initialTab }: { initialTab?: DmTab } = {}) {
   return (
     <AuthedPage module="projects">
-      <DataBoard />
+      <DataBoard initialTab={initialTab} />
     </AuthedPage>
   )
 }
 
-function DataBoard() {
+function DataBoard({ initialTab }: { initialTab?: DmTab | undefined }) {
   const { data, isLoading, isError, refetch } = useDataRecords()
   const { data: projects } = useProjects()
   const verify = useVerifyData()
   const updateRecord = useUpdateDataRecord()
   const del = useDeleteDataRecord()
   const confirm = useConfirm()
-  const [tab, setTab] = useState<DmTab>('records')
+  const [tab, setTab] = useState<DmTab>(initialTab ?? 'records')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [projectId, setProjectId] = useState('')

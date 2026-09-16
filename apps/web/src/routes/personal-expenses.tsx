@@ -59,7 +59,7 @@ function exportCsv(rows: PersonalExpense[]) {
   URL.revokeObjectURL(url)
 }
 
-function PersonalExpensesContent() {
+function PersonalExpensesContent({ report }: { report?: boolean | undefined }) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 300)
   const [category, setCategory] = useState<string>('all')
@@ -165,7 +165,7 @@ function PersonalExpensesContent() {
             <Button variant="outline" size="sm" onClick={() => window.print()} disabled={sorted.length === 0}>
               <Printer /> Print
             </Button>
-            <ReportDialog />
+            <ReportDialog autoOpen={report} />
             <Button onClick={() => { setEditing(null); setDialogOpen(true) }} size="sm">
               <Plus /> Add Expense
             </Button>
@@ -773,8 +773,8 @@ function firstOfMonth(): string {
 }
 
 /** Category and day breakdown for a date range — the backend's had this since round 1, the UI never asked for it. */
-function ReportDialog() {
-  const [open, setOpen] = useState(false)
+function ReportDialog({ autoOpen }: { autoOpen?: boolean | undefined } = {}) {
+  const [open, setOpen] = useState(autoOpen ?? false)
   const [startDate, setStartDate] = useState(firstOfMonth())
   const [endDate, setEndDate] = useState(todayISO())
   const { data, isLoading, isError } = usePersonalExpenseReport(open ? startDate : '', open ? endDate : '')
@@ -855,10 +855,10 @@ function ReportDialog() {
   )
 }
 
-export function PersonalExpensesPage() {
+export function PersonalExpensesPage({ report }: { report?: boolean } = {}) {
   return (
     <AuthedPage module="personal_expenses">
-      <PersonalExpensesContent />
+      <PersonalExpensesContent report={report} />
     </AuthedPage>
   )
 }

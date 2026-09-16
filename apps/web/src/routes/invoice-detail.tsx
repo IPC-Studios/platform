@@ -21,15 +21,15 @@ import { PaymentModePicker } from '@/features/settings/PaymentModePicker'
 
 const TONE = { draft: 'neutral', sent: 'info', partial: 'warning', paid: 'success', cancelled: 'danger' } as const
 
-export function InvoiceDetailPage() {
+export function InvoiceDetailPage({ edit }: { edit?: boolean } = {}) {
   return (
     <AuthedPage module="billing">
-      <InvoiceDoc />
+      <InvoiceDoc edit={edit} />
     </AuthedPage>
   )
 }
 
-function InvoiceDoc() {
+function InvoiceDoc({ edit }: { edit?: boolean | undefined }) {
   const { id } = useParams({ from: '/authed/billing/invoices/$id' })
   const { data, isLoading, isError, refetch } = useInvoice(id)
   const { data: company } = useQuery({
@@ -66,7 +66,7 @@ function InvoiceDoc() {
         <div className="flex flex-wrap gap-2">
           {editable && (
             <>
-              <EditInvoiceDialog invoice={data} />
+              <EditInvoiceDialog invoice={data} autoOpen={edit} />
               <DeleteInvoiceButton invoiceId={data.id} />
             </>
           )}
@@ -255,10 +255,10 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   )
 }
 
-function EditInvoiceDialog({ invoice }: { invoice: InvoiceDetail }) {
+function EditInvoiceDialog({ invoice, autoOpen }: { invoice: InvoiceDetail; autoOpen?: boolean | undefined }) {
   const update = useUpdateInvoice(invoice.id)
   const { data: states } = useStates()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen ?? false)
   const allZeroGst = invoice.items.every((i) => Number(i.gst_rate) === 0)
   const form = useInvoiceForm({
     client_id: invoice.client_id ?? '',
