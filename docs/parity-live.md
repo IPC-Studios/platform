@@ -751,3 +751,68 @@ Worth recording separately, because neither existed until the fix did:
 
 The pattern behind both: a fix that changes what a value *means* silently
 changes every reader of that value. Grep for the readers, not just the writers.
+
+## Round: the P1/P3 backlog, and which of it was real (2026-09-16)
+
+Checked each item against the rebuild before acting. Three of the five P1
+items described the **old** app's files rather than gaps in ours:
+
+| Claim | Reality |
+| --- | --- |
+| Clients CSV missing | Already there, with selective export |
+| Phone renders blank on personal expenses and enquiries | Both already render cards, not tables. **No page in the rebuild uses `hidden md:block` at all**, so nothing can go blank on a phone |
+| Project/GST filters missing on company expenses | Project was already wired; only GST was missing |
+| Company expenses capped at 200 | Real |
+| CSV without BOM / broken escaping | Real, in three places |
+
+### Company expenses: two bugs, one screen
+
+The page fetched 200 rows and paginated them in the browser, so a studio past
+its two-hundredth expense could not reach the rest — and the pager, counting
+the 200 it held, gave no sign more existed.
+
+The summary endpoint filtered by **date alone** while the rows beneath it were
+narrowed by category, project, amount and a search. That is the third instance
+this week of the same shape, after clients and the team directory: two numbers
+on one screen answering different questions. The list, its count and its tiles
+now read one predicate.
+
+The GST filter is by the studio's own treatments rather than a with/without
+guess — `exempt` carries no tax, so folding it into "with GST" would put
+untaxed rows under a tile that counts tax.
+
+### CSV
+
+Three exports built their files by hand. Two wrapped every cell in quotes but
+doubled the inner quotes of only one column, so a name containing a quote broke
+the row and shifted every later column. None wrote a BOM, so Excel read every
+rupee sign as mojibake — the two reasons the shared helper exists. The helper
+itself quoted on a comma, a quote or `\n` but not a bare `\r`, which a note
+pasted from Windows carries. `toCsv()` now has a test; it had none, despite
+being the one path every export takes.
+
+### The job that had never run
+
+`mark_absent_backstop()` has existed since 0014: an `absent` row for every
+active member with no attendance row for the day, in each company's timezone.
+Granted to service_role, covered by a test, and **called by nothing** — so no
+studio has ever had an absent day recorded. A date nobody touched was no row.
+
+It now runs at 18:30 UTC on its own ticker, not as part of the hourly job:
+marking everyone absent at 1am and relying on check-in to flip them back would
+make any absence figure read during the day a lie.
+
+It also miscounted. `get diagnostics` sat inside the loop over companies, so
+each overwrote the last and it returned whatever the final company got —
+usually zero. The cron log would have said "0 absences" on a night it wrote
+fifty. Same family as the unused CRM automation columns in the memory note:
+**a feature is not shipped until something calls it.**
+
+### A flaky suite is worse than a slow one
+
+Adding two PGlite suites made the run fail on a busy machine and pass on a
+quiet one, reporting every test in the affected file as *skipped*. Each file
+boots Postgres in WebAssembly and applies all 142 migrations in `beforeAll`,
+which does not fit in vitest's default ten-second hook timeout under
+contention. Raised it. Nothing about the code under test had changed — and a
+suite that fails randomly teaches you to re-run instead of to read.
