@@ -157,19 +157,25 @@ export const workRouter = new Hono<AppEnv>()
     return c.json(deliverResponse.parse({ token, link: `${c.env.APP_URL}/delivery?token=${token}` }))
   })
 
-  // Lovable parity: revoke a delivery link (client sees invalid/expired).
-  .post('/submissions/:id/revoke-delivery', requireAction('team_work_preview', 'edit'), async (c) => {    const id = uuidParam(c)
+  // Revoke a delivery link: the client's link stops opening, and the studio
+  // can see that it has.
+  //
+  // This used to run the three statements inline and return `true` whatever
+  // happened. The submission's UPDATE matched no row every single time —
+  // tws_update is scoped to `status = 'submitted'` and work is only ever sent
+  // once approved — and RLS filters an UPDATE rather than refusing it, so
+  // nothing failed and nothing was marked. 0144 does all three behind one
+  // permission check and says whether it found the row.
+  .post('/submissions/:id/revoke-delivery', requireAction('team_work_preview', 'edit'), async (c) => {
+    const id = uuidParam(c)
     const ok = await attempt(c, 'work.revoke_delivery', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        await sql`select revoke_access_token('work_delivery', ${id})`
-        await sql`update team_work_submissions set revoked_at = now()
-          where id = ${id} and company_id = ${c.get('auth').companyId}`
-        await sql`update team_work_client_deliveries set revoked_at = now()
-          where submission_id = ${id} and company_id = ${c.get('auth').companyId}`
-        return true
+        const rows = await sql<{ revoke_work_delivery: boolean }[]>`
+          select revoke_work_delivery(${id}) as revoke_work_delivery`
+        return rows[0]?.revoke_work_delivery ?? false
       }),
     )
-    if (!ok) fail(400, 'We could not revoke this delivery.')
+    if (!ok) fail(404, 'We could not find that delivery to revoke.')
     await audit(c, { action: 'work.delivery_revoke', entityType: 'work_submission', entityId: id })
     return c.json({ ok: true })
   })
