@@ -8,29 +8,21 @@ import { useMyTasks, useBoard } from '@/features/tasks/api'
 import { useSlots } from '@/features/allocation/api'
 import { useReminders } from '@/features/reminders/api'
 import { useQuery } from '@tanstack/react-query'
-import { attendanceRecord, z } from '@ipc/contracts'
+import { attendanceRecord } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 
 const myList = attendanceRecord.array()
 
+/**
+ * The employee's own attendance. The path was `/hr/my`, which the API has
+ * never served — the route is `/hr/attendance/my` — so this 404'd on every
+ * load of the employee dashboard.
+ */
 function useMyAttendanceToday() {
   const { session } = useAuth()
   return useQuery({
     queryKey: ['hr', 'my-attendance'],
-    queryFn: () => callApi('/hr/my', { responseSchema: myList }),
-    enabled: !!session,
-    staleTime: 30_000,
-  })
-}
-
-function useCheckedIn() {
-  const { session } = useAuth()
-  return useQuery({
-    queryKey: ['hr', 'checked-in'],
-    queryFn: () =>
-      callApi('/hr/checked-in', {
-        responseSchema: z.object({ checked_in: z.boolean() }),
-      }).catch(() => ({ checked_in: false })),
+    queryFn: () => callApi('/hr/attendance/my', { responseSchema: myList }),
     enabled: !!session,
     staleTime: 30_000,
   })
@@ -49,7 +41,6 @@ export function EmployeeDashboard() {
   const slots = useSlots()
   const reminders = useReminders()
   const attendance = useMyAttendanceToday()
-  const checkedIn = useCheckedIn()
 
   const tasks = myTasks.data ?? board.data?.slice(0, 10) ?? []
   const openTasks = tasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
@@ -64,8 +55,14 @@ export function EmployeeDashboard() {
   })
   const reminderItems = Array.isArray(reminders.data) ? reminders.data : (reminders.data?.items ?? [])
   const openReminders = reminderItems.filter((r) => r.status !== 'completed' && r.status !== 'dismissed').slice(0, 5)
-  const isCheckedIn = checkedIn.data?.checked_in ?? false
   const todayAttendance = (attendance.data ?? []).find((a) => String(a.a_date ?? '').slice(0, 10) === today)
+  /**
+   * Derived from today's row rather than from a `/hr/checked-in` endpoint that
+   * does not exist. That call 404'd and was caught into `{ checked_in: false }`,
+   * so someone who had checked in was told they had not — every time, with no
+   * error to notice.
+   */
+  const isCheckedIn = !!todayAttendance?.check_in_at && !todayAttendance?.check_out_at
 
   return (
     <div className="flex flex-col gap-4">
