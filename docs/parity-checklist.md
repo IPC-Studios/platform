@@ -67,11 +67,25 @@ plus endpoints, L = schema + endpoints + several screens.
 | 12 | Team hub sub-pages | 10 routes | M | Ours are folded into fewer screens. Deliberate, not revisited. |
 | 13 | Detail/edit route splits | ~30 routes | M | They split `index`/`edit`/`$id`; ours combine. Cosmetic unless deep-linking matters. |
 
-## Still open (as of 2026-09-14)
+## Still open (as of 2026-09-16)
 
 | Area | Notes |
 |---|---|
-| Team Booking → Conflicts | Original breaks conflicts down by severity (Critical/Warning) with type/date/search filters; here it's a plain list. Small, cosmetic. |
+| _(nothing tracked)_ | The Conflicts row below was closed on 2026-09-16. Open **decisions** are listed under it. |
+
+### Closed since
+
+| Area | Notes |
+|---|---|
+| Team Booking → Conflicts | Was listed as open on 2026-09-14 and had since been built: severity (Critical/Warning/Info), type, date-range and search filters, all rendered and applied. Closing it found a real bug — the five tiles counted every conflict while the list was narrowed by a date range defaulting to the next 30 days, so they disagreed before anyone touched a filter. The tiles now describe the same window, with severity and type as the drill-down within it. |
+
+## Open decisions (not work — these need a call from the studio)
+
+| Question | Why it is not mine to make |
+|---|---|
+| `/hr/attendance/auto-check-in` | The endpoint exists and nothing calls it. Checking someone in from their location without them pressing anything is a decision about tracking staff, not a gap to close quietly. |
+| Drop `team_payout_settlements`? | The superseded per-user payout ledger (0143). Nothing reads or writes it and both tables are now commented, but a table drop cannot be undone by a migration. |
+| Plan pricing | Published on 2026-09-16 from the old app's own seed (₹1,999 / ₹18,000 / ₹30,000 ex-GST). Change it in `0141_plan_pricing.sql` if those are not the intended prices. |
 
 ## Done since 2026-09-11 (not yet folded into the table above)
 

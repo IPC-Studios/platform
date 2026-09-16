@@ -1025,23 +1025,22 @@ function Conflicts({ slots, shoots }: { slots: readonly TeamSlot[]; shoots: read
 
   const all = useMemo(() => findConflictItems(slots), [slots])
 
-  const counts = useMemo(
-    () => ({
-      total: all.length,
-      critical: all.filter((i) => i.severity === 'critical').length,
-      warning: all.filter((i) => i.severity === 'warning').length,
-      doubleBooking: all.filter((i) => i.type === 'double_booking').length,
-      pastActive: all.filter((i) => i.type === 'past_active').length,
-    }),
-    [all],
-  )
-
-  const filtered = useMemo(() => {
+  /**
+   * What is in view: the date range and the search, but NOT severity or type.
+   *
+   * The tiles counted `all`, so they described conflicts outside the window
+   * the list was showing — and the window defaults to the next thirty days,
+   * which means they disagreed on first render, before anyone touched a
+   * filter. "Critical 3" above a list of one, with the other two unreachable
+   * in a month nobody is looking at, is worse than no tile.
+   *
+   * Severity and type stay out of the scope deliberately: those two are the
+   * drill-down, so the tiles are what you read to decide which to click.
+   */
+  const scoped = useMemo(() => {
     const start = new Date(from).getTime()
     const end = new Date(to).getTime() + 24 * 60 * 60 * 1000 - 1
     return all
-      .filter((i) => severity === 'all' || i.severity === severity)
-      .filter((i) => type === 'all' || i.type === type)
       .filter((i) => {
         const t = new Date(i.slot.start_at).getTime()
         return t >= start && t <= end
@@ -1057,8 +1056,27 @@ function Conflicts({ slots, shoots }: { slots: readonly TeamSlot[]; shoots: read
           (shoot?.project_name ?? '').toLowerCase().includes(q)
         )
       })
-      .sort((a, b) => a.slot.start_at.localeCompare(b.slot.start_at))
-  }, [all, severity, type, from, to, search, shootById])
+  }, [all, from, to, search, shootById])
+
+  const counts = useMemo(
+    () => ({
+      total: scoped.length,
+      critical: scoped.filter((i) => i.severity === 'critical').length,
+      warning: scoped.filter((i) => i.severity === 'warning').length,
+      doubleBooking: scoped.filter((i) => i.type === 'double_booking').length,
+      pastActive: scoped.filter((i) => i.type === 'past_active').length,
+    }),
+    [scoped],
+  )
+
+  const filtered = useMemo(
+    () =>
+      scoped
+        .filter((i) => severity === 'all' || i.severity === severity)
+        .filter((i) => type === 'all' || i.type === type)
+        .sort((a, b) => a.slot.start_at.localeCompare(b.slot.start_at)),
+    [scoped, severity, type],
+  )
 
   return (
     <div className="mt-4 flex flex-col gap-4">
