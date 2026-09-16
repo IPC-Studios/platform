@@ -140,6 +140,30 @@ function ProjectDetail() {
   const [tab, setTab] = useState<Tab>('overview')
   const [groupByShoot, setGroupByShoot] = useState(false)
 
+  /**
+   * The month the Allocation action should open on. Same query key the Shoots
+   * tab uses, so this shares its cache rather than fetching again — and it has
+   * to sit above the loading guard, or the hook count changes once the project
+   * resolves.
+   */
+  const projectShoots = useQuery({
+    queryKey: ['shoots', 'project', id],
+    queryFn: () => callApi(`/shoots?project_id=${id}`, { responseSchema: shootsList }),
+    enabled: !!id,
+    staleTime: 15_000,
+  })
+  const allocationSearch = (() => {
+    const dates = (projectShoots.data ?? [])
+      .map((s) => s.shoot_date)
+      .filter((d): d is string => !!d)
+      .sort()
+    // Prefer the next one still ahead; fall back to the first, so a finished
+    // project still opens somewhere with its work on screen.
+    const today = new Date().toISOString().slice(0, 10)
+    const pick = dates.find((d) => d >= today) ?? dates[0]
+    return pick ? { month: pick.slice(0, 7) } : {}
+  })()
+
   if (isLoading) return <SkeletonCards count={3} />
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />
 
@@ -267,7 +291,9 @@ function ProjectDetail() {
             </Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>
-            <Link to="/team-allocation">
+            {/* Carries the month of this project's first shoot, so the calendar
+                opens where the work actually is. */}
+            <Link to="/team-allocation" search={allocationSearch}>
               <Users /> Allocation
             </Link>
           </Button>

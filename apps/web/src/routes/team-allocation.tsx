@@ -74,8 +74,22 @@ function TeamBooking() {
   const [tab, setTab] = useState<Tab>('calendar')
   const [view, setView] = useState<CalendarView>('month')
   const today = new Date()
-  const [year, setYear] = useState(today.getFullYear())
-  const [month, setMonth] = useState(today.getMonth())
+  /**
+   * `?month=YYYY-MM` opens on that month. A project's Allocation action used to
+   * link here bare, so a wedding whose shoots are in February landed on the
+   * current month reading "Nothing booked this month" — which is true, and
+   * useless.
+   */
+  const asked = (() => {
+    if (typeof window === 'undefined') return null
+    const v = new URLSearchParams(window.location.search).get('month')
+    const m = v && /^\d{4}-\d{2}$/.test(v) ? v : null
+    if (!m) return null
+    const [y, mo] = m.split('-').map(Number)
+    return y && mo && mo >= 1 && mo <= 12 ? { year: y, month: mo - 1 } : null
+  })()
+  const [year, setYear] = useState(asked?.year ?? today.getFullYear())
+  const [month, setMonth] = useState(asked?.month ?? today.getMonth())
   /** The shoot an "Assign" press came from, so the dialog opens already filled. */
   const [assignTo, setAssignTo] = useState<ShootListItem | null>(null)
 
