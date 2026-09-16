@@ -27,6 +27,7 @@ import {
   Receipt,
   Eye,
   FileCheck,
+  ListChecks,
   Trash2,
   Users,
   Wallet,
@@ -45,7 +46,8 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from '@/shared/ui/dialog'
-import { Input, Label, Select } from '@/shared/ui/input'
+import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { useCreateTask } from '@/features/tasks/api'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
 import {
@@ -1330,6 +1332,7 @@ function DeliverableGroup({
                       {scope === 'client' ? 'To internal' : 'To client'}
                     </Button>
                   )}
+                  {canEdit && <CreateTaskForDeliverable projectId={projectId} deliverable={d} />}
                   {canEdit && <EditDeliverableDialog id={projectId} deliverable={d} />}
                   {canEdit && (
                     <LinkedShootsDialog
@@ -1350,6 +1353,51 @@ function DeliverableGroup({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Turn one deliverable into a task someone owns.
+ *
+ * Generating tasks existed only for a whole project at once, from the Tasks
+ * page — so the answer to "who is cutting the highlight film" was to generate
+ * tasks for everything and then delete the ones you did not want. The old app
+ * puts an Assign Task action on each row; this is that, pre-linked to the
+ * deliverable so the task and the thing it delivers stay connected.
+ */
+function CreateTaskForDeliverable({
+  projectId,
+  deliverable,
+}: {
+  projectId: string
+  deliverable: Deliverable
+}) {
+  const create = useCreateTask()
+  const [done, setDone] = useState(false)
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={create.isPending || done}
+      title={`Create a task for ${deliverable.title}`}
+      onClick={() =>
+        create.mutate(
+          {
+            title: deliverable.title,
+            project_id: projectId,
+            deliverable_id: deliverable.id,
+            status: 'to_do',
+            priority: 'medium',
+            assignees: [],
+            ...(deliverable.description ? { description: deliverable.description } : {}),
+            ...(deliverable.estimated_date ? { due_date: deliverable.estimated_date } : {}),
+          },
+          { onSuccess: () => setDone(true) },
+        )
+      }
+    >
+      <ListChecks /> {done ? 'Task created' : 'Create task'}
+    </Button>
   )
 }
 
@@ -1459,6 +1507,7 @@ function AddDeliverableDialog({
   const [amount, setAmount] = useState('')
   const [workType, setWorkType] = useState('')
   const [internalNotes, setInternalNotes] = useState('')
+  const [brief, setBrief] = useState('')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -1473,6 +1522,7 @@ function AddDeliverableDialog({
       start_rule: 'whole_project',
       ...(workType.trim() ? { work_type: workType.trim() } : {}),
       ...(internalNotes.trim() ? { internal_notes: internalNotes.trim() } : {}),
+      ...(brief.trim() ? { description: brief.trim() } : {}),
     }
     await add.mutateAsync(body)
     setOpen(false)
@@ -1481,6 +1531,7 @@ function AddDeliverableDialog({
     setAmount('')
     setWorkType('')
     setInternalNotes('')
+    setBrief('')
   }
 
   return (
@@ -1511,13 +1562,21 @@ function AddDeliverableDialog({
             </div>
           )}
           <div className="flex flex-col gap-1.5">
+            <Label>Brief (optional)</Label>
+            <Textarea
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              rows={3}
+              placeholder="What this is, and what done looks like — the editor reads this."
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label>Internal notes (optional)</Label>
-            <textarea
+            <Textarea
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
               rows={2}
               placeholder="Never shown to the client"
-              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -1545,6 +1604,12 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
   const [showOnQuotation, setShowOnQuotation] = useState(deliverable.show_on_quotation)
   const [workType, setWorkType] = useState(deliverable.work_type ?? '')
   const [internalNotes, setInternalNotes] = useState(deliverable.internal_notes ?? '')
+  /**
+   * What this deliverable actually is, in the studio's words. `description`
+   * has been on the deliverable and in the contract all along and no form
+   * asked for it — the old app puts an "Add brief" action right on the row.
+   */
+  const [brief, setBrief] = useState(deliverable.description ?? '')
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -1557,6 +1622,7 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
         show_on_quotation: showOnQuotation,
         work_type: workType.trim() || null,
         internal_notes: internalNotes.trim() || null,
+        description: brief.trim() || null,
       },
     })
     setOpen(false)
@@ -1594,13 +1660,21 @@ function EditDeliverableDialog({ id, deliverable }: { id: string; deliverable: D
             Show on quotation
           </label>
           <div className="flex flex-col gap-1.5">
+            <Label>Brief (optional)</Label>
+            <Textarea
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              rows={3}
+              placeholder="What this is, and what done looks like — the editor reads this."
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label>Internal notes (optional)</Label>
-            <textarea
+            <Textarea
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
               rows={2}
               placeholder="Never shown to the client"
-              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
             />
           </div>
           <div className="flex justify-end gap-2">
