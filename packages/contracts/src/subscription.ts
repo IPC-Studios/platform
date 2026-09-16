@@ -6,13 +6,19 @@ export const plan = z.object({
   key: z.string(),
   name: z.string(),
   price: money,
-  billing_interval: z.enum(['monthly', 'yearly']),
+  billing_interval: z.enum(['monthly', 'yearly', 'biennial']),
   // Lovable parity: richer plan cards. All optional.
   description: z.string().nullable().nullish(),
   currency: z.string().nullish(),
   duration_days: z.number().int().nullish(),
   features: z.array(z.string()).nullish(),
   is_active: z.boolean().nullish(),
+  /** What the card is decorated with: the badge, the saving, the per-month figure. */
+  badge: z.string().nullable().nullish(),
+  billing_label: z.string().nullable().nullish(),
+  savings_label: z.string().nullable().nullish(),
+  monthly_equivalent: money.nullish(),
+  sort_order: z.number().int().nullish(),
 })
 export type Plan = z.infer<typeof plan>
 

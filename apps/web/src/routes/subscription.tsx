@@ -180,57 +180,98 @@ function Subscription() {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
-          {data.map((p) => (
-            <Card key={p.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="size-4 text-primary" />
-                  {p.name}
-                </CardTitle>
-                <p className="text-2xl font-semibold">
-                  {formatINR(p.price)}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {' '}
-                    / {p.billing_interval === 'yearly' ? 'year' : 'month'}
-                  </span>
-                </p>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
-                {p.features && p.features.length > 0 ? (
-                  <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-                    {p.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2">
-                        <Check className="size-4 text-success" /> {f}
+          {data.map((p) => {
+            // A studio already inside its plan is renewing, not choosing.
+            const renewing = !status.data?.can_purchase
+            const free = p.price <= 0
+            const highlight = p.badge === 'Most Popular'
+            const saver = p.badge === 'Maximum Savings'
+            const label = free
+              ? 'Free Trial Included'
+              : subscribe.isPending
+                ? 'Processing…'
+                : renewing
+                  ? `Renew · ${p.name.replace(/^IPC\s+/i, '')}`
+                  : `Choose ${p.name.replace(/^IPC\s+/i, '')}`
+            return (
+              <Card
+                key={p.id}
+                className={
+                  highlight
+                    ? 'border-primary ring-2 ring-primary'
+                    : saver
+                      ? 'border-success ring-2 ring-success/60'
+                      : undefined
+                }
+              >
+                <CardHeader>
+                  {p.badge && (
+                    <StatusBadge tone={saver ? 'success' : 'info'} className="w-fit">
+                      {p.badge}
+                    </StatusBadge>
+                  )}
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="size-4 text-primary" />
+                    {p.name}
+                  </CardTitle>
+                  <p className="text-2xl font-semibold">
+                    {formatINR(p.price)}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {' '}
+                      / {p.billing_interval === 'biennial' ? '2 years' : p.billing_interval === 'yearly' ? 'year' : 'month'}
+                    </span>
+                  </p>
+                  {/* The figure people actually compare plans on. */}
+                  {p.monthly_equivalent != null && p.billing_interval !== 'monthly' && (
+                    <p className="text-sm text-muted-foreground">
+                      {formatINR(p.monthly_equivalent)}/month, paid up front
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {p.billing_label ?? ''}
+                    {p.billing_label ? ' · ' : ''}+ GST (18%)
+                  </p>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  {p.savings_label && (
+                    <p className="rounded-md bg-success/10 px-2.5 py-1.5 text-sm font-medium text-success">
+                      {p.savings_label}
+                    </p>
+                  )}
+                  {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
+                  {p.features && p.features.length > 0 ? (
+                    <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+                      {p.features.map((f) => (
+                        <li key={f} className="flex items-center gap-2">
+                          <Check className="size-4 shrink-0 text-success" /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+                      <li className="flex items-center gap-2">
+                        <Check className="size-4 text-success" /> All studio features
                       </li>
-                    ))}
-                  </ul>
-                ) : (
-                <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-                  <li className="flex items-center gap-2">
-                    <Check className="size-4 text-success" /> All studio features
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="size-4 text-success" /> GST invoicing
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="size-4 text-success" /> +18% GST at checkout
-                  </li>
-                </ul>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  {p.currency ?? 'INR'}{p.duration_days ? ` · ${p.duration_days} days` : ''}
-                </p>
-                <Button
-                  onClick={() => subscribe.mutate(p)}
-                  disabled={subscribe.isPending || !session?.is_owner}
-                  title={session?.is_owner ? undefined : 'Only the studio owner can change the plan.'}
-                >
-                  {subscribe.isPending ? 'Processing…' : 'Subscribe'}
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                      <li className="flex items-center gap-2">
+                        <Check className="size-4 text-success" /> GST invoicing
+                      </li>
+                    </ul>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {p.currency ?? 'INR'}{p.duration_days ? ` · ${p.duration_days} days` : ''}
+                  </p>
+                  <Button
+                    variant={highlight || saver ? 'default' : 'outline'}
+                    onClick={() => subscribe.mutate(p)}
+                    disabled={subscribe.isPending || free || !session?.is_owner}
+                    title={session?.is_owner ? undefined : 'Only the studio owner can change the plan.'}
+                  >
+                    {label}
+                  </Button>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 

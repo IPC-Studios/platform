@@ -34,8 +34,9 @@ export const subscriptionRouter = new Hono<AppEnv>()
         c.get('auth').userId,
         (sql) => sql`
           select id, key, name, price, billing_interval,
-                 description, currency, duration_days, features, is_active
-          from plans where is_active = true order by price`,
+                 description, currency, duration_days, features, is_active,
+                 badge, billing_label, savings_label, monthly_equivalent, sort_order
+          from plans where is_active = true order by sort_order, price`,
       ),
     )
     if (!rows) fail(400, 'We could not load plans.')
@@ -46,6 +47,15 @@ export const subscriptionRouter = new Hono<AppEnv>()
       duration_days: r['duration_days'] ?? null,
       features: Array.isArray(r['features']) ? r['features'] : null,
       is_active: true,
+      badge: (r['badge'] as string | null) ?? null,
+      billing_label: (r['billing_label'] as string | null) ?? null,
+      savings_label: (r['savings_label'] as string | null) ?? null,
+      // numeric(12,2) arrives as a string from the driver.
+      monthly_equivalent:
+        r['monthly_equivalent'] === null || r['monthly_equivalent'] === undefined
+          ? null
+          : Number(r['monthly_equivalent']),
+      sort_order: r['sort_order'] === null || r['sort_order'] === undefined ? null : Number(r['sort_order']),
     }))))
   })
 

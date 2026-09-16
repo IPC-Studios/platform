@@ -24,8 +24,9 @@ const ORDER = '44444444-4444-4444-4444-444444444444'
 /** The /subscription/plans query, verbatim. */
 const PLANS_SQL = `
   select id, key, name, price, billing_interval,
-         description, currency, duration_days, features, is_active
-  from plans where is_active = true order by price`
+         description, currency, duration_days, features, is_active,
+         badge, billing_label, savings_label, monthly_equivalent, sort_order
+  from plans where is_active = true order by sort_order, price`
 
 /** The /subscription/status company query, verbatim apart from the bound id. */
 const STATUS_SQL = `
@@ -97,11 +98,28 @@ beforeAll(async () => {
 
 describe('subscription screen queries', () => {
   it('the plans query runs — every column it names exists', async () => {
-    const res = await db.query<{ key: string; currency: string; description: string | null }>(PLANS_SQL)
-    expect(res.rows.length).toBe(1)
-    expect(res.rows[0]!.key).toBe('studio')
-    expect(res.rows[0]!.currency).toBe('INR')
-    expect(res.rows[0]!.description).toBe('Everything a working studio needs.')
+    // This is the router's query verbatim. Its job is to fail the moment the
+    // query names a column the table does not have, which is how the whole
+    // subscription screen came to 400 on every call.
+    const res = await db.query<{
+      key: string
+      currency: string
+      description: string | null
+      badge: string | null
+      sort_order: number
+    }>(PLANS_SQL)
+    // 0141 publishes the three real plans; this file adds its own fixture.
+    const own = res.rows.find((r) => r.key === 'studio')
+    expect(own).toBeDefined()
+    expect(own!.currency).toBe('INR')
+    expect(own!.description).toBe('Everything a working studio needs.')
+    // Sold in the order a studio should read them, cheapest commitment first.
+    expect(res.rows.filter((r) => r.key.startsWith('ipc_')).map((r) => r.key)).toEqual([
+      'ipc_monthly',
+      'ipc_yearly',
+      'ipc_2year',
+    ])
+    expect(res.rows.find((r) => r.key === 'ipc_yearly')!.badge).toBe('Most Popular')
   })
 
   it('the status query runs and names the plan the company is on', async () => {
