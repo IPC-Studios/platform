@@ -9,7 +9,9 @@
  */
 const cell = (v: string | number | null | undefined): string => {
   const s = v === null || v === undefined ? '' : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  // \r as well as \n: a note pasted in from Windows carries CRLF, and a bare
+  // carriage return splits the row just as surely as a newline does.
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export function toCsv(

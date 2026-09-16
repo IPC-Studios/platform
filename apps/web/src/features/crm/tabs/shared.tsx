@@ -9,6 +9,7 @@ import { EmptyState } from '@/shared/ui/states'
 import { Avatar } from '@/shared/ui/avatar'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { dueBucket } from '../leads'
+import { downloadCsv, toCsv } from '@/shared/ui/csv'
 
 export const SOURCE_TONE: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
   facebook: 'info',
@@ -328,25 +329,22 @@ export function BoardColumn({
   )
 }
 
-/** Downloads the given leads as a spreadsheet-friendly CSV. */
+/**
+ * Downloads the given leads as a spreadsheet-friendly CSV.
+ *
+ * Through the shared helper: this quoted correctly but wrote no BOM, so a
+ * lead called Sharma with a rupee deal value opened in Excel as mojibake.
+ */
 export function exportLeadsCsv(leads: readonly CrmLead[], filename = 'leads.csv') {
-  const header = 'name,phone,email,stage,status,source,owner,company,title,deal_value,probability,close_date,lost_reason,follow_up_at,created_at\n'
-  const rows = leads
-    .map((l) =>
-      [
-        l.name ?? '', l.phone ?? '', l.email ?? '', leadStageLabel(l), l.status, l.source, l.assignee_name ?? '',
-        l.crm_company_name ?? '', l.title ?? '', l.deal_value ?? '', l.probability ?? '', l.close_date ?? '',
-        l.lost_reason ?? '', l.follow_up_at ?? '', l.created_at,
-      ]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-        .join(','),
-    )
-    .join('\n')
-  const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadCsv(
+    filename,
+    toCsv(
+      ['Name', 'Phone', 'Email', 'Stage', 'Status', 'Source', 'Owner', 'Company', 'Title', 'Deal value', 'Probability', 'Close date', 'Lost reason', 'Follow up at', 'Created at'],
+      leads.map((l) => [
+        l.name ?? '', l.phone ?? '', l.email ?? '', leadStageLabel(l), l.status, l.source,
+        l.assignee_name ?? '', l.crm_company_name ?? '', l.title ?? '', l.deal_value ?? '',
+        l.probability ?? '', l.close_date ?? '', l.lost_reason ?? '', l.follow_up_at ?? '', l.created_at,
+      ]),
+    ),
+  )
 }

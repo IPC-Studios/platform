@@ -36,6 +36,7 @@ const TAX_NAMES = ['GST', 'CGST', 'SGST', 'IGST', 'Custom']
 const PAGE_SIZE = 20
 const todayISO = () => new Date().toISOString().slice(0, 10)
 import { Plus, Search, Trash2, Edit, Wallet, Calendar, BarChart3, Download, Printer, Users, X, Paperclip } from 'lucide-react'
+import { downloadCsv, toCsv } from '@/shared/ui/csv'
 
 interface ItemLine {
   title: string
@@ -43,20 +44,48 @@ interface ItemLine {
   qty: string
 }
 
+/**
+ * The export, through the shared helper.
+ *
+ * Built by hand this wrapped every cell in quotes but doubled the inner
+ * quotes of only the description, so a party name containing a quote broke
+ * the row; and with no BOM, Excel on Windows read every rupee sign as
+ * mojibake. The itemised lines are summarised into a column of their own --
+ * an expense entered as five lines exported as one number, which is the
+ * figure you cannot reconcile against the bill.
+ */
 function exportCsv(rows: PersonalExpense[]) {
-  const header = ['id', 'date', 'category', 'description', 'party', 'amount', 'gst_treatment', 'gst_rate', 'invoice_number', 'tax_name', 'tax_amount', 'reverse_charge']
-  const lines = rows.map((e) =>
-    [e.id, e.expense_date, e.category ?? '', (e.description ?? '').replace(/"/g, '""'), e.party_name ?? '', String(e.amount), e.gst_treatment, e.gst_rate == null ? '' : String(e.gst_rate), e.invoice_number ?? '', e.tax_name ?? '', e.tax_amount == null ? '' : String(e.tax_amount), e.reverse_charge ? 'yes' : 'no']
-      .map((v) => `"${v}"`)
-      .join(','),
+  const itemised = (e: PersonalExpense): string =>
+    Array.isArray(e.itemize_json) && e.itemize_json.length > 0
+      ? e.itemize_json
+          .map((l) => {
+            const line = l as Record<string, unknown>
+            const qty = Number(line['qty'] ?? 1)
+            return `${String(line['title'] ?? '')} x${qty} @ ${String(line['amount'] ?? '')}`
+          })
+          .join('; ')
+      : ''
+
+  downloadCsv(
+    `personal-expenses-${todayISO()}.csv`,
+    toCsv(
+      ['Date', 'Category', 'Description', 'Party', 'Amount', 'GST treatment', 'GST rate', 'Invoice number', 'Tax name', 'Tax amount', 'Reverse charge', 'Itemised lines'],
+      rows.map((e) => [
+        e.expense_date,
+        e.category ?? '',
+        e.description ?? '',
+        e.party_name ?? '',
+        e.amount,
+        e.gst_treatment,
+        e.gst_rate ?? '',
+        e.invoice_number ?? '',
+        e.tax_name ?? '',
+        e.tax_amount ?? '',
+        e.reverse_charge ? 'yes' : 'no',
+        itemised(e),
+      ]),
+    ),
   )
-  const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `personal-expenses-${todayISO()}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 function PersonalExpensesContent({ report }: { report?: boolean | undefined }) {
