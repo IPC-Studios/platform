@@ -67,6 +67,10 @@ beforeAll(async () => {
   // The privileges production grants in 00_bootstrap.sql, before any table
   // exists. Without these, RLS never gets a say.
   await db.exec(`grant usage on schema public to anon, authenticated, service_role;`)
+  // Production grants this too (00_bootstrap.sql). Without it, a policy that
+  // calls auth.uid() fails with "permission denied for schema auth" — which
+  // reads as a policy rejection and is not one.
+  await db.exec(`grant usage on schema auth to anon, authenticated, service_role;`)
   await db.exec(
     `alter default privileges in schema public grant select, insert, update, delete on tables to authenticated, service_role;`,
   )

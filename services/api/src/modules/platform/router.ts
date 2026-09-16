@@ -73,14 +73,14 @@ export const platformRouter = new Hono<AppEnv>()
           insert into companies (name) values (${parsed.data.name}) returning id`
         const companyId = rows[0]?.id
         if (!companyId) return null
-        // Owner membership is created lazily on first login; record intent
-        // (best-effort: the invites table is created by a later migration).
-        try {
-          await sql`insert into platform_studio_invites (company_id, email, name, phone, plan_key, invited_by)
-            values (${companyId}, ${parsed.data.owner_email}, ${parsed.data.owner_name ?? null},
-                    ${parsed.data.owner_phone ?? null}, ${parsed.data.plan_key ?? null}, ${c.get('auth').userId})
-            on conflict do nothing`
-        } catch { /* pre-migration: studio row already exists, keep going */ }
+        // Who this studio is for. Owner membership is created when they
+        // register against this row — without it the company is an orphan
+        // nobody can claim, which is what used to happen: the table did not
+        // exist and this insert's failure was swallowed.
+        await sql`insert into platform_studio_invites (company_id, email, name, phone, plan_key, invited_by)
+          values (${companyId}, ${parsed.data.owner_email}, ${parsed.data.owner_name ?? null},
+                  ${parsed.data.owner_phone ?? null}, ${parsed.data.plan_key ?? null}, ${c.get('auth').userId})
+          on conflict do nothing`
         if (parsed.data.plan_key) {
           try {
             await sql`select platform_grant_trial(p_company_id => ${companyId})`
