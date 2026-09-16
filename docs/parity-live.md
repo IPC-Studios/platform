@@ -386,3 +386,54 @@ drawer, and is the only row the inbox's Warm filter returns; the task
 deliverable picker enables on project choice and lists that project's real
 deliverables; data-management chip counts, both status filters and the date
 range render; the project-tracking row carries its five figures.
+
+## Round: the page-by-page crawl (2026-09-16)
+
+A crawler that visits each screen and captures every button, tab, heading,
+select and field — reading `aria-label` as well as text, because our icon
+buttons carry their name there and the earlier harness could not see them.
+Run against both apps and diffed route by route.
+
+### Ours was ahead on
+
+Employees (Directory/Salaries tabs, pagination, engagement/status/role
+filters, Deactivate, Remove), Attendance (check in/out, My attendance, Set
+location, Correct, a Late state), Roles & Access (a role library of defaults to
+adopt), Project Tracking, Clients, Tasks, Production Board, and the CRM as a
+whole — fourteen tabs against eleven.
+
+### Gaps found and closed
+
+| Where | What was missing |
+| --- | --- |
+| Project → Shoots | The whole planning surface. Rebuilt: per-requirement rows coloured by fill, Assign/Manage, role chips, crew progress, time on the card, assigned and data badges, inline edit, apply preset |
+| Project → Deliverables | `description` (the old app's "Add brief") reachable by no form; no way to make a task from one deliverable |
+| Project → Expenses | "Add expense" was a link to the global list — pressing it added nothing |
+| Project → Terms | No Save draft: you finished in one sitting or lost the lot |
+| CRM → Templates | No seeding, so every studio wrote its first enquiry reply from scratch |
+| CRM → Reports | Date range only — no source or owner filter |
+| Lead sources | No Meta portal checklist, only a list of unset server secrets |
+| Settings | No contact details; phone/email/address lived only on the invoice templates page |
+| Tasks | No explicit View action |
+| Project → Allocation | Linked to a bare calendar, opening on a month with nothing in it |
+
+### Traps worth remembering
+
+- **A draft is newer than the document it came from.** The documents list takes
+  one row per project, newest first, so an unfiltered list would let saving a
+  draft hide the live document, its link and its acknowledgement state.
+- **Two overloads both callable as `crm_stats(date, date)`** is an
+  ambiguous-function error at call time. Adding defaulted parameters means
+  dropping the old signature, and the test asserts one function remains.
+- **`renderTemplate` fills an unknown `{{placeholder}}` with empty text.** A
+  seeded template written against an invented variable ships "Hi , thanks for
+  reaching out" and nothing reports it — so the seeds' placeholders are checked
+  against what `crmTemplateVars` actually produces.
+- **A blank filter value must mean "no filter"**, not a value literally equal
+  to the empty string. Same family as the `Number('')` bug two rounds ago.
+
+### Still to crawl
+
+The client-facing document pages (quotation, receipt, delivery note, terms
+acknowledgement, team terms) — reachable only by token, so they need a seeded
+link per type rather than a logged-in session.
