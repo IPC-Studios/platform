@@ -189,8 +189,16 @@ function Enquiries() {
   const [tab, setTab] = useState<EnquiryStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [source, setSource] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
   const { data: sources } = useActiveLookups('enquiry_source')
-  const list = useEnquiries({ status: tab === 'all' ? null : tab, search, source: source || null })
+  const list = useEnquiries({
+    status: tab === 'all' ? null : tab,
+    search,
+    source: source || null,
+    from: from || null,
+    to: to || null,
+  })
 
   const pages = list.data?.pages ?? []
   const summary = pages[0]?.summary
@@ -247,6 +255,36 @@ function Enquiries() {
             </option>
           ))}
         </Select>
+        {/* The tiles above count the same window, so "37 enquiries in
+            October" is one reading rather than two screens. */}
+        <Input
+          type="date"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          aria-label="Enquiries from"
+          className="sm:max-w-40"
+          max={to || undefined}
+        />
+        <Input
+          type="date"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          aria-label="Enquiries to"
+          className="sm:max-w-40"
+          min={from || undefined}
+        />
+        {(from || to) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setFrom('')
+              setTo('')
+            }}
+          >
+            Clear dates
+          </Button>
+        )}
       </div>
 
       <div className="mt-4">

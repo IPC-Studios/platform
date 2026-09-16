@@ -38,6 +38,13 @@ export const enquiriesRouter = new Hono<AppEnv>()
     const source = (c.req.query('source') ?? '').trim()
     const cursor = c.req.query('cursor')
     if (cursor && Number.isNaN(Date.parse(cursor))) fail(422, 'That page marker is invalid.')
+    // "How many came in last month" was unanswerable: the list had a status,
+    // a search and a source, and no way to bound it in time at all.
+    const from = (c.req.query('from') ?? '').trim() || null
+    const to = (c.req.query('to') ?? '').trim() || null
+    for (const [name, v] of [['from', from], ['to', to]] as const) {
+      if (v && Number.isNaN(Date.parse(v))) fail(422, `That ${name} date is invalid.`)
+    }
     const limitRaw = Number(c.req.query('limit') ?? 100)
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 100
     const rows = await attempt(c, 'enquiries.list', () =>
@@ -59,6 +66,9 @@ export const enquiriesRouter = new Hono<AppEnv>()
                          or e.message ilike ${'%' + search + '%'})`
                   : sql`true`
               }
+              and ${from ? sql`e.created_at >= ${from}::date` : sql`true`}
+              -- A "to" date means the whole of that day, not midnight on it.
+              and ${to ? sql`e.created_at < (${to}::date + 1)` : sql`true`}
              and ${cursor ? sql`e.created_at < ${cursor}` : sql`true`}
            order by e.created_at desc
            limit ${limit + 1}`
@@ -70,7 +80,9 @@ export const enquiriesRouter = new Hono<AppEnv>()
                  count(*) filter (where enquiry_status = 'contacted')::int as contacted_count,
                  count(*) filter (where enquiry_status = 'converted')::int as converted_count,
                  count(*) filter (where enquiry_status = 'closed')::int as closed_count
-            from enquiries`
+            from enquiries
+           where ${from ? sql`created_at >= ${from}::date` : sql`true`}
+             and ${to ? sql`created_at < (${to}::date + 1)` : sql`true`}`
         const page = items.slice(0, limit)
         const last = page[page.length - 1] as { created_at?: string } | undefined
         return {

@@ -14,16 +14,24 @@ import { useAccess } from '@/shared/auth/useAccess'
 const created = z.object({ id: z.string().uuid() })
 const anySchema = z.any()
 
-export function useEnquiries(filters: { status?: EnquiryStatus | null; search?: string; source?: string | null }) {
+export function useEnquiries(filters: {
+  status?: EnquiryStatus | null
+  search?: string
+  source?: string | null
+  from?: string | null
+  to?: string | null
+}) {
   const { session } = useAuth()
   const access = useAccess()
   const base = new URLSearchParams()
   if (filters.status) base.set('status', filters.status)
   if (filters.search?.trim()) base.set('search', filters.search.trim())
   if (filters.source?.trim()) base.set('source', filters.source.trim())
+  if (filters.from?.trim()) base.set('from', filters.from.trim())
+  if (filters.to?.trim()) base.set('to', filters.to.trim())
   const qs = base.toString()
   return useInfiniteQuery({
-    queryKey: ['enquiries', filters.status ?? 'all', filters.search ?? '', filters.source ?? ''],
+    queryKey: ['enquiries', qs],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams(qs)
       if (pageParam) params.set('cursor', pageParam)
