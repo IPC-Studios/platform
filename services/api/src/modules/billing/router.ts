@@ -502,6 +502,13 @@ export const billingRouter = new Hono<AppEnv>()
           id: r.id,
           project_id: r.project_id,
           project_name: r.project_name,
+          // Selected, typed, and then dropped here — the schema's
+          // `.default(null)` filled the hole without a word, so the list
+          // showed every payment as belonging to no invoice while the invoice
+          // itself listed the same payment. A field is only real when the
+          // read path returns it.
+          invoice_id: r.invoice_id,
+          invoice_number: r.invoice_number,
           client_id: r.client_id,
           client_name: r.client_name,
           client_phone: r.client_phone,

@@ -382,5 +382,91 @@ check(
   { tiles: expenseTiles.json.count, list: gstOnly.json.items?.length },
 )
 
+// ── the payment ledger (0145) ─────────────────────────────────
+// There were two payment tables and nothing joined them: money recorded
+// against an invoice never reached the project, and money recorded against
+// the project left the invoice unpaid. `received_payments` is the single
+// ledger now, and an invoice's totals are derived from it by trigger.
+//
+// These run against the real HTTP path on purpose. The bug that survived the
+// pglite suite was in response SHAPING, not in SQL: the list selected
+// invoice_id, typed it, and then rebuilt the row as an object literal that
+// left it out — and the schema's `.default(null)` filled the hole in silence.
+const ledgerClient = await api('/clients', {
+  token: aToken,
+  method: 'POST',
+  body: { name: 'Ledger Co', phone: randPhone() },
+})
+const ledgerProject = await api('/projects', {
+  token: aToken,
+  method: 'POST',
+  body: { name: 'Ledger project', client_id: ledgerClient.json.id, package_cost: 10000 },
+})
+const ledgerInvoice = await api('/billing/invoices', {
+  token: aToken,
+  method: 'POST',
+  body: {
+    client_id: ledgerClient.json.id,
+    project_id: ledgerProject.json.id,
+    place_of_supply: '27',
+    intra_state: true,
+    invoice_date: new Date().toISOString().slice(0, 10),
+    discount: 0,
+    discount_type: 'flat',
+    status: 'sent',
+    lines: [{ description: 'Ledger probe', quantity: 1, rate: 10000, gst_rate: 0 }],
+  },
+})
+check('ledger: an invoice can be raised on a project', ledgerInvoice.status === 201, {
+  status: ledgerInvoice.status,
+  ...ledgerInvoice.json,
+})
+
+const invId = ledgerInvoice.json.id
+const paid = await api(`/billing/invoices/${invId}/payments`, {
+  token: aToken,
+  method: 'POST',
+  body: { amount: 10000, paid_on: new Date().toISOString().slice(0, 10), mode: 'upi' },
+})
+check('ledger: a payment can be recorded against the invoice', paid.status === 204, paid.json)
+
+const invAfter = await api(`/billing/invoices/${invId}`, { token: aToken })
+check(
+  'ledger: the invoice settles itself from the payment',
+  invAfter.json.status === 'paid' && Number(invAfter.json.amount_paid) === 10000,
+  { status: invAfter.json.status, amount_paid: invAfter.json.amount_paid },
+)
+
+// The half that was broken: this money has to reach the project.
+const fin = await api('/financials/projects', { token: aToken })
+const projRow = (Array.isArray(fin.json) ? fin.json : []).find(
+  (f) => f.project_id === ledgerProject.json.id,
+)
+check(
+  'ledger: money recorded on the invoice reaches the project',
+  Number(projRow?.received) === 10000,
+  { received: projRow?.received },
+)
+
+// And the shaping bug: the list must return the link it selects.
+const payList = await api('/billing/payments?page=1&page_size=50', { token: aToken })
+const listed = ((payList.json.items ?? payList.json) || []).find((p) => p.invoice_id === invId)
+check(
+  'ledger: the payments list says which invoice a payment settled',
+  !!listed && listed.invoice_number === invAfter.json.invoice_number,
+  { found: !!listed, invoice_number: listed?.invoice_number },
+)
+
+// Deleting it must un-settle the invoice, or a mistake stays "paid" for ever.
+if (listed) {
+  const gone = await api(`/billing/payments/${listed.id}`, { token: aToken, method: 'DELETE' })
+  const invUnpaid = await api(`/billing/invoices/${invId}`, { token: aToken })
+  check(
+    'ledger: removing the payment un-settles the invoice',
+    gone.status < 300 && Number(invUnpaid.json.amount_paid) === 0 && invUnpaid.json.status !== 'paid',
+    { delete: gone.status, amount_paid: invUnpaid.json.amount_paid, status: invUnpaid.json.status },
+  )
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
