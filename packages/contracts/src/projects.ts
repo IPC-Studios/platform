@@ -248,6 +248,10 @@ export const projectDetail = z.object({
   client_id: uuid,
   client_name: z.string().nullable(),
   client_phone: z.string().nullable(),
+  // The Overview shows how to reach the client; phone alone meant looking
+  // them up on another screen to send anything.
+  client_email: z.string().nullable().default(null),
+  client_address: z.string().nullable().default(null),
   package_cost: money,
   additional_deliverables_cost: money,
   total_cost: money,

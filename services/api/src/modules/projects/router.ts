@@ -462,6 +462,7 @@ export const projectsRouter = new Hono<AppEnv>()
                  p.additional_deliverables_cost, p.total_cost, p.show_quotation, p.created_at,
                  p.quotation_terms, coalesce(p.quotation_display_prefs,'{}'::jsonb) as quotation_display_prefs,
                  cl.name as client_name, cl.phone as client_phone,
+                 cl.email as client_email, cl.address as client_address,
                  coalesce((
                    select jsonb_agg(
                      to_jsonb(d) || jsonb_build_object(

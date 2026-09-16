@@ -28,6 +28,7 @@ import {
   Eye,
   FileCheck,
   ListChecks,
+  MapPin,
   Trash2,
   Users,
   Wallet,
@@ -323,6 +324,7 @@ function ProjectDetail() {
                 <Fact label="Created" value={prettyDate(data.created_at)} />
                 <Fact label="Client" value={data.client_name ?? '—'} />
                 <Fact label="Phone" value={data.client_phone ?? '—'} />
+                <Fact label="Email" value={data.client_email ?? '—'} />
               </CardContent>
             </Card>
 
@@ -365,6 +367,21 @@ function ProjectDetail() {
                     <Phone className="size-3.5" aria-hidden />
                     {data.client_phone}
                   </a>
+                )}
+                {data.client_email && (
+                  <a
+                    href={`mailto:${data.client_email}`}
+                    className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    <Mail className="size-3.5" aria-hidden />
+                    {data.client_email}
+                  </a>
+                )}
+                {data.client_address && (
+                  <p className="mt-1 flex items-start gap-1.5 text-sm text-muted-foreground">
+                    <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    {data.client_address}
+                  </p>
                 )}
                 <Link
                   to="/clients"

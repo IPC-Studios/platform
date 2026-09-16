@@ -128,6 +128,8 @@ const projectDetail: ProjectDetail = {
   client_id: CLIENT.sharma,
   client_name: 'Sharma Family',
   client_phone: '9876543210',
+  client_email: 'client@example.test',
+  client_address: '12 Turner Road, Bandra West, Mumbai',
   package_cost: 185000,
   additional_deliverables_cost: 42000,
   total_cost: 227000,
