@@ -38,14 +38,17 @@ function GstAnalysisContent() {
         title="GST Analysis"
         description="GST liability and input tax credit analysis"
         actions={
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
-            <FileText className="mr-1 h-4 w-4" /> Export
-          </Button>
+          <div className="no-print">
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <FileText className="mr-1 h-4 w-4" /> Print
+            </Button>
+          </div>
         }
       />
 
-      {/* Date Range Filter */}
-      <Card>
+      {/* Date Range Filter. The dates are already stated on the figures
+          below, so the pickers themselves are noise on paper. */}
+      <Card className="no-print">
         <CardContent className="pt-6">
           <div className="flex flex-wrap items-end gap-4">
             <div>

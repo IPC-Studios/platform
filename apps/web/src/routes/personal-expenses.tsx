@@ -155,7 +155,7 @@ function PersonalExpensesContent({ report }: { report?: boolean | undefined }) {
         title="Personal Expenses"
         description="Track your personal expenses"
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="no-print flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => setPartiesOpen(true)}>
               <Users /> Parties
             </Button>
@@ -188,8 +188,9 @@ function PersonalExpensesContent({ report }: { report?: boolean | undefined }) {
         </p>
       )}
 
-      {/* Filter bar: search + category tabs + party/date/amount/gst/reverse/sort */}
-      <Card>
+      {/* Filter bar: search + category tabs + party/date/amount/gst/reverse/sort.
+          Controls, not content -- they do not belong on the printed sheet. */}
+      <Card className="no-print">
         <CardContent className="flex flex-col gap-3 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative flex-1">

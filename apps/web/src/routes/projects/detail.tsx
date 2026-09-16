@@ -741,7 +741,11 @@ function PaymentRow({
         )}
       </div>
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent title={`Receipt — ${formatINR(p.amount)}`} description={`${projectName}${clientName ? ` · ${clientName}` : ''}`}>
+        <DialogContent
+          className="paper"
+          title={`Receipt — ${formatINR(p.amount)}`}
+          description={`${projectName}${clientName ? ` · ${clientName}` : ''}`}
+        >
           <dl className="flex flex-col gap-2 text-sm">
             <Money label="Amount" value={p.amount} accent />
             <Fact label="Date" value={p.paid_on} />
@@ -751,7 +755,9 @@ function PaymentRow({
             <Fact label="GST" value={p.is_gst ? `Yes${p.gst_number ? ` (${p.gst_number})` : ''}` : 'No'} />
             {p.description && <Fact label="Note" value={p.description} />}
           </dl>
-          <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {/* The buttons are part of the dialog, so they are inside `paper`
+              and would print on the receipt. `paper-toolbar` drops them. */}
+          <div className="paper-toolbar mt-4 flex flex-wrap justify-end gap-2">
             <Button variant="outline" size="sm" onClick={onEmail}>
               <Mail /> Email
             </Button>

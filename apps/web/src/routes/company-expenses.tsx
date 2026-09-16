@@ -206,7 +206,7 @@ function Expenses() {
         title="Company expenses"
         description={`Total ${formatINR(summary.total)} · ${summary.count} entries`}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="no-print flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => setCatsOpen(true)}>
               <Tags /> Categories
             </Button>
@@ -222,7 +222,7 @@ function Expenses() {
       />
 
       <HowToUse
-        className="mt-4"
+        className="no-print mt-4"
         title="Track studio expenses"
         description="What the studio spends on itself — team payments, travel, rent, equipment, editing and operations."
         steps={[
@@ -243,8 +243,10 @@ function Expenses() {
         <StatCard label="Categories used" value={String(summary.cats)} icon={Tags} />
       </div>
 
-      {/* Filter bar */}
-      <Card className="mt-4">
+      {/* Filter bar. Which filters produced the report is worth knowing, but
+          a row of empty inputs on a printed sheet is not -- the figures above
+          already reflect them. */}
+      <Card className="no-print mt-4">
         <CardContent className="flex flex-col gap-3 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative flex-1">

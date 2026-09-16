@@ -328,8 +328,12 @@ function ProjectQuotation() {
         </div>
       )}
 
-      <div className="mt-4 rounded-xl border border-border bg-card p-5 sm:p-8">
-        <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
+      {/* `paper` is the whole contract: everything outside it is hidden on
+          paper, so Print gives the client their quotation rather than a
+          screenshot of the studio's editing screen -- toolbar, visibility
+          toggles, branding warning and all. */}
+      <div className="paper mt-4 rounded-xl border border-border bg-card p-5 sm:p-8">
+        <header className="paper-block flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
           <div>
             <div className="flex items-center gap-2">
               {(company?.invoice_logo_url ?? company?.avatar_url) ? (
