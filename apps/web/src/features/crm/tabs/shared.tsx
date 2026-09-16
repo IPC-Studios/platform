@@ -50,7 +50,9 @@ export function DueBadge({ lead, now }: { lead: CrmLead; now: Date }) {
       ? `Overdue · ${prettyDate(lead.follow_up_at!)}`
       : bucket === 'today'
         ? 'Due today'
-        : prettyDate(lead.follow_up_at!)
+        : bucket === 'tomorrow'
+          ? 'Tomorrow'
+          : prettyDate(lead.follow_up_at!)
   return <StatusBadge tone={tone}>{label}</StatusBadge>
 }
 

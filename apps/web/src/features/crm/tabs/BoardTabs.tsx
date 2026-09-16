@@ -24,8 +24,8 @@ import { taskDueBy } from '@ipc/domain'
 import { Check, ClipboardList } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { LostReasonDialog } from '../LostReasonDialog'
-import { DUE_COLUMNS, boardColumns } from '../leads'
-import { BoardColumn, LeadCard, LeadTable, stageTone } from './shared'
+import { DUE_COLUMNS, boardColumns, isOpen, isUncontacted } from '../leads'
+import { BoardColumn, DueBadge, LeadCard, LeadTable, stageTone } from './shared'
 
 /** Everything owed today or already late — the list to clear before going home. */
 export function TodayTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; now: Date; onOpen: (id: string) => void }) {
@@ -37,6 +37,11 @@ export function TodayTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; no
   const canEdit = access.hasAction('crm', 'edit')
   const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
   const dueTasks = (tasks.data ?? []).filter((t) => taskDueBy(t, endOfDay))
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const open = leads.filter(isOpen)
+  const uncontacted = open.filter(isUncontacted)
+  const hot = open.filter((l) => l.is_hot)
+  const fresh = open.filter((l) => new Date(l.created_at).getTime() >= startOfDay.getTime())
 
   return (
     <div className="flex flex-col gap-4">
@@ -79,6 +84,86 @@ export function TodayTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; no
         Work top-down; the list is ordered by how long each one has been waiting.
       </div>
       <LeadTable leads={due} now={now} total={leads.length} onOpen={onOpen} />
+
+      {/* Chasing what is due is only half of today. These three are the ones
+          that never get a follow-up date put on them in the first place, and
+          so never appear on the board at all. */}
+      <div className="grid gap-3 lg:grid-cols-3">
+        <TodayList
+          title="Uncontacted leads"
+          hint="Nobody has reached them yet."
+          leads={uncontacted}
+          now={now}
+          onOpen={onOpen}
+        />
+        <TodayList
+          title="Hot leads"
+          hint="Scored high enough to be worth a call today."
+          leads={hot}
+          now={now}
+          onOpen={onOpen}
+          tone="warning"
+        />
+        <TodayList
+          title="Arrived today"
+          hint="Came in since midnight."
+          leads={fresh}
+          now={now}
+          onOpen={onOpen}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One of the three side lists on Today's Work. Capped, because the point is
+ * "here are some to pick up now", not a second copy of the inbox.
+ */
+function TodayList({
+  title,
+  hint,
+  leads,
+  now,
+  onOpen,
+  tone,
+}: {
+  title: string
+  hint: string
+  leads: readonly CrmLead[]
+  now: Date
+  onOpen: (id: string) => void
+  tone?: 'warning'
+}) {
+  const shown = leads.slice(0, 6)
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        {title}
+        <StatusBadge tone={tone === 'warning' && leads.length > 0 ? 'warning' : 'neutral'}>{leads.length}</StatusBadge>
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+      {shown.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">Nothing here.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-border">
+          {shown.map((l) => (
+            <li key={l.id}>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:underline"
+                onClick={() => onOpen(l.id)}
+              >
+                <span className="min-w-0 truncate">{l.name ?? l.phone ?? 'Lead'}</span>
+                <DueBadge lead={l} now={now} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {leads.length > shown.length && (
+        <p className="mt-2 text-xs text-muted-foreground">and {leads.length - shown.length} more</p>
+      )}
     </div>
   )
 }
@@ -87,7 +172,7 @@ export function TodayTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; no
 export function FollowUpBoardTab({ leads, now, onOpen }: { leads: readonly CrmLead[]; now: Date; onOpen: (id: string) => void }) {
   const columns = boardColumns(leads, now)
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
       {DUE_COLUMNS.map((col) => (
         <BoardColumn
           key={col.key}

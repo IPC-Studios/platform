@@ -65,6 +65,8 @@ describe('dueBucket', () => {
     expect(dueBucket(lead('a', { follow_up_at: '2026-08-30T10:00:00Z' }), NOW)).toBe('overdue')
     expect(dueBucket(lead('b', { follow_up_at: '2026-09-01T18:00:00Z' }), NOW)).toBe('today')
     expect(dueBucket(lead('c', { follow_up_at: '2026-09-05T09:00:00Z' }), NOW)).toBe('upcoming')
+    // Tomorrow is its own bucket, not the head of "upcoming".
+    expect(dueBucket(lead('c2', { follow_up_at: '2026-09-02T09:00:00Z' }), NOW)).toBe('tomorrow')
   })
 
   it('counts a follow-up earlier today as still due today, not overdue', () => {
@@ -195,6 +197,7 @@ describe('boardColumns', () => {
       [
         lead('Late', { follow_up_at: '2026-08-28T10:00:00Z' }),
         lead('Today', { follow_up_at: '2026-09-01T12:00:00Z' }),
+        lead('Tomorrow', { follow_up_at: '2026-09-02T12:00:00Z' }),
         lead('Later', { follow_up_at: '2026-09-20T12:00:00Z' }),
         lead('Nothing'),
         lead('Won', { status: 'converted', converted_at: '2026-09-01T08:00:00Z' }),
@@ -203,6 +206,7 @@ describe('boardColumns', () => {
     )
     expect(names(columns.overdue)).toEqual(['Late'])
     expect(names(columns.today)).toEqual(['Today'])
+    expect(names(columns.tomorrow)).toEqual(['Tomorrow'])
     expect(names(columns.upcoming)).toEqual(['Later'])
     expect(names(columns.none)).toEqual(['Nothing'])
   })

@@ -11,7 +11,7 @@ import { LEGACY_STAGES, LEGACY_STAGE_LABEL } from '@ipc/domain'
  */
 
 /** Where a lead sits relative to its promised call-back. */
-export type DueBucket = 'overdue' | 'today' | 'upcoming' | 'none'
+export type DueBucket = 'overdue' | 'today' | 'tomorrow' | 'upcoming' | 'none'
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
@@ -25,6 +25,10 @@ export function dueBucket(lead: CrmLead, now: Date): DueBucket {
   const dueDay = startOfDay(due)
   if (dueDay < today) return 'overdue'
   if (dueDay.getTime() === today.getTime()) return 'today'
+  // Tomorrow earns its own column: the point of the board is to know what to
+  // prepare for tonight, and "upcoming" buries that among next month's.
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+  if (dueDay.getTime() === tomorrow.getTime()) return 'tomorrow'
   return 'upcoming'
 }
 
@@ -195,7 +199,8 @@ export const STAGE_LABEL: Record<LeadStatus, string> = LEGACY_STAGE_LABEL
 export const DUE_COLUMNS: ReadonlyArray<{ key: DueBucket; label: string; hint: string }> = [
   { key: 'overdue', label: 'Overdue', hint: 'Promised earlier and missed' },
   { key: 'today', label: 'Today', hint: 'Due before the day ends' },
-  { key: 'upcoming', label: 'Upcoming', hint: 'Scheduled ahead' },
+  { key: 'tomorrow', label: 'Tomorrow', hint: 'Prepare for these tonight' },
+  { key: 'upcoming', label: 'Upcoming', hint: 'Scheduled ahead, earliest first' },
   { key: 'none', label: 'No follow-up', hint: 'Nobody has agreed to call back' },
 ]
 
@@ -204,7 +209,7 @@ export function boardColumns(
   leads: readonly CrmLead[],
   now: Date,
 ): Record<DueBucket, CrmLead[]> {
-  const columns: Record<DueBucket, CrmLead[]> = { overdue: [], today: [], upcoming: [], none: [] }
+  const columns: Record<DueBucket, CrmLead[]> = { overdue: [], today: [], tomorrow: [], upcoming: [], none: [] }
   for (const lead of leads) {
     if (!isOpen(lead)) continue
     columns[dueBucket(lead, now)].push(lead)
