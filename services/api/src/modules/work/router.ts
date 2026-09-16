@@ -19,7 +19,11 @@ import { audit } from '../../lib/audit'
 import { rpcJson } from '../../lib/rpc'
 
 const list = workSubmission.array()
-const deliverResponse = z.object({ token: z.string() })
+// Every other issuer (quotation, receipt, terms) hands back a ready link
+// built from APP_URL; this one returned a bare token, so the only caller
+// would have had to know the public route's shape to use it. `token` stays
+// for anything already reading it.
+const deliverResponse = z.object({ token: z.string(), link: z.string() })
 
 export const workRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
@@ -150,7 +154,7 @@ export const workRouter = new Hono<AppEnv>()
     )
     if (!token) fail(400, 'The submission must be submitted or approved before delivery.')
     await audit(c, { action: 'work.deliver', entityType: 'work_submission', entityId: id })
-    return c.json(deliverResponse.parse({ token }))
+    return c.json(deliverResponse.parse({ token, link: `${c.env.APP_URL}/delivery?token=${token}` }))
   })
 
   // Lovable parity: revoke a delivery link (client sees invalid/expired).

@@ -360,11 +360,12 @@ function MyWork() {
         <SendWorkToClientDialog
           open
           onClose={() => setSending(null)}
-          link={sending.submission_link ?? ''}
+          submissionId={sending.id}
+          fallbackLink={sending.submission_link ?? ''}
           projectName={projectById.get(sending.project_id ?? '')?.name ?? null}
-          clientName={null}
+          clientName={projectById.get(sending.project_id ?? '')?.client_name ?? null}
           clientEmail={null}
-          clientPhone={null}
+          clientPhone={projectById.get(sending.project_id ?? '')?.client_phone ?? null}
         />
       )}
     </>

@@ -1,20 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, Copy, Mail, MessageCircle } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent, DialogFooter } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
+import { useDeliverWork } from './api'
 
 /**
- * Send finished work to the client (Lovable parity with
- * SendWorkToClientDialog): copy the link, open WhatsApp with a prefilled
- * message, or open the client's mail app. No sending happens server-side —
- * these hand off to the apps the studio already uses.
+ * Send finished work to the client: copy the link, open WhatsApp with a
+ * prefilled message, or open the client's mail app. The sending itself still
+ * hands off to the apps the studio already uses — but the LINK is minted
+ * here, by the API, rather than being the submission's own URL.
+ *
+ * That distinction is the whole point. This used to share
+ * `submission_link`: the raw internal URL an editor pasted, usually a Drive
+ * folder. It never expires, cannot be revoked, and leaves no record of what
+ * went to whom. A delivery token does all three — `deliver_work_to_client`,
+ * the revoke endpoint and `team_work_client_deliveries` have existed since
+ * 0010 and nothing had ever called them.
+ *
+ * If minting fails the dialog falls back to the raw link rather than leaving
+ * someone unable to send finished work at all, and says which one they have.
  */
 export function SendWorkToClientDialog({
   open,
   onClose,
-  link,
+  submissionId,
+  fallbackLink,
   projectName,
   clientName,
   clientEmail,
@@ -22,7 +34,8 @@ export function SendWorkToClientDialog({
 }: {
   open: boolean
   onClose: () => void
-  link: string
+  submissionId: string
+  fallbackLink: string
   projectName: string | null
   clientName: string | null
   clientEmail: string | null
@@ -31,6 +44,28 @@ export function SendWorkToClientDialog({
   const [copied, setCopied] = useState(false)
   const [email, setEmail] = useState(clientEmail ?? '')
   const [phone, setPhone] = useState(clientPhone ?? '')
+  const [minted, setMinted] = useState<string | null>(null)
+  const deliver = useDeliverWork()
+
+  // One token per opening of this dialog, so the link is already in hand
+  // whichever channel they pick.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    deliver
+      .mutateAsync({ id: submissionId, channel: 'link' })
+      .then((r) => {
+        if (!cancelled) setMinted(r.link)
+      })
+      .catch(() => {
+        // useDeliverWork has already told them why.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, submissionId])
+
+  const link = minted ?? fallbackLink
 
   const message = `Hi ${clientName ?? 'there'}, your ${projectName ? `${projectName} ` : ''}work is ready: ${link}`
 
@@ -67,11 +102,20 @@ export function SendWorkToClientDialog({
       <DialogContent title="Send to client" description="Share the finished work link on the channel the client answers.">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
-            <span className="min-w-0 flex-1 truncate">{link}</span>
-            <Button size="sm" variant="outline" onClick={() => void copy()}>
+            <span className="min-w-0 flex-1 truncate">{deliver.isPending ? 'Preparing the link…' : link}</span>
+            <Button size="sm" variant="outline" disabled={deliver.isPending || !link} onClick={() => void copy()}>
               {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
+          {/* Which link is in their hand changes what they are promising the
+              client, so it is worth one line rather than a silent difference. */}
+          {!deliver.isPending && (
+            <p className="text-xs text-muted-foreground">
+              {minted
+                ? 'A client link that you can revoke later, and that expires on its own.'
+                : 'Could not prepare a client link, so this is the raw submission link — it will not expire and cannot be revoked.'}
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Client phone (WhatsApp)</Label>

@@ -71,3 +71,24 @@ export function useRunWorkReminders() {
     onError: (e: Error) => toast.error(e.message),
   })
 }
+
+/**
+ * Mint a client-facing delivery link for a finished submission.
+ *
+ * The send dialog used to share `submission_link` -- the raw internal URL the
+ * editor pasted, a Drive folder as often as not. That has no expiry, cannot
+ * be revoked, and leaves no record of what was sent to whom. All three of
+ * those exist server-side (`deliver_work_to_client`, the revoke endpoint,
+ * `team_work_client_deliveries`) and nothing had ever called them.
+ */
+export function useDeliverWork() {
+  return useMutation({
+    mutationFn: ({ id, channel }: { id: string; channel: string }) =>
+      callApi(`/work/submissions/${id}/deliver`, {
+        method: 'POST',
+        body: { channel },
+        responseSchema: z.object({ token: z.string(), link: z.string() }),
+      }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
