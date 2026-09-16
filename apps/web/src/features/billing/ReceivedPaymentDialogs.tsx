@@ -15,7 +15,6 @@ import {
   useUpdateReceivedPayment,
   useDeleteReceivedPayment,
   type ReceivedPayment,
-  useInvoices,
 } from './api'
 import { SendReceiptDialog } from './SendReceiptDialog'
 import { copyReceiptLink, issueReceiptLink, openReceiptWhatsApp, receiptShareText } from './receiptShare'
@@ -89,17 +88,9 @@ export function ReceivedPaymentDialog({
     }
   }, [open, initial])
 
-  const { data: invoices } = useInvoices()
   const pending = create.isPending || update.isPending
   const clientProjects = (projects ?? []).filter((p) => !form.client_id || p.client_id === form.client_id)
-  // The list endpoint answers with either an array or a page, depending on
-  // whether it was asked for one; the client's name is all it carries, so the
-  // list is narrowed by that rather than by id.
-  const invoiceRows = Array.isArray(invoices) ? invoices : (invoices?.items ?? [])
-  const clientName = clients.find((c) => c.id === form.client_id)?.name ?? null
-  const openInvoices = invoiceRows.filter(
-    (i) => i.status !== 'cancelled' && (!clientName || i.client_name === clientName),
-  )
+
 
   function set<K extends keyof PaymentFormState>(key: K, value: PaymentFormState[K]) {
     setForm((s) => ({ ...s, [key]: value }))
@@ -108,11 +99,8 @@ export function ReceivedPaymentDialog({
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    // Since 0145 a payment may be against an invoice instead of a project —
-    // an invoice need not belong to one. It must be against something, or
-    // nothing can ever reconcile it.
-    if (!form.project_id && !form.invoice_id) {
-      setError('Pick the project or the invoice this payment is against.')
+    if (!form.project_id) {
+      setError('Pick a project for this payment.')
       return
     }
     const amount = Number(form.amount)
@@ -125,8 +113,7 @@ export function ReceivedPaymentDialog({
       return
     }
     const payload = {
-      ...(form.project_id ? { project_id: form.project_id } : {}),
-      ...(form.invoice_id ? { invoice_id: form.invoice_id } : {}),
+      project_id: form.project_id,
       ...(form.client_id ? { client_id: form.client_id } : {}),
       amount,
       description: form.description.trim() || null,
@@ -172,7 +159,9 @@ export function ReceivedPaymentDialog({
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Project</Label>
+              <Label>
+                Project <span className="text-destructive">*</span>
+              </Label>
               <select
                 value={form.project_id}
                 onChange={(e) => set('project_id', e.target.value)}
@@ -186,28 +175,7 @@ export function ReceivedPaymentDialog({
                 ))}
               </select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              {/* Naming the invoice is what settles it. Before 0145 the two
-                  were separate ledgers, so a payment recorded here left the
-                  invoice reading unpaid however much the client had sent. */}
-              <Label>Against invoice</Label>
-              <select
-                value={form.invoice_id}
-                onChange={(e) => set('invoice_id', e.target.value)}
-                className="h-9 rounded-md border border-input bg-card px-3 text-sm"
-              >
-                <option value="">Not against an invoice</option>
-                {openInvoices.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.invoice_number} · {formatINR(i.total)}
-                    {Number(i.balance_due) > 0 ? ` · ${formatINR(Number(i.balance_due))} due` : ' · settled'}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Pick one and the invoice settles itself from this payment.
-              </p>
-            </div>
+
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
