@@ -1,3 +1,4 @@
+import type { TransactionSql } from 'postgres'
 import { Hono, type Context } from 'hono'
 import {
   addMemberRequest,
@@ -86,6 +87,49 @@ export const teamRouter = new Hono<AppEnv>()
     const pageSize = Math.min(200, Math.max(1, Number(sizeRaw ?? 25) || 25))
     const offset = (page - 1) * pageSize
 
+    // Engagement, role and the salary range used to narrow the page the
+    // browser already had, while `total` below went on counting everyone --
+    // so filtering to freelancers could show an empty page 1 of 4 with the
+    // freelancers on page 3. They narrow the query now, and the count agrees.
+    const engagement = c.req.query('engagement_type')?.trim() ?? ''
+    if (engagement && !['in_house', 'freelancer'].includes(engagement)) {
+      fail(422, 'That engagement type is not one we use.')
+    }
+    // One control, two kinds of role: `app:<role>` is the access ladder,
+    // `job:<uuid>` is one of the studio's own job roles.
+    const roleParam = c.req.query('role')?.trim() ?? ''
+    const [roleKind, roleValue] = roleParam ? roleParam.split(':') : [null, null]
+    if (roleParam && roleKind !== 'app' && roleKind !== 'job') fail(422, 'That role filter is not valid.')
+    if (roleKind === 'job' && !/^[0-9a-f-]{36}$/i.test(roleValue ?? '')) fail(422, 'That job role is not valid.')
+
+    // A salary bound is only honoured for someone allowed to see salaries.
+    // Applied for anyone else it would leak the figures it is hiding: page
+    // through "min 80000" and you have the list without ever seeing a number.
+    const canSeeSalary = c.get('auth').access.hasModule('team_salaries')
+    const bound = (key: string): number | null => {
+      const raw = c.req.query(key)?.trim()
+      if (!raw || !canSeeSalary) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n)) fail(422, 'That salary filter is not a number.')
+      return n
+    }
+    const minSalary = bound('min_salary')
+    const maxSalary = bound('max_salary')
+
+    const narrow = (sql: TransactionSql) => sql`
+      and ${engagement ? sql`u.engagement_type = ${engagement}` : sql`true`}
+      and ${roleKind === 'app' ? sql`u.role = ${roleValue}` : sql`true`}
+      and ${
+        roleKind === 'job'
+          ? sql`exists (select 1 from employee_role_assignments x where x.user_id = u.user_id and x.role_id = ${roleValue}::uuid)`
+          : sql`true`
+      }
+      -- A bound only ever narrows. Someone with no salary recorded drops out
+      -- of both directions rather than being counted as zero, which would put
+      -- them inside every "under X" -- a claim about a figure nobody entered.
+      and ${minSalary === null ? sql`true` : sql`(u.salary is not null and u.salary >= ${minSalary})`}
+      and ${maxSalary === null ? sql`true` : sql`(u.salary is not null and u.salary <= ${maxSalary})`}`
+
     const rows = await attempt(c, 'team.directory', () =>
       withUser(
         c.env,
@@ -112,6 +156,7 @@ export const teamRouter = new Hono<AppEnv>()
           where u.deleted_at is null
             and ${status ? sql`u.status = ${status}` : sql`true`}
             and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`} or coalesce(u.alternate_phone, '') like ${`%${search}%`})` : sql`true`}
+            ${narrow(sql)}
           group by u.user_id
           order by u.name
           ${paged ? sql`limit ${pageSize} offset ${offset}` : sql``}`,
@@ -119,7 +164,6 @@ export const teamRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not load the team.')
 
-    const canSeeSalary = c.get('auth').access.hasModule('team_salaries')
     const list = directoryMember.array().parse(rows)
     const shaped = canSeeSalary
       ? list
@@ -140,7 +184,8 @@ export const teamRouter = new Hono<AppEnv>()
           select count(*)::text as n from users u
           where u.deleted_at is null
             and ${status ? sql`u.status = ${status}` : sql`true`}
-            and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`} or coalesce(u.alternate_phone, '') like ${`%${search}%`})` : sql`true`}`,
+            and ${search ? sql`(lower(u.name) like ${`%${search}%`} or lower(coalesce(u.email, '')) like ${`%${search}%`} or coalesce(u.phone, '') like ${`%${search}%`} or coalesce(u.alternate_phone, '') like ${`%${search}%`})` : sql`true`}
+            ${narrow(sql)}`,
       ),
     )
     const total = Number(counted?.[0]?.n ?? shaped.length)

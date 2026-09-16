@@ -26,7 +26,7 @@ import { ManageAccessDialog } from '@/features/team/ManageAccessDialog'
 import { SalariesTab } from '@/features/team/SalariesTab'
 import {
   EMPTY_FILTERS,
-  filterDirectory,
+  sortDirectory,
   hasActiveFilters,
   toCsv,
   type DirectoryFilters,
@@ -92,13 +92,22 @@ function Directory({ onAdd }: { onAdd: () => void }) {
   const [deletePending, setDeletePending] = useState(false)
   const [accessTarget, setAccessTarget] = useState<DirectoryMember | null>(null)
 
-  // Server-paginated source: search + status narrow on the server, the rest
-  // (tab, role, engagement, salary, sort) refines the loaded page client-side.
+  // Everything that decides WHICH members exist is now asked of the server,
+  // so the count under the pager describes the list above it. Narrowing the
+  // already-loaded page meant "freelancers only" could show an empty page 1
+  // of 4 with the freelancers sitting on page 3.
+  //
+  // The Freelance tab is the same question as the engagement filter, so it
+  // goes down the same wire rather than trimming the result afterwards.
   const paged = useDirectoryPaged({
     page,
     page_size: pageSize,
     search: filters.q || undefined,
     status: filters.status || undefined,
+    engagement_type: tab === 'freelance' ? 'freelancer' : filters.type || undefined,
+    role: filters.role || undefined,
+    min_salary: filters.minSalary || undefined,
+    max_salary: filters.maxSalary || undefined,
   })
   const updateMember = useUpdateMember()
   const deleteMember = useDeleteMember()
@@ -110,7 +119,9 @@ function Directory({ onAdd }: { onAdd: () => void }) {
   const pageItems = useMemo(() => paged.data?.items ?? [], [paged.data])
   const total = paged.data?.total ?? 0
   const members = pageItems
-  const rows = useMemo(() => filterDirectory(members, tab, filters), [members, tab, filters])
+  // Only the ordering is left to do here: the server returns the right rows,
+  // and sorting them is a rearrangement of this page, not a different page.
+  const rows = useMemo(() => sortDirectory(members, filters.sort), [members, filters.sort])
 
   function resetPage(next: DirectoryFilters) {
     setFilters(next)

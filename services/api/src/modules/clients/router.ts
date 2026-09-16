@@ -14,7 +14,14 @@ export const clientsRouter = new Hono<AppEnv>()
 
   .get('/', requireAction('clients', 'view'), async (c) => {
     const url = new URL(c.req.url)
-    const hasPaging = url.searchParams.has('page') || url.searchParams.has('page_size') || url.searchParams.has('search') || url.searchParams.has('sort')
+    const hasPaging =
+      url.searchParams.has('page') ||
+      url.searchParams.has('page_size') ||
+      url.searchParams.has('search') ||
+      url.searchParams.has('sort') ||
+      url.searchParams.has('relation') ||
+      url.searchParams.has('created_from') ||
+      url.searchParams.has('created_to')
     if (!hasPaging) {
       const rows = await attempt(c, 'clients.list', () =>
         withUser(c.env, c.get('auth').userId, (sql) => sql`select * from clients order by created_at desc`),
@@ -27,15 +34,29 @@ export const clientsRouter = new Hono<AppEnv>()
     const search = (url.searchParams.get('search') ?? '').trim()
     const sort = (url.searchParams.get('sort') ?? 'recent').trim()
     const orderBy = sort === 'name' ? 'name asc' : sort === 'city' ? 'city asc nulls last, name asc' : 'created_at desc'
+    // Relation and the added-on range used to be applied in the browser, to
+    // whichever 25 rows the current page happened to hold, while `total` and
+    // the pager went on counting every client. "Relation: referral" could
+    // therefore show an empty page 1 of 5 with referrals sitting on page 3.
+    const relation = (url.searchParams.get('relation') ?? '').trim()
+    const createdFrom = (url.searchParams.get('created_from') ?? '').trim()
+    const createdTo = (url.searchParams.get('created_to') ?? '').trim()
+    for (const [name, v] of [['created_from', createdFrom], ['created_to', createdTo]] as const) {
+      if (v && Number.isNaN(Date.parse(v))) fail(422, `That ${name} date is invalid.`)
+    }
     const offset = (page - 1) * pageSize
     const result = await attempt(c, 'clients.list.page', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const countRows = await sql<{ n: number }[]>`
-          select count(*)::int as n from clients
-          where ${search ? sql`(name ilike ${'%' + search + '%'} or coalesce(phone,'') ilike ${'%' + search + '%'} or coalesce(email,'') ilike ${'%' + search + '%'} or coalesce(city,'') ilike ${'%' + search + '%'})` : sql`true`}`
-        const rows = await sql`
-          select * from clients
+        const where = sql`
           where ${search ? sql`(name ilike ${'%' + search + '%'} or coalesce(phone,'') ilike ${'%' + search + '%'} or coalesce(email,'') ilike ${'%' + search + '%'} or coalesce(city,'') ilike ${'%' + search + '%'})` : sql`true`}
+            and ${relation ? sql`coalesce(relation,'') ilike ${'%' + relation + '%'}` : sql`true`}
+            and ${createdFrom ? sql`created_at >= ${createdFrom}::date` : sql`true`}
+            -- A "to" date means the whole of that day, not midnight on it.
+            and ${createdTo ? sql`created_at < (${createdTo}::date + 1)` : sql`true`}`
+        const countRows = await sql<{ n: number }[]>`
+          select count(*)::int as n from clients ${where}`
+        const rows = await sql`
+          select * from clients ${where}
           order by ${sql.unsafe(orderBy)} limit ${pageSize} offset ${offset}`
         return { total: countRows[0]?.n ?? 0, rows }
       }),

@@ -39,37 +39,11 @@ export const EMPTY_FILTERS: DirectoryFilters = {
 export const hasActiveFilters = (f: DirectoryFilters): boolean =>
   Boolean(f.q || f.type || f.status || f.role || f.minSalary || f.maxSalary)
 
-const num = (v: string): number | null => {
-  const n = Number(v)
-  return v.trim() === '' || Number.isNaN(n) ? null : n
-}
-
-function matchesQuery(m: DirectoryMember, q: string): boolean {
-  const needle = q.trim().toLowerCase()
-  if (!needle) return true
-  return [m.name, m.email, m.phone, m.alternate_phone, ...m.role_names]
-    .filter(Boolean)
-    .some((v) => String(v).toLowerCase().includes(needle))
-}
-
-function matchesRole(m: DirectoryMember, role: string): boolean {
-  if (!role) return true
-  const [kind, value] = role.split(':')
-  return kind === 'app' ? m.role === value : m.role_ids.includes(value ?? '')
-}
-
-/**
- * A salary bound only ever narrows: a member whose salary is hidden (no
- * team_salaries access) or simply unset drops out once a bound is set, rather
- * than sitting in the results as an unverifiable maybe.
- */
-function matchesSalary(m: DirectoryMember, min: number | null, max: number | null): boolean {
-  if (min === null && max === null) return true
-  if (m.salary === null) return false
-  if (min !== null && m.salary < min) return false
-  if (max !== null && m.salary > max) return false
-  return true
-}
+// num(), matchesQuery(), matchesRole() and matchesSalary() lived here. They
+// narrowed a page the server had already chosen, so the pager under the list
+// disagreed with the list. The directory endpoint applies all four now --
+// including the rule that a salary bound drops rows with no salary rather
+// than reading a missing figure as zero.
 
 const byName = (a: DirectoryMember, b: DirectoryMember) => a.name.localeCompare(b.name)
 
@@ -91,22 +65,24 @@ const SORTS: Record<SortKey, (a: DirectoryMember, b: DirectoryMember) => number>
   salary_low: bySalary('low'),
 }
 
-export function filterDirectory(
+/**
+ * Order a page of members.
+ *
+ * Kept separate from the filtering, which the server now does: a sort only
+ * rearranges the rows already on screen, so doing it here is correct, while
+ * filtering here would disagree with the total under the pager.
+ */
+export function sortDirectory(
   rows: readonly DirectoryMember[],
-  tab: DirectoryTab,
-  f: DirectoryFilters,
+  sort: SortKey,
 ): DirectoryMember[] {
-  const min = num(f.minSalary)
-  const max = num(f.maxSalary)
-  return rows
-    .filter((m) => (tab === 'freelance' ? m.engagement_type === 'freelancer' : true))
-    .filter((m) => (f.type ? m.engagement_type === f.type : true))
-    .filter((m) => (f.status ? m.status === f.status : true))
-    .filter((m) => matchesRole(m, f.role))
-    .filter((m) => matchesSalary(m, min, max))
-    .filter((m) => matchesQuery(m, f.q))
-    .sort(SORTS[f.sort])
+  return [...rows].sort(SORTS[sort])
 }
+
+// filterDirectory() used to live here. It narrowed the page the browser had
+// already loaded while the pager went on counting every member, so
+// "freelancers only" could show an empty page 1 of 4. The directory endpoint
+// does the narrowing now; see supabase/tests/team-directory-filters.test.ts.
 
 const csvCell = (v: string | number | null): string => {
   const s = v === null ? '' : String(v)

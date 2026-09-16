@@ -53,6 +53,12 @@ export interface DirectoryPageParams {
   page_size: number
   search?: string | undefined
   status?: string | undefined
+  /** Engagement: 'in_house' or 'freelancer'. */
+  engagement_type?: string | undefined
+  /** `app:<role>` for the access ladder, `job:<uuid>` for a studio job role. */
+  role?: string | undefined
+  min_salary?: string | undefined
+  max_salary?: string | undefined
 }
 
 const directoryPageSchema = z.object({
@@ -76,6 +82,10 @@ export function useDirectoryPaged(params: DirectoryPageParams) {
   })
   if (params.search?.trim()) qs.set('search', params.search.trim())
   if (params.status) qs.set('status', params.status)
+  if (params.engagement_type) qs.set('engagement_type', params.engagement_type)
+  if (params.role) qs.set('role', params.role)
+  if (params.min_salary?.trim()) qs.set('min_salary', params.min_salary.trim())
+  if (params.max_salary?.trim()) qs.set('max_salary', params.max_salary.trim())
   const key = qs.toString()
   return useQuery({
     queryKey: ['team', 'directory', 'paged', key],

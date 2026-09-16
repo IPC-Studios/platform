@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DirectoryMember } from '@ipc/contracts'
-import { EMPTY_FILTERS, filterDirectory, hasActiveFilters, toCsv } from './filters'
+import { EMPTY_FILTERS, hasActiveFilters, sortDirectory, toCsv } from './filters'
 
 const member = (over: Partial<DirectoryMember> & { name: string }): DirectoryMember => ({
   user_id: `id-${over.name}`,
@@ -58,81 +58,23 @@ const ROWS: DirectoryMember[] = [
 
 const names = (rows: readonly DirectoryMember[]) => rows.map((r) => r.name)
 
-describe('filterDirectory', () => {
-  it('defaults to everyone, newest first', () => {
-    expect(names(filterDirectory(ROWS, 'all', EMPTY_FILTERS))).toEqual([
-      'Imran',
-      'Anita',
-      'Sana',
-      'Rahul',
-    ])
-  })
-
-  it('the freelance tab keeps only freelancers', () => {
-    expect(names(filterDirectory(ROWS, 'freelance', EMPTY_FILTERS))).toEqual(['Imran', 'Anita'])
-  })
-
-  it('searches name, email and phone', () => {
-    const byEmail = filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, q: 'rahul@studio' })
-    expect(names(byEmail)).toEqual(['Rahul'])
-    const byPhone = filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, q: '98111' })
-    expect(names(byPhone)).toEqual(['Rahul'])
-    const byJobRole = filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, q: 'photographer' })
-    expect(names(byJobRole)).toEqual(['Rahul'])
-  })
-
-  it('filters by status and engagement', () => {
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, status: 'inactive' }))).toEqual([
-      'Imran',
-    ])
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, type: 'in_house' }))).toEqual([
-      'Sana',
-      'Rahul',
-    ])
-  })
-
-  it('one role control covers access levels and job roles', () => {
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, role: 'app:manager' }))).toEqual([
-      'Sana',
-    ])
-    expect(
-      names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, role: 'job:role-photo' })),
-    ).toEqual(['Rahul'])
-  })
-
-  it('a salary bound drops rows with no salary rather than guessing', () => {
-    const rows = filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, minSalary: '20000' })
-    expect(names(rows)).toEqual(['Sana', 'Rahul'])
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, maxSalary: '50000' }))).toEqual([
-      'Anita',
-      'Rahul',
-    ])
+describe('sortDirectory', () => {
+  // Filtering moved to the directory endpoint, so the count under the pager
+  // describes the list above it. Ordering stayed here: a sort rearranges the
+  // page already on screen rather than choosing a different one.
+  it('leaves the server order alone by default, newest first', () => {
+    expect(names(sortDirectory(ROWS, 'newest'))).toEqual(['Imran', 'Anita', 'Sana', 'Rahul'])
   })
 
   it('sorts by name and by salary, with unknown salaries last', () => {
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, sort: 'name' }))).toEqual([
-      'Anita',
-      'Imran',
-      'Rahul',
-      'Sana',
-    ])
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, sort: 'salary_high' }))).toEqual([
-      'Sana',
-      'Rahul',
-      'Anita',
-      'Imran',
-    ])
-    expect(names(filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, sort: 'salary_low' }))).toEqual([
-      'Anita',
-      'Rahul',
-      'Sana',
-      'Imran',
-    ])
+    expect(names(sortDirectory(ROWS, 'name'))).toEqual(['Anita', 'Imran', 'Rahul', 'Sana'])
+    expect(names(sortDirectory(ROWS, 'salary_high'))).toEqual(['Sana', 'Rahul', 'Anita', 'Imran'])
+    expect(names(sortDirectory(ROWS, 'salary_low'))).toEqual(['Anita', 'Rahul', 'Sana', 'Imran'])
   })
 
   it('does not mutate the rows it was given', () => {
     const original = names(ROWS)
-    filterDirectory(ROWS, 'all', { ...EMPTY_FILTERS, sort: 'name' })
+    sortDirectory(ROWS, 'name')
     expect(names(ROWS)).toEqual(original)
   })
 
@@ -145,11 +87,12 @@ describe('filterDirectory', () => {
 
 describe('toCsv', () => {
   it('writes a header plus one line per row', () => {
-    const csv = toCsv(filterDirectory(ROWS, 'freelance', EMPTY_FILTERS))
+    const csv = toCsv(ROWS.filter((r) => r.engagement_type === 'freelancer'))
     const lines = csv.split('\n')
     expect(lines[0]).toContain('Name,Email,Phone')
     expect(lines).toHaveLength(3)
-    expect(lines[2]).toContain('Anita')
+    expect(csv).toContain('Anita')
+    expect(csv).toContain('Imran')
   })
 
   it('quotes anything that would break the format', () => {

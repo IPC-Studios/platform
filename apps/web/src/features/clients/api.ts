@@ -17,7 +17,7 @@ export interface ClientDirectoryQuery {
   sort?: 'recent' | 'name' | 'city'
   /** Client-side filter (free-text tag); the server only filters search/sort. */
   relation?: string
-  /** Client-side YYYY-MM-DD range on created_at. */
+  /** YYYY-MM-DD range on created_at, applied by the database. */
   created_from?: string
   created_to?: string
   page?: number
@@ -39,20 +39,13 @@ export function useClients(query?: ClientDirectoryQuery) {
       params.set('page_size', String(q.page_size ?? 25))
       if (q.search?.trim()) params.set('search', q.search.trim())
       if (q.sort) params.set('sort', q.sort)
-      const page: ClientPage = await callApi(`/clients?${params.toString()}`, { responseSchema: clientPage })
-      // Relation + date range are free-text/client-side filters.
-      const rel = q.relation?.trim().toLowerCase()
-      const from = q.created_from?.trim()
-      const to = q.created_to?.trim()
-      if (!rel && !from && !to) return page
-      const items = page.items.filter((c) => {
-        if (rel && !(c.relation ?? '').toLowerCase().includes(rel)) return false
-        const day = c.created_at.slice(0, 10)
-        if (from && day < from) return false
-        if (to && day > to) return false
-        return true
-      })
-      return { ...page, items }
+      // These three used to be applied here, to the page that had already come
+      // back -- so they narrowed 25 rows while the pager went on counting all
+      // of them. The database applies them now, and the count agrees.
+      if (q.relation?.trim()) params.set('relation', q.relation.trim())
+      if (q.created_from?.trim()) params.set('created_from', q.created_from.trim())
+      if (q.created_to?.trim()) params.set('created_to', q.created_to.trim())
+      return callApi(`/clients?${params.toString()}`, { responseSchema: clientPage })
     },
     enabled: !!session && access.hasModule('clients'),
     staleTime: 30_000,
