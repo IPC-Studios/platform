@@ -4,7 +4,7 @@ import { Check, Copy, Mail, MessageCircle } from 'lucide-react'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent, DialogFooter } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
-import { useDeliverWork } from './api'
+import { useDeliverWork, useMarkClientSent } from './api'
 
 /**
  * Send finished work to the client: copy the link, open WhatsApp with a
@@ -46,6 +46,7 @@ export function SendWorkToClientDialog({
   const [phone, setPhone] = useState(clientPhone ?? '')
   const [minted, setMinted] = useState<string | null>(null)
   const deliver = useDeliverWork()
+  const markSent = useMarkClientSent()
 
   // One token per opening of this dialog, so the link is already in hand
   // whichever channel they pick.
@@ -80,12 +81,22 @@ export function SendWorkToClientDialog({
     }
   }
 
+  /**
+   * Marked only when a send surface actually opens — WhatsApp or the mail
+   * client. Copying the link is not a send: someone checking the URL would
+   * otherwise leave a record saying the client had it.
+   */
+  function recordSend(channel: string) {
+    markSent.mutate({ id: submissionId, channel })
+  }
+
   function whatsapp() {
     const digits = phone.replace(/\D/g, '')
     const url = digits
       ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
       : `https://wa.me/?text=${encodeURIComponent(message)}`
     window.open(url, '_blank', 'noopener')
+    recordSend('whatsapp')
   }
 
   function sendEmail() {
@@ -94,6 +105,7 @@ export function SendWorkToClientDialog({
       return
     }
     const subject = encodeURIComponent(`${projectName ?? 'Your work'} is ready`)
+    recordSend('email')
     window.location.href = `mailto:${email.trim()}?subject=${subject}&body=${encodeURIComponent(message)}`
   }
 

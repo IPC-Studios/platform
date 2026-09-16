@@ -92,3 +92,29 @@ export function useDeliverWork() {
     onError: (e: Error) => toast.error(e.message),
   })
 }
+
+/**
+ * Record that a submission went to the client, and on which channel.
+ *
+ * `/work/submissions/:id/client-sent` has existed since 0104 and nothing
+ * called it, while the My Work list has always rendered "Sent to client via
+ * …" from the column it sets — so that line could never appear, whatever
+ * anyone did.
+ */
+export function useMarkClientSent() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, channel }: { id: string; channel: string }) =>
+      callApi(`/work/submissions/${id}/client-sent`, {
+        method: 'POST',
+        body: { channel },
+        responseSchema: z.object({ ok: z.boolean() }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['work', 'submissions'] })
+    },
+    // Recording the send must never be what stops someone sending: the
+    // WhatsApp or mail window has already opened by this point.
+    onError: () => {},
+  })
+}
