@@ -510,3 +510,45 @@ Both caught me while writing `work-submission-rls.test.ts`:
 Also: RLS *filters* a DELETE rather than refusing it, so asserting that a
 delete throws would pass against a table that cheerfully deleted everything it
 could see. Assert on what survived.
+
+## Round: scanning for the RLS write-policy gap (2026-09-16)
+
+0138 came from stumbling over one broken feature. The shape is mechanical, so
+it got a scanner: for every `withUser` block in the API, find `insert into` /
+`update` / `delete from` against a table whose RLS is on and which has no
+policy for that command. `withService` is excluded — service_role bypasses RLS
+and is the legitimate way to write a definer-only table.
+
+Three hits, and none of them looked like the same bug, because RLS fails three
+different ways:
+
+| Route | How it failed |
+| --- | --- |
+| `PATCH /work/submissions/:id` | UPDATE is **filtered**, not refused — zero rows matched, and the route answered "We could not update this submission." Fixing a typo'd link before review was impossible |
+| `POST .../revoke-delivery` | Same filtering, but the handler returns `true` regardless, so it reported **success** while `revoked_at` was never written. The token itself is revoked by a definer function, so the link died while the record showed it live |
+| `POST /platform/studios` | INSERT is **refused** outright — vendor-provisioned studios could not be created |
+
+### What fixing the third one uncovered
+
+- **A plain plpgsql trigger runs as the inserter.** `seed_custom_lookups_for_company()`
+  writes into `custom_lookups`, which is checked against
+  `get_current_company_id()` — the *vendor's* company, not the new one.
+  Registration goes through service_role and bypasses RLS, which is why this
+  never surfaced. Now definer, like the CRM seed trigger beside it; it can only
+  write rows keyed to `new.id`.
+- **`platform_studio_invites` was never created by any migration**, though
+  0128's comment builds the whole claim story on it. The route wrote to it
+  inside a try/catch, so every provisioning swallowed "relation does not exist"
+  and discarded the invited owner's email, name, phone and plan — leaving an
+  orphan company with no owner and no way to claim it.
+- **`INSERT ... RETURNING` needs a SELECT policy over the new row**, on top of
+  the INSERT one. `companies_select_own` covers only the caller's own company,
+  so the route's `returning id` failed even once the insert was allowed.
+
+### A third way an RLS harness lies
+
+Added to the two in the previous round: **grant `usage on schema auth`**.
+Production does (00_bootstrap.sql); without it any policy calling `auth.uid()`
+fails with "permission denied for schema auth", which reads as a policy
+rejection and is not one. It cost a wrong diagnosis here before the probe
+showed `is_platform_admin()` returning true all along.
