@@ -816,3 +816,73 @@ boots Postgres in WebAssembly and applies all 142 migrations in `beforeAll`,
 which does not fit in vitest's default ten-second hook timeout under
 contention. Raised it. Nothing about the code under test had changed — and a
 suite that fails randomly teaches you to re-run instead of to read.
+
+## Round: P2 and the rest of P3 (2026-09-16)
+
+### P2 was entirely stale
+
+All eight items were already built. Checked each before touching anything:
+
+| Item | State |
+| --- | --- |
+| Clients: `alternate_phone`, `city`, `gstin` | All three in `ClientFormDialog` |
+| Enquiries: Title-Case → lower_snake status | Already `z.enum(['new','reviewed',…])` |
+| Leads: assign / follow-up / stage / group | All wired in `AddLeadDialog`, plus `quality` |
+| Invoice: `client_id*`, place of supply, toggles, discount, GST lines | All present, with the cross-field validation |
+| Personal expenses: free-text category → enum | Already a `Select` over `PERSONAL_EXPENSE_CATEGORIES` |
+| Tasks: `deliverable_id`, `parent_task_id`, `voice_note_url` | All three |
+| Shoots: venue URL | `mapLink` already accepts any URL, with a deliberate empty-string clear |
+| Reminders: entity picker, assignee | `EntityPicker` + `assigned_to` |
+
+### The two decisions
+
+**Venue URL** — already settled in the contract: any URL, because a venue's
+own page or an Apple Maps link is as valid as a Google one, and an
+empty string clears the field rather than 422ing.
+
+**The access split stays.** Lovable bundles both expense screens into one
+`money` module, which hides personal expenses from managers — so a manager
+cannot log their own reimbursement. Ours splits them: `company_expenses` is
+`superAdminOnly` and sensitive, `personal_expenses` is visible to everyone and
+scoped by RLS to `user_id = auth.uid()`, so you see only your own. That is
+both safer and more useful, and loosening access control to match a weaker
+model would be the wrong trade.
+
+### What was actually left
+
+**The guard denied before it knew.** Permissions come from the session, and
+until it lands the effective set is empty — so every guarded route rendered
+"Not available" and corrected itself a moment later. On a slow connection that
+flash is all someone sees, and it reads as being locked out of their own
+studio.
+
+**Attendance: the fourth instance of the tiles/list mismatch.** Status and
+engagement narrowed the page the browser held while the count described the
+whole roster, and the five tiles were computed from whichever 25 rows arrived
+— a studio of forty read "Total 25" on page one. Both filters go to the API
+now; the tiles are counted over the filtered roster before the page is cut.
+
+The rules moved to `packages/domain`. The API had grown its own copy of the
+`not_checked_out` derivation while the web kept the original — and two
+implementations of a derived value only have to disagree once for a row to
+carry a badge that contradicts the filter that found it.
+
+**The client was sent the studio's internal link.** "Send to client" shared
+`submission_link`: the raw URL an editor pasted, usually a Drive folder. No
+expiry, no revocation, no record of what went to whom. All three exist —
+`deliver_work_to_client()`, the revoke endpoint and
+`team_work_client_deliveries`, there since 0010 with RLS settled in 0138/0139
+— and nothing had ever called them. That is the second "built and never
+invoked" find today, after the absent sweep.
+
+The endpoint also returned a bare token while every other issuer hands back a
+ready link built from `APP_URL`, and the dialog was passed the client's name,
+email and phone as literal `null`, so the prefilled message said "Hi there"
+with no recipient.
+
+### The count, after this week
+
+Four screens had a list and a number beneath it that described different sets:
+clients, the team directory, company expenses, attendance. None errored. The
+shape to watch for is a filter applied after the fetch — in a hook, in a
+`useMemo`, in a `filterX` helper — on any screen that also shows a total.
