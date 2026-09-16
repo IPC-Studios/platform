@@ -642,3 +642,55 @@ Verified against the live API after deploy: `plan_source` derives
 `grandfathered`; `entity_type=project` narrows three reminders to two and
 `priority=high` to one; an enquiry window outside the data returns zero rows
 **and** a zero summary, so the tiles move with the list.
+
+## Round: pricing, and documents that printed as screenshots (2026-09-16)
+
+### Pricing
+
+`plans` had been empty since the rebuild started. Nothing in the app can
+publish a plan — that is a platform act — so the subscription screen honestly
+said "No plans are on offer yet" and no studio could renew. The three plans
+now come from the old app's own seed: Monthly ₹1,999 / 30 days, Yearly ₹18,000
+/ 365 days (Most Popular), 2-Year ₹30,000 / 730 days (Maximum Savings), all
+ex-GST with 18% added at checkout.
+
+Two shape problems first. `billing_interval` allowed only monthly and yearly,
+so the 2-year plan could not be stored at all; and the badge, savings line and
+per-month figure had nowhere to live, so they are real columns rather than more
+keys buried in the `features` jsonb.
+
+The test that matters: a ₹30,000 two-year purchase must extend by 730 days.
+`activate_subscription` prefers `duration_days` over the interval (0131), but
+`biennial` is not `yearly`, so an interval-driven expiry would have sold two
+years for a thirty-day extension. Each savings line is also checked against the
+prices — a card promising a discount the invoice does not give is worse than no
+card.
+
+Writing the RLS test hit the harness trap for the fourth time: without the
+bootstrap grants from `deploy/db/00_bootstrap.sql`, reading `plans` as
+`authenticated` fails with "permission denied for table", which reads as a
+policy rejection and is not one.
+
+### Documents that printed as screenshots
+
+Printing a project's quotation printed the whole editing screen — breadcrumbs,
+the Back / Refresh / Email / WhatsApp toolbar, the "Show to client" checkbox,
+the branding warning, the acknowledgement note, the "Show on quotation"
+toggles — and then the document underneath. That is what reached the client.
+
+The `.paper` mechanism for exactly this has existed since the public document
+routes were built: mark the document, and `body:has(.paper) *` hides everything
+outside it. The internal quotation never used it.
+
+Audited every `window.print()` caller:
+
+| Screen | State |
+| --- | --- |
+| `/projects/$id/quotation` | **Was broken.** Now `.paper` |
+| Payment receipt dialog on `/projects/$id` | **Was broken** — the dialog's own Email/WhatsApp/Print buttons are inside the document and printed on it. Now `.paper` + `paper-toolbar` |
+| `/company-expenses`, `/personal-expenses`, `/financials/gst-analysis` | Internal reports, not client documents, so they keep the page and drop the controls: filter bar, how-to panel and action buttons are `no-print` |
+| Public `/quotation`, `/receipt`, `/delivery`, `/billing/invoices/$id`, terms wizard, both acknowledgement pages | Already marked |
+| CRM Reports tab | Filters already `no-print` |
+
+The distinction worth keeping: a client document gets `.paper` and the sheet to
+itself; an internal report keeps its page and loses its controls.
