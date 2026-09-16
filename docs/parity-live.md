@@ -460,3 +460,53 @@ Reading `ipc_refresh_token` out of localStorage and calling `/auth/refresh`
 consumes it, and the signed-in session dies at its next refresh — which looks
 like a random logout minutes later. Write the returned `refresh_token` back
 before doing anything else.
+
+### Delivery note and team terms (2026-09-16)
+
+Both are ours-only — the old app has no equivalent — so this was a "does it
+work" check rather than a comparison.
+
+- **Team terms** renders correctly: studio, shoot and project header, a pending
+  badge, the recipient and role, the full undertaking with every variable
+  substituted, name pre-filled, optional email, I agree, Print, and the
+  evidence note.
+- **Delivery note** renders correctly: studio, submission title, the client
+  greeting, delivered date, Open your gallery, WhatsApp, Email, Copy.
+
+Getting to the delivery one is what surfaced the worst bug of the round.
+
+#### Submitting work had never been possible
+
+`team_work_submissions` was designed to be written only through SECURITY
+DEFINER functions, so 0010 gave it a SELECT policy and no write policy.
+`POST /work/submissions` later stopped calling `submit_work()` and began
+inserting directly — the RPC predates the hard-disk and folder handover
+columns and was dropping them. A direct insert runs as `authenticated` under
+RLS, so with no INSERT policy every submission was refused: 42501, surfaced as
+"You do not have access to this action."
+
+The whole submit → review → deliver chain was dead at the first step, for
+every user including the owner, behind a message that reads like a deliberate
+permission restriction rather than a bug. The seeded studio had zero
+submissions and that looked like nothing had been seeded.
+
+0138 adds the INSERT policy, mirroring what `submit_work()` enforced. Verified
+end to end on the deployed app afterwards: submit 201, review 204, deliver 200,
+and the client page renders.
+
+#### Two ways an RLS test lies to you
+
+Both caught me while writing `work-submission-rls.test.ts`:
+
+- **Skipping the bootstrap grants.** Production sets `select, insert, update,
+  delete` as DEFAULT PRIVILEGES in `deploy/db/00_bootstrap.sql` before any
+  table exists. A harness that omits them fails with "permission denied for
+  table" — a GRANT error that looks nothing like the RLS refusal under test,
+  and sends you after the wrong bug.
+- **`set local role` outside a transaction does nothing.** The statements then
+  run as the superuser, RLS is bypassed entirely, and every assertion passes
+  for the wrong reason. Use `set role`.
+
+Also: RLS *filters* a DELETE rather than refusing it, so asserting that a
+delete throws would pass against a table that cheerfully deleted everything it
+could see. Assert on what survived.
