@@ -51,6 +51,32 @@ export function useNotifications(filters: NotificationFilters = {}) {
   })
 }
 
+/**
+ * Unread, counted in SQL.
+ *
+ * The bell used to count the rows it had: the list is capped at fifty, so a
+ * studio with more unread alerts than that saw a badge that stopped counting
+ * — and a badge is the one thing on the screen whose entire job is to be the
+ * true number. `/notifications/unread-count` has existed alongside it,
+ * calling unread_notifications_count(), and nothing called it.
+ *
+ * It also stops the header fetching fifty rows on every page just to show a
+ * digit.
+ */
+export function useUnreadCount() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () =>
+      callApi('/notifications/unread-count', {
+        responseSchema: z.object({ unread_count: z.coerce.number().int() }),
+      }),
+    enabled: !!session,
+    staleTime: 30_000,
+  })
+}
+
+/** Counts whatever list it is handed — still used where the rows are all there. */
 export const unreadCount = (rows: { read_at?: string | null }[] | undefined) =>
   (rows ?? []).filter((n) => !n.read_at).length
 

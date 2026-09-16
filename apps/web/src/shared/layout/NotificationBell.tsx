@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Bell } from 'lucide-react'
-import { useNotifications, unreadCount } from '@/features/crm/notifications'
+import { useUnreadCount } from '@/features/crm/notifications'
 import { cn } from '../ui/cn'
 
 /**
@@ -15,8 +15,10 @@ import { cn } from '../ui/cn'
  * reads as "checked, nothing there" when nothing has been checked.
  */
 export function NotificationBell() {
-  const { data } = useNotifications()
-  const unread = unreadCount(data)
+  // Counted server-side. Counting the fetched list meant the badge stopped at
+  // whatever the list was capped to, which for a badge is the whole job.
+  const { data } = useUnreadCount()
+  const unread = data?.unread_count ?? 0
 
   return (
     <Link
