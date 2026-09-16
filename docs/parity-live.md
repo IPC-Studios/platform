@@ -956,3 +956,70 @@ test suite asks it, and nothing about an unreachable feature looks broken. The
 RLS detail is worth keeping in mind on its own: **an UPDATE filtered to zero
 rows by a policy is silent**, so any handler that returns success without
 checking the row count can report work it did not do.
+
+## Round: the payment ledger, and what "received" means (2026-09-16)
+
+Two money defects, fixed separately on purpose — shipping both at once would
+have meant not knowing which caused a wrong number.
+
+### One ledger (0145)
+
+There were two payment tables and nothing joined them. `record_invoice_payment()`
+wrote `invoice_payments`; every project and profit figure summed
+`received_payments`. A grep of every migration and every API file found no line
+mentioning both.
+
+Invoice a client ₹1,80,000, they pay, record it on the invoice — the project
+read "received ₹0, balance ₹1,80,000" and the month showed no cash. Record it
+on the project instead and the invoice stayed unpaid for ever.
+
+`received_payments` is the ledger now: richer table, already what the money
+reads. It gained `invoice_id`; `project_id` became nullable (an invoice need
+not have a project); a CHECK refuses money belonging to neither. Invoice
+totals are derived by trigger on insert, update and delete — including moving
+a payment between invoices, which recomputes both ends. One place the number
+comes from is what makes a second divergence impossible rather than unlikely.
+
+Verified live: ₹10,000 on an invoice moved the project 60,000 → 70,000 and
+settled the invoice; deleting it reversed both.
+
+**Two things it nearly broke**, caught before pushing: the payments list
+inner-joined `projects`, so invoice-only payments would have vanished from it;
+and the create endpoint still demanded a project.
+
+**One it did break**, caught only by checking the live app afterwards: the
+payments list selected `invoice_id`, typed it, and then rebuilt each row as an
+object literal that left it out — pattern six from the memory note, *a field is
+only real when the read path returns it*, walked into by the person who wrote
+the note. `.default(null)` filled the hole, so the response was well-formed and
+wrong, and 1,591 tests passed with it in place. The guard now lives in
+`rls-live.mjs`, because it was a TypeScript shaping bug that SQL tests cannot
+reach.
+
+### Pending is not received (0146)
+
+`status` has been ('paid','pending') since 0106 and nothing that counted money
+ever filtered on it, so a client's promise inflated the project's received
+figure, the month's cash, the profit report, GST income, and — worst — the
+balance printed on the client's own quotation and receipt.
+
+Eight definitions across six migrations. Each was copied byte-for-byte out of
+the migration that owns it by a generator that asserted every replacement
+matched, and reported every remaining reference so the one that should *not* be
+filtered was a decision: `get_receipt_for_token`'s own `where rp.id = v_payment`,
+which finds the payment the receipt is for.
+
+`= 'paid'` rather than `<> 'pending'`: identical today, but if a third status
+is added, understating money is visible and overstating it is silent. A test
+pins the constraint to exactly two values so adding one fails loudly.
+
+Verified live: a ₹25,000 pending payment left `received` at 60,000; marking it
+paid moved it to 85,000.
+
+### What both rounds have in common
+
+Neither defect was reachable by any static check, and both produced numbers
+that were internally consistent and wrong. The tests that now hold them assert
+the *same figure twice under two states* — pending vs paid, before vs after a
+delete — which is the only shape that catches a filter quietly dropped in a
+later edit.
