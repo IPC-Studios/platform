@@ -886,3 +886,73 @@ Four screens had a list and a number beneath it that described different sets:
 clients, the team directory, company expenses, attendance. None errored. The
 shape to watch for is a filter applied after the fetch — in a hook, in a
 `useMemo`, in a `filterX` helper — on any screen that also shows a total.
+
+## Round: reachability, two layers (2026-09-16)
+
+The two best finds of the week were both "built, granted, tested — and called
+by nothing". So I asked that question systematically, at the SQL layer and
+again at the HTTP layer.
+
+### SQL: eight orphaned SECURITY DEFINER functions
+
+A definer function runs as its owner and bypasses RLS. Eight were left granted
+to `authenticated` after the path that used them was replaced. Each was
+verified to have no caller in the API, none in any other function's body, and
+no trigger attached.
+
+The one that mattered: `settle_payout()` writes `team_payout_settlements`
+while the live path writes `team_slot_settlements`. Two tables whose names
+differ by one word, for the same idea — which is how a future "record a payout
+adjustment" lands in the wrong one and the money quietly disagrees. Both now
+carry a comment saying which is real. The dead table is kept: a table drop
+cannot be undone by a migration, and "nothing has ever written to it" is a
+claim about this repository, not about every database out there.
+
+`crm_apply_automations` looked alarming — the v3 rule engine with no caller —
+but 0047 replaced the row trigger deliberately and says so in its own comment:
+"the row trigger now enrolls workflows instead of applying rules."
+
+A test now reads the catalog after every migration and fails on any granted
+definer function with no reachable caller. Writing it without the
+`pg_trigger` lookup reported every trigger function in the schema, because a
+trigger names its function in the catalog and nowhere else.
+
+### HTTP: three endpoints with no caller
+
+Of 329 route definitions, exactly three had no reference anywhere in the web
+app:
+
+| Endpoint | What it turned out to be |
+| --- | --- |
+| `/notifications/unread-count` | The bell counted the rows it had fetched, and the list is capped at fifty — so past fifty unread the badge was simply wrong. Being the true number is a badge's whole job. Also stops the header pulling fifty rows to render one digit |
+| `/work/submissions/:id/revoke-delivery` | See below |
+| `/hr/attendance/auto-check-in` | **Left alone deliberately.** Checking someone in from their location without them pressing anything is a decision about tracking staff, not a gap to close quietly. Flagged for the studio to decide |
+
+### The bug I found in my own change
+
+After wiring the send dialog to mint revocable client links, the dialog says
+"a client link that you can revoke later" — so I went looking for the control
+that keeps that promise. There wasn't one, and `revoked_at` was neither
+selected by the list query nor in the contract.
+
+Adding it exposed something worse. Revoking ran three statements; the UPDATE
+that stamps `revoked_at` on the submission matched **no row, every time**.
+`tws_update` (0139) is scoped to `status = 'submitted'` — written for editing
+before review — and work is only ever sent once **approved**. RLS filters an
+UPDATE rather than refusing it, so the statement changed nothing, raised
+nothing, and the handler returned `true` regardless. A no-op was
+indistinguishable from a revocation.
+
+The client's link did die, because expiring the token is a definer call. What
+was lost was the studio's ability to see that it had.
+
+Fixed by going back to the table's 0010 design — written through definer
+functions — with one permission check and an honest return value.
+
+### The lesson
+
+Both layers, same question: *what calls this?* Neither typecheck, lint nor the
+test suite asks it, and nothing about an unreachable feature looks broken. The
+RLS detail is worth keeping in mind on its own: **an UPDATE filtered to zero
+rows by a policy is silent**, so any handler that returns success without
+checking the row count can report work it did not do.
