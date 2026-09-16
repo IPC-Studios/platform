@@ -8,6 +8,7 @@ import {
   setFenceRequest,
   z,
 } from '@ipc/contracts'
+import { matchesRoster, summariseRoster } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireModule } from '../../middleware/permissions'
@@ -95,6 +96,8 @@ export const hrRouter = new Hono<AppEnv>()
     const sizeRaw = c.req.query('page_size')
     const search = c.req.query('search')?.trim().toLowerCase() ?? ''
     const status = c.req.query('status')?.trim() ?? ''
+    const type = c.req.query('type')?.trim() ?? ''
+    if (type && !['in_house', 'freelancer'].includes(type)) fail(422, 'That engagement type is not one we use.')
     const paged = pageRaw !== undefined || sizeRaw !== undefined
     const page = Math.max(1, Number(pageRaw ?? 1) || 1)
     const pageSize = Math.min(200, Math.max(1, Number(sizeRaw ?? 25) || 25))
@@ -122,19 +125,29 @@ export const hrRouter = new Hono<AppEnv>()
     )
     if (!rows) fail(400, 'We could not load attendance.')
     const items = attendanceDayRow.array().parse(rows)
-    if (!paged && !status) return c.json(items)
-    const filtered = status
-      ? items.filter((r) => {
-          const derived = r.check_in_at && !r.check_out_at ? 'not_checked_out' : r.status
-          return derived === status || r.status === status
-        })
-      : items
+    if (!paged && !status && !type) return c.json(items)
+    // matchesRoster is the same function the dashboard used to apply in the
+    // browser. `not_checked_out` is derived from the two timestamps rather
+    // than stored, and one implementation of that rule is the only way a row's
+    // badge and the filter that found it cannot disagree.
+    const filtered = items.filter((r) => matchesRoster(r, { status, type }))
     if (!paged) return c.json(filtered)
+    // Counted over the WHOLE filtered roster, before the page is cut. The
+    // page used to compute these from whichever 25 rows it held, so a studio
+    // of forty read "Total 25" on page one of its own attendance.
+    const sum = summariseRoster(filtered)
     return c.json({
       items: filtered.slice(offset, offset + pageSize),
       total: filtered.length,
       page,
       page_size: pageSize,
+      summary: {
+        total: sum.total,
+        present: sum.present,
+        absent: sum.absent,
+        not_checked_out: sum.notCheckedOut,
+        percent: sum.percent,
+      },
     })
   })
 

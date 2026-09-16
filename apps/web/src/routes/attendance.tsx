@@ -49,7 +49,6 @@ import {
   STATUS_LABEL,
   STATUS_TONE,
   displayStatus,
-  filterRows,
   formatTime,
   hasFilters,
   hoursWorked,
@@ -205,6 +204,20 @@ const pagedDay = z.object({
   total: z.number().int(),
   page: z.number().int(),
   page_size: z.number().int(),
+  /**
+   * Counted server-side over the whole filtered roster. Older deploys do not
+   * send it, so it stays optional and the page falls back to counting the
+   * rows it has -- which is what it always did, and what was wrong.
+   */
+  summary: z
+    .object({
+      total: z.number().int(),
+      present: z.number().int(),
+      absent: z.number().int(),
+      not_checked_out: z.number().int(),
+      percent: z.number(),
+    })
+    .optional(),
 })
 
 function TeamDashboard() {
@@ -218,10 +231,14 @@ function TeamDashboard() {
   // Server-paginated roster: search narrows on the server, the rest refines
   // the loaded page client-side. Falls back to the legacy array shape.
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['hr', 'attendance', date, page, pageSize, filters.search],
+    queryKey: ['hr', 'attendance', date, page, pageSize, filters.search, filters.status, filters.type],
     queryFn: async () => {
       const qs = new URLSearchParams({ date, page: String(page), page_size: String(pageSize) })
       if (filters.search.trim()) qs.set('search', filters.search.trim())
+      // Status and engagement used to narrow the page the browser already
+      // had, while the count under it described the whole roster.
+      if (filters.status !== 'all') qs.set('status', filters.status)
+      if (filters.type) qs.set('type', filters.type)
       const raw: unknown = await callApi(`/hr/attendance?${qs.toString()}`, {
         responseSchema: z.unknown(),
       })
@@ -236,8 +253,24 @@ function TeamDashboard() {
 
   const rows = useMemo(() => data?.items ?? [], [data])
   const total = data?.total ?? 0
-  const shown = useMemo(() => filterRows(rows, filters), [rows, filters])
-  const totals = useMemo(() => summarise(rows), [rows])
+  // The server returns the right rows for these filters, so there is nothing
+  // left to narrow here; filtering again would only disagree with the count.
+  const shown = rows
+  // Counted over the whole filtered roster. Computing this from `rows` meant
+  // a studio of forty read "Total 25" on page one of its own attendance.
+  const totals = useMemo(
+    () =>
+      data?.summary
+        ? {
+            total: data.summary.total,
+            present: data.summary.present,
+            absent: data.summary.absent,
+            notCheckedOut: data.summary.not_checked_out,
+            percent: data.summary.percent,
+          }
+        : summarise(rows),
+    [data, rows],
+  )
   // Only the people who answer for the roster may rewrite a day on it.
   const canCorrect = !!session?.is_owner || session?.role === 'admin'
 

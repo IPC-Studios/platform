@@ -1,19 +1,19 @@
 import type { AttendanceDayRow } from '@ipc/contracts'
+import { displayStatus as displayStatusOf, matchesRoster, summariseRoster, type DisplayStatus } from '@ipc/domain'
 
 /**
- * The attendance dashboard's arithmetic.
+ * The attendance dashboard's presentation: labels, tones, and the formatting
+ * around them.
  *
- * The recorded status says what happened at the door; whether someone is still
- * inside is a question about the two timestamps. Deriving it here — rather than
- * storing a fourth status — means it can never disagree with the times shown
- * beside it.
+ * The rules themselves — what counts as present, who a filter keeps — moved
+ * to `@ipc/domain` so the API narrows the roster with the same code rather
+ * than its own copy. Two implementations of "has this person checked out yet"
+ * only have to disagree once for a row to carry a badge that contradicts the
+ * filter that found it.
  */
-export type DisplayStatus = 'present' | 'late' | 'absent' | 'not_checked_out'
+export type { DisplayStatus }
 
-export function displayStatus(row: AttendanceDayRow): DisplayStatus {
-  if (row.check_in_at && !row.check_out_at) return 'not_checked_out'
-  return row.status
-}
+export const displayStatus = (row: AttendanceDayRow): DisplayStatus => displayStatusOf(row)
 
 export const STATUS_LABEL: Record<DisplayStatus, string> = {
   present: 'Present',
@@ -42,18 +42,8 @@ export interface AttendanceSummary {
  * Anyone who came in counts as present for the percentage — late is still
  * turning up, and someone who has not checked out has certainly arrived.
  */
-export function summarise(rows: readonly AttendanceDayRow[]): AttendanceSummary {
-  const total = rows.length
-  const turnedUp = rows.filter((r) => r.check_in_at !== null).length
-  return {
-    total,
-    present: turnedUp,
-    absent: rows.filter((r) => r.check_in_at === null).length,
-    notCheckedOut: rows.filter((r) => displayStatus(r) === 'not_checked_out').length,
-    // An empty roster is 0%, not a division by zero dressed up as NaN.
-    percent: total === 0 ? 0 : Math.round((turnedUp / total) * 100),
-  }
-}
+export const summarise = (rows: readonly AttendanceDayRow[]): AttendanceSummary =>
+  summariseRoster(rows)
 
 export interface AttendanceFilters {
   search: string
@@ -75,14 +65,22 @@ function matchesSearch(row: AttendanceDayRow, search: string): boolean {
     .some((v) => String(v).toLowerCase().includes(needle))
 }
 
+/**
+ * Narrow a roster in the browser.
+ *
+ * The dashboard no longer calls this — status and engagement go to the API,
+ * so the count under the list describes the list. It stays for the personal
+ * view, which holds one member's whole history in memory and has no pager to
+ * contradict, and it delegates the status and engagement rules to the same
+ * `matchesRoster` the API uses.
+ */
 export function filterRows(
   rows: readonly AttendanceDayRow[],
   filters: AttendanceFilters,
 ): AttendanceDayRow[] {
-  return rows
-    .filter((r) => (filters.status === 'all' ? true : displayStatus(r) === filters.status))
-    .filter((r) => (filters.type ? r.engagement_type === filters.type : true))
-    .filter((r) => matchesSearch(r, filters.search))
+  return rows.filter(
+    (r) => matchesRoster(r, { status: filters.status, type: filters.type }) && matchesSearch(r, filters.search),
+  )
 }
 
 const timeFormat = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' })
