@@ -258,10 +258,15 @@ export const crmActivitiesRouter = new Hono<AppEnv>()
           returning id`
         if (!r) return null
         if (l.assigned_to && l.assigned_to !== auth.userId) {
+          // Every generator in 0125 passes a severity and a deep link; this
+          // was the one call site that stopped at the entity, so the only
+          // notification the API itself writes was the only one you could not
+          // click through. `?lead=` opens the deal's drawer, archived or not.
           await sql`
             select create_notification(get_current_company_id(), ${l.assigned_to}, 'crm_meeting',
               ${`Meeting: ${v.subject}`}, ${`With ${l.name ?? 'a lead'} on ${new Date(v.starts_at).toISOString().slice(0, 16).replace('T', ' ')} UTC`},
-              ${`crm_meeting:${r.id}`}, 'crm_lead', ${v.lead_id})`
+              ${`crm_meeting:${r.id}`}, 'crm_lead', ${v.lead_id},
+              'info', ${`/follow-ups?lead=${v.lead_id}`})`
         }
         const [full] = await sql`${selectActivity(sql)} where a.id = ${r.id}`
         return full ?? null

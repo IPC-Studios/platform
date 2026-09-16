@@ -191,11 +191,7 @@ function Notifications({ generate }: { generate?: boolean | undefined }) {
                         {n.dismissed_at && <StatusBadge tone="neutral">dismissed</StatusBadge>}
                       </div>
                       {n.body && <p className="text-sm text-muted-foreground">{n.body}</p>}
-                      {n.deep_link && (
-                        <Link to={n.deep_link} className="mt-1 inline-block text-sm text-primary hover:underline">
-                          Open
-                        </Link>
-                      )}
+                      {n.deep_link && <DeepLink to={n.deep_link} />}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1">
@@ -332,5 +328,29 @@ function GeneratorCentre() {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * "Open" on a notification.
+ *
+ * A deep link is a plain string written by whatever raised the notification --
+ * a SQL generator, usually -- so it can carry a query string. TanStack Router
+ * matches `to` against route paths and does not split one off, so
+ * `/follow-ups?lead=abc` would look for a route literally named that and land
+ * on the not-found page. Split it here, once, rather than forbidding every
+ * caller from pointing at a particular record.
+ */
+function DeepLink({ to }: { to: string }) {
+  const [path, query] = to.split('?')
+  const search = query ? Object.fromEntries(new URLSearchParams(query)) : undefined
+  return (
+    <Link
+      to={path ?? to}
+      {...(search ? { search: search as never } : {})}
+      className="mt-1 inline-block text-sm text-primary hover:underline"
+    >
+      Open
+    </Link>
   )
 }
