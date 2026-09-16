@@ -30,10 +30,58 @@ export interface ExpenseFilters {
   date_to?: string | undefined
   min_amount?: string | undefined
   max_amount?: string | undefined
+  /** 'with' | 'without' | 'rcm' — GST treatment, or reverse charge only. */
+  gst?: string | undefined
   sort?: 'date' | 'amount' | undefined
   dir?: 'asc' | 'desc' | undefined
   page?: number | undefined
   page_size?: number | undefined
+}
+
+/** Every filter goes on the query string the same way for the list and the tiles. */
+function expenseParams(f: ExpenseFilters): URLSearchParams {
+  const p = new URLSearchParams()
+  if (f.search?.trim()) p.set('search', f.search.trim())
+  if (f.category) p.set('category', f.category)
+  if (f.project_id) p.set('project_id', f.project_id)
+  if (f.date_from) p.set('date_from', f.date_from)
+  if (f.date_to) p.set('date_to', f.date_to)
+  if (f.min_amount) p.set('min_amount', f.min_amount)
+  if (f.max_amount) p.set('max_amount', f.max_amount)
+  if (f.gst) p.set('gst', f.gst)
+  return p
+}
+
+const expensePage = z.object({
+  items: expenses,
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+})
+export type ExpensePage = z.infer<typeof expensePage>
+
+/**
+ * A page of expenses, with the real total behind it.
+ *
+ * This used to fetch 200 rows and paginate them in the browser, so a studio
+ * past its two-hundredth expense simply could not reach the rest — and the
+ * pager, counting the 200 it had, gave no sign of it.
+ */
+export function useExpensePage(filters: ExpenseFilters & { page: number; page_size: number }) {
+  const { session } = useAuth()
+  const access = useAccess()
+  const params = expenseParams(filters)
+  if (filters.sort) params.set('sort', filters.sort)
+  if (filters.dir) params.set('dir', filters.dir)
+  params.set('page', String(filters.page))
+  params.set('page_size', String(filters.page_size))
+  const qs = params.toString()
+  return useQuery({
+    queryKey: ['expenses', 'page', qs],
+    queryFn: () => callApi(`/financials/expenses?${qs}`, { responseSchema: expensePage }),
+    enabled: !!session && access.hasModule('company_expenses'),
+    staleTime: 15_000,
+  })
 }
 
 export function useExpenses(filters: ExpenseFilters = {}) {
@@ -222,6 +270,10 @@ export const expenseSummary = z.object({
   total: z.number(),
   tax_total: z.number(),
   rcm_total: z.number(),
+  // Counted in SQL over the whole filtered set. Computing these from the rows
+  // on screen made "Project-linked" and "Categories used" describe one page.
+  linked_count: z.coerce.number().int().default(0),
+  category_count: z.coerce.number().int().default(0),
 })
 export type ExpenseSummary = z.infer<typeof expenseSummary>
 
@@ -232,13 +284,17 @@ export type ExpenseSummary = z.infer<typeof expenseSummary>
  * "Total" meant "total of these twenty" — a number that changed as you paged
  * and was wrong every time.
  */
-export function useExpenseSummary(dateFrom?: string, dateTo?: string) {
+/**
+ * The tiles, over the same rows the list is showing.
+ *
+ * This took a date range only, so "Total" described every expense in the
+ * month while the rows under it were narrowed by category, project, amount
+ * and a search — two numbers on one screen answering different questions.
+ */
+export function useExpenseSummary(filters: ExpenseFilters = {}) {
   const { session } = useAuth()
   const access = useAccess()
-  const params = new URLSearchParams()
-  if (dateFrom) params.set('date_from', dateFrom)
-  if (dateTo) params.set('date_to', dateTo)
-  const qs = params.toString()
+  const qs = expenseParams(filters).toString()
   return useQuery({
     queryKey: ['expenses', 'summary', qs],
     queryFn: () =>

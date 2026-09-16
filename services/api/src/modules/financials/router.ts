@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
+import type { TransactionSql } from 'postgres'
 import {
   createExpenseRequest,
   createFixedOverheadRequest,
@@ -29,6 +31,47 @@ import { audit } from '../../lib/audit'
 const expenses = expense.array()
 const financials = projectFinancials.array()
 
+/** Everything the expense list can be narrowed by, read once. */
+function expenseFilters(c: Context<AppEnv>) {
+  // The studio's own vocabulary, not a with/without guess: `exempt` is a GST
+  // treatment that carries no tax, so folding it into "with GST" would put
+  // rows with no tax under a tile that counts tax.
+  const gstRaw = c.req.query('gst')?.trim() ?? ''
+  if (gstRaw && !['gst_applicable', 'exempt', 'non_gst', 'reverse_charge'].includes(gstRaw)) {
+    fail(422, 'That GST filter is not one we use.')
+  }
+  return {
+    project: uuidQuery(c, 'project_id'),
+    category: c.req.query('category') || null,
+    dateFrom: c.req.query('date_from') || null,
+    dateTo: c.req.query('date_to') || null,
+    search: (c.req.query('search') ?? '').trim() || null,
+    minAmount: numberQuery(c, 'min_amount', 'amount_min'),
+    maxAmount: numberQuery(c, 'max_amount', 'amount_max'),
+    gst: gstRaw || null,
+  }
+}
+
+/** The one WHERE the list, its count and its tiles all share. */
+function expenseWhere(sql: TransactionSql, f: ReturnType<typeof expenseFilters>) {
+  return sql`
+    where ${f.project ? sql`e.project_id = ${f.project}` : sql`true`}
+      and (${f.category}::text is null or e.category = ${f.category})
+      and (${f.dateFrom}::date is null or e.expense_date >= ${f.dateFrom}::date)
+      and (${f.dateTo}::date is null or e.expense_date <= ${f.dateTo}::date)
+      and (${f.search}::text is null or e.description ilike '%' || ${f.search} || '%' or e.invoice_number ilike '%' || ${f.search} || '%')
+      and (${f.minAmount}::numeric is null or e.amount >= ${f.minAmount}::numeric)
+      and (${f.maxAmount}::numeric is null or e.amount <= ${f.maxAmount}::numeric)
+      and ${
+        f.gst === 'reverse_charge'
+          ? // Two columns say this: the treatment, and the boolean the tile counts.
+            sql`(e.gst_treatment = 'reverse_charge' or e.reverse_charge = true)`
+          : f.gst
+            ? sql`e.gst_treatment = ${f.gst}`
+            : sql`true`
+      }`
+}
+
 interface FinancialRow {
   project_id: string
   name: string
@@ -42,43 +85,41 @@ export const financialsRouter = new Hono<AppEnv>()
   .use('*', requireAuth)
 
   // ── Expenses (company_expenses module) ──────────────────────
-  // Lovable parity: 6 filters + sort + pagination + summary. Filters:
-  // project_id, category, date_from, date_to, search, min_amount.
+  //
+  // The list, the count under it and the tiles above it all read ONE
+  // predicate. They used not to: the summary endpoint filtered by date alone,
+  // so "Total" described every expense in the month while the rows beneath it
+  // were narrowed by category, project, amount and a search. Two numbers on
+  // one screen that answer different questions is worse than one number.
   .get('/expenses', requireModule('company_expenses'), async (c) => {
-    const project = uuidQuery(c, 'project_id')
-    const category = c.req.query('category') || null
-    const dateFrom = c.req.query('date_from') || null
-    const dateTo = c.req.query('date_to') || null
-    const search = (c.req.query('search') ?? '').trim() || null
-    const minAmount = numberQuery(c, 'min_amount', 'amount_min')
-    const maxAmount = numberQuery(c, 'max_amount', 'amount_max')
+    const f = expenseFilters(c)
     const sort = c.req.query('sort') === 'amount' ? 'amount' : 'date'
     const dir = c.req.query('dir') === 'asc' ? 'asc' : 'desc'
+    // Paging is opt-in: a caller that asks for a page gets { items, total },
+    // one that does not still gets the plain array it always got.
+    const wantsPage = c.req.query('page') !== undefined || c.req.query('page_size') !== undefined
     const page = Math.max(1, Number(c.req.query('page') ?? 1) || 1)
     const pageSize = Math.min(200, Math.max(1, Number(c.req.query('page_size') ?? 100) || 100))
-    const rows = await attempt(c, 'financials.expenses', () =>
-      withUser(
-        c.env,
-        c.get('auth').userId,
-        (sql) => sql`
+    const result = await attempt(c, 'financials.expenses', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const rows = await sql`
           select e.id, e.project_id, e.party_id, p.name as party_name, e.category, e.description,
                   e.amount, e.expense_date, e.gst_treatment, e.gst_rate, e.is_fixed_overhead,
                   e.invoice_number, e.amount_is, e.tax_name, e.tax_amount, e.reverse_charge, e.itemize_json
           from expenses e
           left join parties p on p.id = e.party_id
-          where ${project ? sql`e.project_id = ${project}` : sql`true`}
-            and (${category}::text is null or e.category = ${category})
-            and (${dateFrom}::date is null or e.expense_date >= ${dateFrom}::date)
-            and (${dateTo}::date is null or e.expense_date <= ${dateTo}::date)
-            and (${search}::text is null or e.description ilike '%' || ${search} || '%' or e.invoice_number ilike '%' || ${search} || '%')
-            and (${minAmount}::numeric is null or e.amount >= ${minAmount}::numeric)
-            and (${maxAmount}::numeric is null or e.amount <= ${maxAmount}::numeric)
+          ${expenseWhere(sql, f)}
           order by ${sort === 'amount' ? sql`e.amount` : sql`e.expense_date`} ${dir === 'asc' ? sql`asc` : sql`desc`}
-          limit ${pageSize} offset ${(page - 1) * pageSize}`,
-      ),
+          limit ${pageSize} offset ${(page - 1) * pageSize}`
+        if (!wantsPage) return { rows, total: rows.length }
+        const counted = await sql<{ n: number }[]>`
+          select count(*)::int as n from expenses e ${expenseWhere(sql, f)}`
+        return { rows, total: counted[0]?.n ?? rows.length }
+      }),
     )
-    if (!rows) fail(400, 'We could not load expenses.')
-    return c.json(expenses.parse((rows as Record<string, unknown>[]).map((r) => ({
+    if (!result) fail(400, 'We could not load expenses.')
+    const rows = result.rows
+    const items = expenses.parse((rows as Record<string, unknown>[]).map((r) => ({
       ...r,
       invoice_number: (r['invoice_number'] as string | null) ?? null,
       amount_is: (r['amount_is'] as string | null) ?? null,
@@ -86,22 +127,24 @@ export const financialsRouter = new Hono<AppEnv>()
       tax_amount: typeof r['tax_amount'] === 'number' ? r['tax_amount'] : null,
       reverse_charge: typeof r['reverse_charge'] === 'boolean' ? r['reverse_charge'] : null,
       itemize_json: Array.isArray(r['itemize_json']) ? r['itemize_json'] : null,
-    }))))
+    })))
+    return wantsPage
+      ? c.json({ items, total: result.total, page, page_size: pageSize })
+      : c.json(items)
   })
 
-  // Lovable parity: company expense summary + printable report rows.
+  // The tiles, over exactly the rows the list is showing.
   .get('/expenses/summary', requireModule('company_expenses'), async (c) => {
-    const dateFrom = c.req.query('date_from') || null
-    const dateTo = c.req.query('date_to') || null
+    const f = expenseFilters(c)
     const row = await attempt(c, 'financials.expenses_summary', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql<Record<string, unknown>[]>`select
-            count(*)::int as count, coalesce(sum(amount), 0) as total,
-            coalesce(sum(tax_amount), 0) as tax_total,
-            coalesce(sum(amount) filter (where reverse_charge = true), 0) as rcm_total
-          from expenses
-         where (${dateFrom}::date is null or expense_date >= ${dateFrom}::date)
-           and (${dateTo}::date is null or expense_date <= ${dateTo}::date)`
+            count(*)::int as count, coalesce(sum(e.amount), 0) as total,
+            coalesce(sum(e.tax_amount), 0) as tax_total,
+            coalesce(sum(e.amount) filter (where e.reverse_charge = true), 0) as rcm_total,
+            count(*) filter (where e.project_id is not null)::int as linked_count,
+            count(distinct e.category) filter (where e.category is not null)::int as category_count
+          from expenses e ${expenseWhere(sql, f)}`
         return rows[0] ?? null
       }),
     )

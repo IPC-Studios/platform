@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Plus, Wallet, Pencil, Trash2, Search, Download, Printer, Tags, X, Eye } from 'lucide-react'
 import type { CreateExpenseRequest, Expense } from '@ipc/contracts'
 
@@ -15,11 +15,12 @@ import { Input, Label, Select } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
+import { downloadCsv, toCsv } from '@/shared/ui/csv'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Card, CardContent } from '@/shared/ui/card'
-import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense, useExpenseSummary } from '@/features/financials/api'
+import { useExpensePage, useCreateExpense, useUpdateExpense, useDeleteExpense, useExpenseSummary } from '@/features/financials/api'
 import { useProjects } from '@/features/projects/api'
 import { PartyPicker } from '@/features/parties/PartyPicker'
 import { useConfirm } from '@/shared/ui/confirm'
@@ -84,20 +85,33 @@ function ExpenseCategoryPicker({ value, onChange }: { value: string; onChange: (
   )
 }
 
+/**
+ * The export, through the shared helper.
+ *
+ * This used to build the file by hand: it wrapped every cell in quotes but
+ * doubled the inner quotes of only one of them, so a party name containing a
+ * quote broke the row — and with no BOM, Excel on Windows read every rupee
+ * sign as mojibake. Both are exactly what `downloadCsv` exists to prevent.
+ */
 function exportCsv(rows: Expense[]) {
-  const header = ['id', 'date', 'category', 'description', 'project_id', 'party', 'amount', 'gst_treatment', 'gst_rate', 'invoice_number', 'reverse_charge']
-  const lines = rows.map((e) =>
-    [e.id, e.expense_date, e.category ?? '', (e.description ?? '').replace(/"/g, '""'), e.project_id ?? '', e.party_name ?? '', String(e.amount), e.gst_treatment, e.gst_rate == null ? '' : String(e.gst_rate), e.invoice_number ?? '', e.reverse_charge ? 'yes' : 'no']
-      .map((v) => `"${v}"`)
-      .join(','),
+  downloadCsv(
+    `company-expenses-${todayISO()}.csv`,
+    toCsv(
+      ['Date', 'Category', 'Description', 'Project', 'Party', 'Amount', 'GST treatment', 'GST rate', 'Invoice number', 'Reverse charge'],
+      rows.map((e) => [
+        e.expense_date,
+        e.category ?? '',
+        e.description ?? '',
+        e.project_id ?? '',
+        e.party_name ?? '',
+        e.amount,
+        e.gst_treatment,
+        e.gst_rate ?? '',
+        e.invoice_number ?? '',
+        e.reverse_charge ? 'yes' : 'no',
+      ]),
+    ),
   )
-  const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `company-expenses-${todayISO()}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 export function CompanyExpensesPage() {
@@ -128,10 +142,10 @@ function Expenses() {
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<Expense | null>(null)
   const [catsOpen, setCatsOpen] = useState(false)
+  const [gst, setGst] = useState('')
 
-  const { data: serverSummary } = useExpenseSummary(dateFrom || undefined, dateTo || undefined)
-
-  const { data, isLoading, isError, refetch, isFetching } = useExpenses({
+  // One set of filters, read by the list, its count and the tiles above it.
+  const filters = {
     search: search.trim() || undefined,
     category: category || undefined,
     project_id: projectId || undefined,
@@ -139,13 +153,18 @@ function Expenses() {
     date_to: dateTo || undefined,
     min_amount: minAmount || undefined,
     max_amount: maxAmount || undefined,
+    gst: gst || undefined,
+  }
+  const { data: serverSummary } = useExpenseSummary(filters)
+  const { data: pageData, isLoading, isError, refetch, isFetching } = useExpensePage({
+    ...filters,
     sort,
     dir,
-    page: 1,
-    page_size: 200,
+    page,
+    page_size: PAGE_SIZE,
   })
 
-  const activeCount = [search.trim(), category, projectId, dateFrom, dateTo, minAmount, maxAmount].filter(Boolean).length
+  const activeCount = [search.trim(), category, projectId, dateFrom, dateTo, minAmount, maxAmount, gst].filter(Boolean).length
 
   function resetFilters() {
     setSearch('')
@@ -155,32 +174,28 @@ function Expenses() {
     setDateTo('')
     setMinAmount('')
     setMaxAmount('')
+    setGst('')
     setPage(1)
   }
 
-  const sorted = useMemo(() => {
-    const rows = [...(data ?? [])]
-    rows.sort((a, b) => {
-      const av = sort === 'amount' ? a.amount : a.expense_date
-      const bv = sort === 'amount' ? b.amount : b.expense_date
-      const cmp = av < bv ? -1 : av > bv ? 1 : 0
-      return dir === 'asc' ? cmp : -cmp
-    })
-    return rows
-  }, [data, sort, dir])
+  // The server sorts and pages. Sorting here would only have reordered the
+  // rows already fetched, and paging here capped the whole screen at the
+  // first 200 expenses with nothing to say so.
+  const sorted = pageData?.items ?? []
+  const total = pageData?.total ?? 0
 
-  // SummaryCards (Lovable parity): computed over the filtered set.
-  const summary = useMemo(() => {
-    const rows = sorted
-    const total = rows.reduce((s, e) => s + e.amount, 0)
-    const linked = rows.filter((e) => e.project_id).length
-    const cats = new Set(rows.map((e) => e.category).filter(Boolean)).size
-    return { total, count: rows.length, linked, general: rows.length - linked, cats }
-  }, [sorted])
+  // Counted in SQL over the whole filtered set, not over this page.
+  const summary = {
+    total: serverSummary?.total ?? 0,
+    count: serverSummary?.count ?? 0,
+    linked: serverSummary?.linked_count ?? 0,
+    general: (serverSummary?.count ?? 0) - (serverSummary?.linked_count ?? 0),
+    cats: serverSummary?.category_count ?? 0,
+  }
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
-  const pageRows = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+  const pageRows = sorted
 
   async function onDelete(e: Expense) {
     const yes = await confirm({
@@ -274,6 +289,18 @@ function Expenses() {
                 {(projects ?? []).map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {/* Two tiles above this bar count tax and reverse charge, and
+                  there was no way to see the rows behind either figure. */}
+              <Label>GST</Label>
+              <Select value={gst} onChange={(e) => { setGst(e.target.value); setPage(1) }} aria-label="Filter by GST">
+                <option value="">Any GST treatment</option>
+                <option value="gst_applicable">GST applicable</option>
+                <option value="exempt">Exempt</option>
+                <option value="non_gst">No GST</option>
+                <option value="reverse_charge">Reverse charge</option>
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
