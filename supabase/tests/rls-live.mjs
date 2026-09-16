@@ -16,8 +16,20 @@ const rand = () => Math.random().toString(36).slice(2, 10)
 const randPhone = () => `9${Math.floor(Math.random() * 1e9).toString().padStart(9, '0')}`
 let pass = 0
 let fail = 0
-const check = (name, ok) => {
+/**
+ * `detail` is the response that decided it. Printed only on failure, and only
+ * far enough to name the cause -- a bare "FAIL" tells you a thing is broken
+ * and not one word about why, which is the whole failure mode this suite
+ * exists to catch. Three expense checks failed in CI for a week reading
+ * "FAIL" with no status; they were sending a token that an earlier test had
+ * deliberately revoked, and the 401 was right there in the response.
+ */
+const check = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
+  if (!ok && detail !== undefined) {
+    const body = typeof detail === 'string' ? detail : JSON.stringify(detail)
+    console.log(`      got: ${body.slice(0, 300)}`)
+  }
   ok ? pass++ : fail++
 }
 
@@ -299,15 +311,30 @@ check('B: the post-reset session works', fresh.status === 200)
 // is every caller — so creating a company expense failed for everyone while
 // typecheck, lint and the pglite suite all stayed green. Only a real insert
 // through the real driver catches that shape of bug.
+// A's sessions were all revoked by the logout-all block above -- that is what
+// it is testing, and `a.token` died with them. These checks used it anyway and
+// were reading 401 as a broken insert. Sign back in for a live token; A's
+// password was never changed (only B's was reset).
+const aAgain = await api('/auth/login', {
+  method: 'POST',
+  body: { email: a.email, password: 'Testpass12345!' },
+})
+check('A: signs back in for the expense checks', aAgain.status === 200, aAgain.json)
+const aToken = aAgain.json.access_token
+
 const expenseMin = await api('/financials/expenses', {
-  token: a.token,
+  token: aToken,
   method: 'POST',
   body: { amount: 2500 },
 })
-check('A: can create an expense with only the required fields', expenseMin.status === 201)
+check(
+  'A: can create an expense with only the required fields',
+  expenseMin.status === 201,
+  { status: expenseMin.status, ...expenseMin.json },
+)
 
 const expenseFull = await api('/financials/expenses', {
-  token: a.token,
+  token: aToken,
   method: 'POST',
   body: {
     amount: 8000,
@@ -318,14 +345,42 @@ const expenseFull = await api('/financials/expenses', {
     gst_rate: 18,
   },
 })
-check('A: can create a fully specified expense', expenseFull.status === 201)
+check('A: can create a fully specified expense', expenseFull.status === 201, {
+  status: expenseFull.status,
+  ...expenseFull.json,
+})
 
 const expenseItemized = await api('/financials/expenses', {
-  token: a.token,
+  token: aToken,
   method: 'POST',
   body: { amount: 4000, itemize_json: [{ title: 'Battery', amount: 4000, qty: 1 }] },
 })
-check('A: can create an itemized expense', expenseItemized.status === 201)
+check('A: can create an itemized expense', expenseItemized.status === 201, {
+  status: expenseItemized.status,
+  ...expenseItemized.json,
+})
+
+// The list is the other half of the fix that went in with these: it pages on
+// the server now, and its tiles are counted over the same filtered set.
+const expensePage = await api('/financials/expenses?page=1&page_size=2', { token: aToken })
+check(
+  'A: the expense list pages, with a real total',
+  expensePage.status === 200 &&
+    Array.isArray(expensePage.json.items) &&
+    typeof expensePage.json.total === 'number' &&
+    expensePage.json.total >= 3,
+  { status: expensePage.status, ...expensePage.json },
+)
+
+const expenseTiles = await api('/financials/expenses/summary?gst=gst_applicable', { token: aToken })
+const gstOnly = await api('/financials/expenses?page=1&page_size=100&gst=gst_applicable', { token: aToken })
+check(
+  'A: the summary counts the same rows the filtered list returns',
+  expenseTiles.status === 200 &&
+    gstOnly.status === 200 &&
+    expenseTiles.json.count === gstOnly.json.items.length,
+  { tiles: expenseTiles.json.count, list: gstOnly.json.items?.length },
+)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
