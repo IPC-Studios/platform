@@ -584,3 +584,61 @@ least one shoot in the month. Ours does not work that way:
 and returns every project that is not cancelled, with booked revenue always the
 project's whole value. The copy says what ours does rather than repeating a
 rule we do not implement.
+
+## Round: the CRM tabs, the old app's own deep links, and the P2 list (2026-09-16)
+
+### CRM tab contents
+
+Same method as the project tabs: the two screens side by side, reading what
+each one is for rather than what buttons it has.
+
+| Tab | What ours was missing |
+| --- | --- |
+| Today's Work | Three of the five lists. Ours had what is overdue and what is due today; the old app also shows **uncontacted leads, hot leads, and the ones that arrived this morning**. None of those carry a follow-up date, so none appeared on the board either — they were invisible on the one screen meant to say "here is today" |
+| Follow-up Board | The **Tomorrow** column. Ours folded it into "upcoming", which buries the calls you need to prepare for tonight among next month's |
+| Lead Inbox, Pipeline, Templates, Reports, Distribution, Duplicates, Settings, Imports | At parity or ahead. Ours' pipeline carries WIP limits, required fields per stage, deal value and multiple pipelines against the old app's fixed eight stages |
+
+### The deep links the old app had as pages of its own
+
+The rebuild consolidated several screens, which was right for the screens and
+wrong for thirteen URLs: each one 404'd. They are now aliases onto the same
+component behind the same module guard, choosing only which tab, dialog or
+section you land on — `/data-management/locations`, `/team-allocation/calendar`
+and `/conflicts`, `/attendance/my`, `/billing/settings`, `/billing/invoices/new`
+and `/$id/edit`, `/billing/$id/invoice`, `/company-expenses/report`,
+`/personal-expenses/report`, `/notifications/generate`, `/settings/services`,
+`/settings/work-submissions`.
+
+### P2, and what the gap file got wrong
+
+`parity-gaps.json` is a capture from 2026-09-15 and several of its rows had
+already been closed by the rounds after it. `/production-board` has its
+Overdue / Due Today / Needs Attention lanes and the lane colour picker;
+`/data-management` has all six status tabs; `/attendance` has Type and
+Duration; `/settings/team-terms` has Archived; `/settings/roles`,
+`/lead-sources` and `/team-payouts` match. Chasing those labels would have been
+work with nothing at the end of it.
+
+What was actually missing:
+
+| Screen | Fixed |
+| --- | --- |
+| `/financials/profit` | The table showed **one basis**, on a page called "cash vs booked, side by side". Both revenue figures and both profit figures are columns now, with the selected basis in bold. The margin came from the API's `gross_margin`, which knows nothing about the allocated fixed cost two columns to its left — the two numbers contradicted each other on every row |
+| `/reminders` | No filter bar **at all**, though `list_reminders` has taken an entity type, a due range, an overdue flag and a search since 0107 and the router passed three of its eleven arguments |
+| `/settings/subscription`, `/settings/company` | "Plan: Active" reads the same on a free trial and on two years paid up. `planSource()` now says which |
+| `/enquiries` | Nothing bounded the list in time, so "how many came in last month" was unanswerable on the screen built to answer it. The seven tiles count the same window |
+
+Two things the tests caught that a browser check would not have:
+
+- The reminders status picker I wrote offered "done". The check constraint has
+  allowed only `active/completed/dismissed` since 0060, so that option would
+  have returned an empty board with no error — the silent-failure shape again.
+- `/financials/salary-summary` grouped `team_payouts` by `employment_type`, a
+  column on no table, inside a `catch` that returned `[]`. It has answered
+  "no salaries" for as long as it has existed. Nothing called it, so it is
+  deleted rather than repaired.
+
+Verified against the live API after deploy: `plan_source` derives
+`grandfathered`; `entity_type=project` narrows three reminders to two and
+`priority=high` to one; an enquiry window outside the data returns zero rows
+**and** a zero summary, so the tiles move with the list.
