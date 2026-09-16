@@ -1023,3 +1023,69 @@ that were internally consistent and wrong. The tests that now hold them assert
 the *same figure twice under two states* — pending vs paid, before vs after a
 delete — which is the only shape that catches a filter quietly dropped in a
 later edit.
+
+## Round: the reconciliation screen (2026-09-16)
+
+Built because both money bugs of the day survived for the same reason: the two
+halves of the same rupee were never displayed together. Each screen was
+self-consistent, so each looked right, and nobody compares two screens.
+
+Every figure on the page is a difference between two independently-computed
+numbers — sold vs billed, billed vs received, received vs banked, owed vs
+settled. A disagreement is a column.
+
+### The fourth leg needed new data, so it got some
+
+Three legs were computable with what existed. `banked` was not, so
+`received_payments.cleared_at` was added: `received` is what the studio
+recorded, `banked` is what somebody confirmed reached the account.
+
+Deliberately a human confirmation and **not** a statement import. There is no
+bank feed in this system, and a column that quietly meant "someone typed a
+UTR" would invite trust it has not earned. Only a `paid` row can be banked —
+there is nothing to confirm about a promise.
+
+### Two figures nothing showed before
+
+**Not yet billed** — work sold that no invoice covers. On the live data this
+read ₹10,43,500 against ₹1,65,200 invoiced. It is the quietest way a studio
+loses money: the job is done, the client would pay, and nobody sent the bill.
+
+**Paid over** — settled beyond what a booking was costed at.
+
+### The health strip
+
+Four rules the schema is supposed to hold, counted rather than assumed —
+including one that can only be non-zero if 0145's CHECK constraint is dropped.
+Silence is the normal state; the row of pixels earns itself on the day one
+stops being true.
+
+### The bug I shipped, and how it was caught
+
+0147 built every money_in total by summing per project. That silently excluded
+a payment against a project-less invoice, and such an invoice itself — both
+ordinary since 0145, and both present in the live data, where *neither*
+invoice had a project.
+
+It was found by **using the feature**: marking a real payment as banked and
+watching the Banked total stay at zero. Not by a test, not by review. A
+reconciliation screen blind to some of the money is worse than none, because
+it reports a clean bill of health it never checked — which is exactly the
+failure the page exists to end.
+
+Totals are company-wide now, the per-project table stays per project, and
+`unassigned_received` / `unassigned_invoiced` name what sits outside any
+project rather than letting it disappear again. `outstanding` now comes from
+`invoices.balance_due`, which the 0145 trigger already derives — one fewer
+independent derivation to disagree with.
+
+`unbilled` deliberately stays a sum of per-project differences: netting it off
+overall would let one over-billed project mask another never invoiced at all.
+
+### The lesson, again
+
+Three times today a defect was found by exercising the running system rather
+than by reading code or running tests — the revoke that marked nothing, the
+payments list that dropped its own column, and this. All three passed
+typecheck, lint and a suite that is now 1,619 green. **Build it, then go and
+use it.**
