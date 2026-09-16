@@ -32,6 +32,19 @@ beforeAll(async () => {
     `create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;`,
   )
   for (const r of ['authenticated', 'anon', 'service_role', 'authenticator']) await db.exec(`create role ${r};`)
+  // Production grants these in deploy/db/00_bootstrap.sql, before any
+  // migration runs. Without them a perfectly good policy fails with
+  // "permission denied for table", which reads as a policy rejection and is
+  // not one -- the harness lying rather than the schema.
+  await db.exec(`grant usage on schema public to anon, authenticated, service_role;`)
+  await db.exec(`grant usage on schema auth to anon, authenticated, service_role;`)
+  await db.exec(
+    `alter default privileges in schema public grant select, insert, update, delete on tables to authenticated, service_role;`,
+  )
+  await db.exec(
+    `alter default privileges in schema public grant usage, select on sequences to authenticated, service_role;`,
+  )
+  await db.exec(`alter default privileges in schema public grant execute on functions to authenticated, service_role;`)
 
   const files = readdirSync(migDir)
     .filter((f) => f.endsWith('.sql') && !f.startsWith('0000_'))
@@ -46,6 +59,17 @@ beforeAll(async () => {
   `)
   await db.exec(`set request.jwt.claim.sub = '${OWNER}';`)
 })
+
+/** Read as a signed-in studio user, with RLS applied rather than bypassed. */
+async function asUser<T>(uid: string, sql: string) {
+  await db.exec(`set role authenticated;`)
+  await db.exec(`set request.jwt.claim.sub = '${uid}';`)
+  try {
+    return await db.query<T>(sql)
+  } finally {
+    await db.exec(`reset role;`)
+  }
+}
 
 const plan = async (key: string) => {
   const r = await db.query<Record<string, unknown>>(`select * from plans where key = $1;`, [key])
@@ -104,6 +128,21 @@ describe('plan pricing', () => {
     )
     const days = Math.round((new Date(r.rows[0]!.expires_at).getTime() - Date.now()) / 86_400_000)
     expect(days).toBe(730)
+  })
+
+  it('a signed-in studio can actually read them', async () => {
+    // Seeding as the migration owner proves nothing: `plans` has RLS, and a
+    // policy that filters every row away looks exactly like an empty table --
+    // which is the state this whole change set out to fix.
+    const r = await asUser<{ key: string }>(OWNER, `select key from plans where is_active;`)
+    expect(r.rows.map((x) => x.key).sort()).toEqual(['ipc_2year', 'ipc_monthly', 'ipc_yearly'])
+  })
+
+  it('hides a plan the platform has withdrawn', async () => {
+    await db.exec(`update plans set is_active = false where key = 'ipc_2year';`)
+    const r = await asUser<{ key: string }>(OWNER, `select key from plans;`)
+    expect(r.rows.map((x) => x.key)).not.toContain('ipc_2year')
+    await db.exec(`update plans set is_active = true where key = 'ipc_2year';`)
   })
 
   it('re-running the seed updates rather than duplicating', async () => {
