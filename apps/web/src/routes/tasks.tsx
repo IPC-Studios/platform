@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Circle,
   Clock,
+  Eye,
   FolderOpen,
   ListChecks,
   Package,
@@ -424,6 +425,11 @@ function TaskTable({ rows, today }: { rows: readonly TaskListItem[]; today: stri
               </td>
               <td className="px-4 py-2 text-right">
                 <div className="flex justify-end gap-1">
+                  {/* The title opens this too, but a row of icons that skips
+                      "look at it" reads as if editing is the only way in. */}
+                  <Button size="sm" variant="ghost" title="View" aria-label={`View ${t.title}`} onClick={() => setDetailId(t.id)}>
+                    <Eye />
+                  </Button>
                   <EditTaskDialog
                     task={t}
                     trigger={

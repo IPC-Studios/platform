@@ -31,6 +31,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { MetaConnectionCard } from '@/features/facebook/MetaConnectionCard'
+import { MetaSetupChecklist } from '@/features/facebook/MetaSetupChecklist'
 import { useMembers } from '@/features/allocation/api'
 import { ImportLogPanel } from '@/features/facebook/ImportLogPanel'
 
@@ -93,6 +94,7 @@ function LeadSources() {
 
       <div className="mt-6">
         <MetaConnectionCard />
+        <MetaSetupChecklist />
       </div>
 
       <div className="mt-6">

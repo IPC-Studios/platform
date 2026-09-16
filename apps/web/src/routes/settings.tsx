@@ -24,7 +24,7 @@ import { SkeletonCards } from '@/shared/ui/skeleton'
 import { ErrorState } from '@/shared/ui/states'
 import { Card, CardContent } from '@/shared/ui/card'
 import { HowToUse } from '@/shared/ui/how-to-use'
-import { Input, Label } from '@/shared/ui/input'
+import { Input, Label, Textarea } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 
 import { humanize } from '@/shared/ui/format'
@@ -385,6 +385,12 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
       avatar_url: data.avatar_url ?? '',
       invoice_logo_url: (data as unknown as Record<string, unknown>)['invoice_logo_url'] as string ?? '',
       document_footer_note: (data as unknown as Record<string, unknown>)['document_footer_note'] as string ?? '',
+      // How a client reaches the studio. The old app keeps these under
+      // Settings → Contact Details; ours had them only on the invoice
+      // templates page, so the natural place to look did not have them.
+      invoice_phone: data.invoice_phone ?? '',
+      invoice_email: data.invoice_email ?? '',
+      invoice_address: data.invoice_address ?? '',
       invoice_number_prefix: data.invoice_number_prefix,
       invoice_next_number: data.invoice_next_number,
       quote_number_prefix: data.quote_number_prefix,
@@ -525,6 +531,42 @@ function BrandIdentityCard({ readOnly }: { readOnly: boolean }) {
               placeholder="Thank you for choosing us."
             />
           </Field>
+        </div>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-sm font-medium">Contact details</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Printed on quotations, invoices and receipts — this is how a client reaches you. The
+            invoice templates page edits the same three.
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Field label="Business phone">
+              <Input
+                value={form.invoice_phone ?? ''}
+                onChange={(e) => set({ invoice_phone: e.target.value })}
+                disabled={readOnly}
+                placeholder="+91 98200 00000"
+              />
+            </Field>
+            <Field label="Business email">
+              <Input
+                type="email"
+                value={form.invoice_email ?? ''}
+                onChange={(e) => set({ invoice_email: e.target.value })}
+                disabled={readOnly}
+                placeholder="billing@yourstudio.in"
+              />
+            </Field>
+            <Field label="Business address" hint="The block printed at the top of a document.">
+              <Textarea
+                rows={3}
+                value={form.invoice_address ?? ''}
+                onChange={(e) => set({ invoice_address: e.target.value })}
+                disabled={readOnly}
+                placeholder={'12 Turner Road\nBandra West, Mumbai 400050'}
+              />
+            </Field>
+          </div>
         </div>
 
         <div className="border-t border-border pt-4">
