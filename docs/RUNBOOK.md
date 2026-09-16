@@ -62,6 +62,20 @@ rules) and sweeps expired refresh tokens. `?dry=1` is a no-op run. Every run
 lands in `cron_runs`; read it at **Settings → System** or `GET /cron/runs`
 (owner or platform admin). A row with no `finished_at` did not complete.
 
+A second job, `POST /cron/attendance`, runs **once a night at `30 18 * * *`
+UTC** — midnight in Asia/Kolkata, matching the old app's sweep. It calls
+`mark_absent_backstop()`, which writes an `absent` row for every active member
+with no attendance row for that date, in each company's own timezone.
+
+It is deliberately not part of the hourly tick. Marking people absent at 1am
+and letting check-in flip them back (0014 does flip absent → present) would
+make any absence figure read during the day a lie. `?dry=1` counts what it
+would write without writing it, and the job is idempotent — `on conflict do
+nothing`, so a retried or doubled run adds nothing the first did not.
+
+Until 2026-09-16 nothing called this function at all, so no studio had ever
+had an absent day recorded: a date nobody touched was simply no row.
+
 ## Rate limiting
 
 `services/api/src/middleware/security.ts`. Sign-in surfaces (`/auth/login`,

@@ -54,6 +54,17 @@ export const cronRunResult = z.object({
 })
 export type CronRunResult = z.infer<typeof cronRunResult>
 
+/**
+ * The nightly attendance sweep. Separate from the hourly job because it must
+ * run once, after the working day: marking people absent at 1am and letting
+ * check-in flip them back would make any mid-day absence figure a lie.
+ */
+export const attendanceSweepResult = z.object({
+  ok: z.literal(true),
+  marked_absent: z.number().int(),
+})
+export type AttendanceSweepResult = z.infer<typeof attendanceSweepResult>
+
 export const healthBody = z.object({
   ok: z.boolean(),
   service: z.literal('ipc-api'),

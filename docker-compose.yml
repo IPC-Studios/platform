@@ -135,6 +135,38 @@ services:
           sleep 3600
         done
 
+  # The nightly attendance sweep: every active member with no row for today
+  # gets an `absent` one. Its own ticker because it must run ONCE, after the
+  # working day -- 18:30 UTC is midnight in Asia/Kolkata, which is when the
+  # old app ran it. Folding it into the hourly loop above would mark everyone
+  # absent at 1am and rely on check-in flipping them back, making any absence
+  # figure read during the day a lie.
+  #
+  # Fires on the first tick at or after 18:30 UTC and then not again until the
+  # UTC date changes, so a restart late in the evening still catches the day
+  # up exactly once. The job itself is idempotent regardless.
+  cron-attendance:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file: [.env]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        last=""
+        while true; do
+          today=$$(date -u +%Y-%m-%d)
+          # 10# so that 0905 is nine-oh-five and not a bad octal literal.
+          hm=$$((10#$$(date -u +%H%M)))
+          if [ "$$hm" -ge 1830 ] && [ "$$last" != "$$today" ]; then
+            if curl -fsS -X POST "http://api:8787/cron/attendance" \n                 -H "x-cron-secret: $${CRON_SECRET}" >/dev/null 2>&1; then
+              last="$$today"
+            fi
+          fi
+          sleep 300
+        done
+
 volumes:
   db_data:
   db_backups:

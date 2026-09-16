@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { cronRun, cronRunResult } from '@ipc/contracts'
+import { attendanceSweepResult, cronRun, cronRunResult } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { fail } from '../../middleware/errors'
 import { requireAuth } from '../../middleware/auth'
@@ -52,6 +52,50 @@ export const cronRouter = new Hono<AppEnv>()
     if (!result) fail(400, 'The job could not run.')
     log.info({ path: c.req.path, dryRun, ...result }, 'cron reminders ran')
     return c.json(cronRunResult.parse({ ok: true, ...result }))
+  })
+
+  /**
+   * The nightly attendance sweep: every active member with no row for today
+   * gets an `absent` one, in their own company's timezone.
+   *
+   * Its own endpoint, not part of the hourly job above, because it has to run
+   * ONCE and after the working day. Marking everyone absent at 1am and
+   * letting check-in flip them back would make any absence figure read
+   * mid-day a lie. Schedule it the way the old app did: 30 18 * * * UTC,
+   * which is midnight in Asia/Kolkata.
+   *
+   * Idempotent: `on conflict do nothing`, so a retried or doubled run writes
+   * nothing the first one did not.
+   */
+  .post('/attendance', async (c) => {
+    const provided = c.req.header('x-cron-secret') ?? ''
+    const expected = c.env.CRON_SECRET ?? ''
+    if (!expected || !timingSafeEqual(provided, expected)) fail(401, 'Unauthorized.')
+
+    const dryRun = c.req.query('dry') === '1'
+    const marked = await attempt(c, 'cron.attendance', () =>
+      withService(c.env, async (sql) => {
+        if (dryRun) {
+          // What it WOULD write, counted the same way the function selects it.
+          const rows = await sql<{ n: number }[]>`
+            select count(*)::int as n
+              from companies c
+              join users u on u.company_id = c.id and u.deleted_at is null and u.status = 'active'
+              left join company_location cl on cl.company_id = c.id
+             where not exists (
+               select 1 from attendance a
+                where a.company_id = c.id and a.user_id = u.user_id
+                  and a.a_date = (now() at time zone coalesce(cl.timezone, 'Asia/Kolkata'))::date
+             )`
+          return rows[0]?.n ?? 0
+        }
+        const rows = await sql<{ n: number }[]>`select mark_absent_backstop() as n`
+        return rows[0]?.n ?? 0
+      }),
+    )
+    if (marked === null) fail(400, 'The job could not run.')
+    log.info({ path: c.req.path, dryRun, marked_absent: marked }, 'cron attendance ran')
+    return c.json(attendanceSweepResult.parse({ ok: true, marked_absent: marked }))
   })
 
   .get('/runs', requireAuth, async (c) => {
