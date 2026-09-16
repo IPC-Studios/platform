@@ -20,16 +20,51 @@ export function DataTab({ projectId, canEdit }: { projectId: string; canEdit: bo
   const { data, isLoading, isError, refetch } = useProjectDataRecords(projectId)
   const verify = useVerifyData()
 
+  /**
+   * Where this project's footage has got to, in six numbers. A list of cards
+   * answers "what did we shoot"; the question actually being asked here is
+   * "is any of it still in one place only".
+   */
+  const rows = data ?? []
+  const stats = {
+    total: rows.length,
+    pending: rows.filter((r) => r.primary_status === 'pending').length,
+    copied: rows.filter((r) => r.primary_status !== 'pending').length,
+    backupPending: rows.filter((r) => r.backup_status !== 'verified').length,
+    backupDone: rows.filter((r) => r.backup_status === 'verified').length,
+    issues: rows.filter((r) => r.issue_found).length,
+  }
+
   return (
     <div className="mt-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-muted-foreground">Data for this project</h2>
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground">Data for this project</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Where every card and drive from this project&apos;s shoots has got to.
+          </p>
+        </div>
         <Button variant="outline" size="sm" asChild>
           <Link to="/data-management">
             <Plus /> Add record
           </Link>
         </Button>
       </div>
+
+      {rows.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <Figure label="Records" value={stats.total} />
+          <Figure label="Not copied" value={stats.pending} tone={stats.pending > 0 ? 'warning' : undefined} />
+          <Figure label="Copied" value={stats.copied} />
+          <Figure
+            label="Backup pending"
+            value={stats.backupPending}
+            tone={stats.backupPending > 0 ? 'warning' : undefined}
+          />
+          <Figure label="Backup done" value={stats.backupDone} tone={stats.backupDone > 0 ? 'success' : undefined} />
+          <Figure label="Issues" value={stats.issues} tone={stats.issues > 0 ? 'danger' : undefined} />
+        </div>
+      )}
 
       {isLoading ? (
         <SkeletonList rows={3} columns={4} />
@@ -93,6 +128,26 @@ export function DataTab({ projectId, canEdit }: { projectId: string; canEdit: bo
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/** One figure in the strip: a number over a caption, coloured when it matters. */
+function Figure({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone?: 'warning' | 'success' | 'danger' | undefined
+}) {
+  const colour =
+    tone === 'warning' ? 'text-warning' : tone === 'danger' ? 'text-destructive' : tone === 'success' ? 'text-success' : ''
+  return (
+    <div className="rounded-lg border border-border p-2.5">
+      <p className={`text-lg font-semibold tabular-nums ${colour}`}>{value}</p>
+      <p className="text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
 }

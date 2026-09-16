@@ -25,7 +25,13 @@ export function TasksTab({ projectId, canEdit }: { projectId: string; canEdit: b
   return (
     <div className="mt-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-muted-foreground">Tasks on this project</h2>
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground">Tasks on this project</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Work that comes from a deliverable is tagged as such. Add one here only for the extras — a
+            last-minute client request, an urgent re-edit, a one-off bit of coordination.
+          </p>
+        </div>
         <Button variant="outline" size="sm" asChild>
           <Link to="/tasks">
             <Plus /> Add task
@@ -58,6 +64,9 @@ export function TasksTab({ projectId, canEdit }: { projectId: string; canEdit: b
                   <span className="flex min-w-0 flex-1 items-center gap-2">
                     <CheckSquare className="size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 truncate font-medium">{t.title}</span>
+                    {/* Which of these is the studio's own promise to the
+                        client, and which is an extra someone added. */}
+                    {t.deliverable_id && <StatusBadge tone="info">From deliverable</StatusBadge>}
                   </span>
                   {t.custom_priority_label ? (
                     <StatusBadge tone={t.custom_priority_tone ?? 'neutral'}>{t.custom_priority_label}</StatusBadge>
