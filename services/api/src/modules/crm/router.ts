@@ -99,6 +99,8 @@ const dateRange = (c: { req: { query: (k: string) => string | undefined } }) => 
   const parsed = crmStatsQuery.safeParse({
     from: c.req.query('from') ?? iso(from),
     to: c.req.query('to') ?? iso(today),
+    source: c.req.query('source') || undefined,
+    assignee: c.req.query('assignee') || undefined,
   })
   if (!parsed.success || parsed.data.to < parsed.data.from) fail(422, 'Pick a valid date range.')
   return parsed.data
@@ -473,7 +475,9 @@ export const crmRouter = new Hono<AppEnv>()
       withUser(
         c.env,
         c.get('auth').userId,
-        (sql) => sql<{ stats: unknown }[]>`select crm_stats(${range.from}::date, ${range.to}::date) as stats`,
+        (sql) => sql<{ stats: unknown }[]>`select crm_stats(
+          ${range.from}::date, ${range.to}::date,
+          ${range.source ?? null}::text, ${range.assignee ?? null}::uuid) as stats`,
       ),
     )
     if (!rows) fail(400, 'Stats failed.')

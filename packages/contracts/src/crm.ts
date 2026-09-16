@@ -562,6 +562,9 @@ export type SendTemplateResponse = z.infer<typeof sendTemplateResponse>
 export const crmStatsQuery = z.object({
   from: isoDate,
   to: isoDate,
+  /** Narrow the whole report to one channel, or to one person's leads. */
+  source: z.string().trim().max(40).optional(),
+  assignee: uuid.optional(),
 })
 export type CrmStatsQuery = z.infer<typeof crmStatsQuery>
 

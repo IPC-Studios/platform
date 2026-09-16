@@ -6,14 +6,37 @@ import { SkeletonTiles } from '@/shared/ui/skeleton'
 import { Card, CardContent } from '@/shared/ui/card'
 import { StatCard } from '@/shared/ui/stat-card'
 import { ErrorState } from '@/shared/ui/states'
-import { formatINR } from '@/shared/ui/format'
+import { formatINR, humanize } from '@/shared/ui/format'
+import { Select } from '@/shared/ui/input'
 import { useCrmStats, useForecast } from '../api'
 import { STAGES } from '../leads'
 import { DateRange, daysBack } from './DateRange'
 import { exportLeadsCsv } from './shared'
 
+/** The channels a lead can arrive through — the same list the CRM filters on. */
+const SOURCES = [
+  'webform',
+  'facebook',
+  'instagram',
+  'whatsapp',
+  'google_form',
+  'referral',
+  'enquiry',
+  'manual',
+  'csv_import',
+  'other',
+] as const
+
 export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
   const [range, setRange] = useState<CrmStatsQuery>(() => daysBack(29))
+  /** Owners taken from the leads on hand, so the list only offers real ones. */
+  const owners = [
+    ...new Map(
+      leads
+        .filter((l) => l.assigned_to && l.assignee_name)
+        .map((l) => [l.assigned_to as string, l.assignee_name as string]),
+    ).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1]))
   const { data, isLoading, isError, error, refetch } = useCrmStats(range)
 
   return (
@@ -22,6 +45,40 @@ export function ReportsTab({ leads }: { leads: readonly CrmLead[] }) {
         <div className="min-w-0 flex-1">
           <DateRange value={range} onChange={setRange} />
         </div>
+        {/* "How is Instagram doing" and "how is Priya doing" are the two
+            questions asked of this screen, and a date range answers neither. */}
+        <Select
+          value={range.source ?? ''}
+          aria-label="Filter by source"
+          className="w-40"
+          onChange={(e) => {
+            const v = e.target.value
+            setRange(({ source: _drop, ...rest }) => (v ? { ...rest, source: v } : rest))
+          }}
+        >
+          <option value="">All sources</option>
+          {SOURCES.map((o) => (
+            <option key={o} value={o}>
+              {humanize(o)}
+            </option>
+          ))}
+        </Select>
+        <Select
+          value={range.assignee ?? ''}
+          aria-label="Filter by owner"
+          className="w-44"
+          onChange={(e) => {
+            const v = e.target.value
+            setRange(({ assignee: _drop, ...rest }) => (v ? { ...rest, assignee: v } : rest))
+          }}
+        >
+          <option value="">All members</option>
+          {owners.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </Select>
         <Button variant="outline" size="sm" onClick={() => window.print()} title="Print this report">
           <Printer /> Print
         </Button>

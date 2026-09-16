@@ -138,8 +138,13 @@ export function useTemplates() {
 }
 
 export function useCrmStats(range: CrmStatsQuery) {
-  return useCrmQuery(['stats', range.from, range.to], () =>
-    callApi(`/crm/stats?from=${range.from}&to=${range.to}`, { responseSchema: crmStats }),
+  // The filters belong in the key: without them the cache would hand back
+  // "all sources" for a source-filtered request.
+  const qs = new URLSearchParams({ from: range.from, to: range.to })
+  if (range.source) qs.set('source', range.source)
+  if (range.assignee) qs.set('assignee', range.assignee)
+  return useCrmQuery(['stats', range.from, range.to, range.source ?? '', range.assignee ?? ''], () =>
+    callApi(`/crm/stats?${qs.toString()}`, { responseSchema: crmStats }),
   )
 }
 
