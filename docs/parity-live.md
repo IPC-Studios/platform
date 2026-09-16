@@ -437,3 +437,26 @@ whole — fourteen tabs against eleven.
 The client-facing document pages (quotation, receipt, delivery note, terms
 acknowledgement, team terms) — reachable only by token, so they need a seeded
 link per type rather than a logged-in session.
+
+### Client-facing documents (2026-09-16)
+
+Compared by minting a real token of each type against the seeded studio, since
+these pages are reachable no other way.
+
+| Page | Result |
+| --- | --- |
+| Quotation (client link) | At parity. Bill-to, project, deliverables, additional services, quoted items, summary, terms; Print/PDF, WhatsApp, Email, Copy link, Send via studio, Accept / Not right now |
+| Receipt (client link) | At parity. Amount, date, mode, reference, received-from block, project totals and balance; Print/PDF, WhatsApp, Email, Copy link |
+| Terms acknowledgement (client link) | At parity, plus a view counter. Body, Print/WhatsApp/Email/Copy, name + optional email, I agree, and the evidence note |
+| Quotation staff preview | Was missing the branding-incomplete warning — added, naming what is absent in the studio's words and linking to settings |
+| Terms wizard step 3 | Already at parity and ahead: the old app has the approval link, email draft and share-manually cards; ours adds email history |
+
+Two suspected gaps on the staff quotation toolbar turned out not to exist: the
+show-to-client toggle is a checkbox and the display options are per-section
+prefs, and a crawl that reads buttons could see neither.
+
+**A trap for anyone automating against the live app:** refresh tokens rotate.
+Reading `ipc_refresh_token` out of localStorage and calling `/auth/refresh`
+consumes it, and the signed-in session dies at its next refresh — which looks
+like a random logout minutes later. Write the returned `refresh_token` back
+before doing anything else.
