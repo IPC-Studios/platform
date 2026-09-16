@@ -694,3 +694,60 @@ Audited every `window.print()` caller:
 
 The distinction worth keeping: a client document gets `.paper` and the sheet to
 itself; an internal report keeps its page and loses its controls.
+
+## Round: five scanners, and what they turned up (2026-09-16)
+
+Written after the reminders find, each one looking for a shape rather than a
+symptom. Three came back empty, which is worth as much as the hits.
+
+| Scanner | Result |
+| --- | --- |
+| SQL function parameters the API never passes | One real hit. Everything else was a positional call, or a parameter correctly left at its default |
+| `catch` blocks that return a value | Two real hits |
+| Query params one side knows and the other does not | Clean once the scanner learned `url.searchParams.get` — the first run's seven hits were all its own blind spot |
+| Contract fields nothing ever fills in | Clean. Every hit lived inside a jsonb blob the API stores whole |
+| Mutations that never invalidate | Clean. Each one either changes nothing (a preview, a password reset email) or delegates to a helper |
+
+### What was actually wrong
+
+**Filters that narrowed the page but not the count.** Clients applied relation
+and the added-on range in the browser, to the 25 rows already fetched, while
+the total under the pager counted every client — so "Relation: referral" could
+show an empty page 1 of 5 with referrals on page 3. The team directory did the
+same with engagement, role and the salary range; its own comment said so. Both
+filter in the database now, with one predicate feeding the page and the count.
+
+A salary bound is honoured only for someone with `team_salaries`. Applied for
+anyone else it leaks the figures the redaction hides: page through "min 80000"
+and you have the list without ever seeing a number.
+
+**Two catches that hid the failure they caught.** `attempt()` exists so every
+database failure gets a log line, a report, a correlation id and the right
+status. An inner `catch { return null }` runs first and discards all of it. On
+monthly profit the null then fell through to a hand-written all-zeros object,
+so a studio whose query failed was shown a month where it earned nothing and
+spent nothing. Both now wrap the result, so "the call failed" and "the query
+found nothing" stop being the same value.
+
+**The one notification you could not click.** Every generator in 0125 passes a
+severity and a deep link; the single notification the API itself writes stopped
+at the entity. Giving it one exposed a second bug — the renderer passed the
+whole link to `<Link to={...}>`, and TanStack Router matches `to` against route
+paths without splitting a query string off, so any deep link with one would
+have landed on the not-found page.
+
+### Two bugs found by fixing bugs
+
+Worth recording separately, because neither existed until the fix did:
+
+- The salary filter I wrote used `coalesce(salary, -1) <= 50000`, which let a
+  member with no salary pass the upper bound — counting a figure nobody entered
+  as zero. Caught by the test written for it.
+- Making the directory's count follow its filters broke the empty state, which
+  chose its wording from `total === 0`. That worked only while the total ignored
+  the filter bar. Filtering to an engagement nobody has told a studio of forty
+  "No employees found yet. Add your first employee." It now asks whether a
+  filter is set, rather than inferring it from a number that changed meaning.
+
+The pattern behind both: a fix that changes what a value *means* silently
+changes every reader of that value. Grep for the readers, not just the writers.
