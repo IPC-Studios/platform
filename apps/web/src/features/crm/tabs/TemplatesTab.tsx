@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Sparkles, Trash2 } from 'lucide-react'
 import { templateVariables } from '@ipc/domain'
 import type { CrmTemplate, TemplateKind } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -10,7 +10,7 @@ import { StatusBadge } from '@/shared/ui/status-badge'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
-import { useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useTemplates } from '../api'
+import { useCreateTemplate, useSeedTemplates, useUpdateTemplate, useDeleteTemplate, useTemplates } from '../api'
 
 const KNOWN = new Set(['name', 'phone', 'email', 'studio'])
 
@@ -22,6 +22,7 @@ const KNOWN = new Set(['name', 'phone', 'email', 'studio'])
 export function TemplatesTab() {
   const { data, isLoading, isError, error, refetch } = useTemplates()
   const create = useCreateTemplate()
+  const seed = useSeedTemplates()
   const update = useUpdateTemplate()
   const del = useDeleteTemplate()
   const confirm = useConfirm()
@@ -61,12 +62,25 @@ export function TemplatesTab() {
       {canEdit && (
         <Card>
           <CardContent className="flex flex-col gap-3 p-4 sm:p-5">
-            <div>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
               <p className="font-medium">{editingId ? 'Edit template' : 'New template'}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 Use <code className="rounded bg-muted px-1">{'{{name}}'}</code>, <code className="rounded bg-muted px-1">{'{{phone}}'}</code>,{' '}
                 <code className="rounded bg-muted px-1">{'{{email}}'}</code> and <code className="rounded bg-muted px-1">{'{{studio}}'}</code>; they are filled in per lead.
               </p>
+              </div>
+              {/* An empty template list is why most studios end up retyping the
+                  same WhatsApp message all season. */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={seed.isPending}
+                onClick={() => seed.mutate(undefined)}
+              >
+                <Sparkles /> {seed.isPending ? 'Adding…' : 'Add starter templates'}
+              </Button>
             </div>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <div className="flex flex-col gap-1">

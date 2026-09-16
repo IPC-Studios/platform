@@ -636,6 +636,22 @@ export const crmRouter = new Hono<AppEnv>()
     return c.json(created, 201)
   })
 
+  // A new studio starts with an empty template list and retypes the same
+  // WhatsApp message all season. This gives it a starting set; re-running adds
+  // only what is missing, so an edited template is never overwritten.
+  .post('/templates/seed', edit, async (c) => {
+    const n = await attempt(c, 'crm.templates_seed', () =>
+      withUser(c.env, c.get('auth').userId, async (sql) => {
+        const [r] = await sql<{ n: number }[]>`
+          select seed_crm_message_templates(get_current_company_id()) as n`
+        return r?.n ?? 0
+      }),
+    )
+    if (n === null) fail(400, 'We could not add the starter templates.')
+    await audit(c, { action: 'template.seed', entityType: 'crm_template', after: { added: n } })
+    return c.json({ added: n })
+  })
+
   .patch('/templates/:id', edit, async (c) => {
     const parsed = updateTemplateRequest.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) fail(422, 'Check template fields.')

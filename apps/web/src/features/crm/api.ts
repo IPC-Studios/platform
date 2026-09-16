@@ -276,6 +276,17 @@ export function useCreateTemplate() {
   )
 }
 
+/**
+ * Starter templates for a studio that has none. Additive: re-running adds only
+ * what is missing, so an edited template is never overwritten.
+ */
+export function useSeedTemplates() {
+  return useCrmMutation(
+    () => callApi('/crm/templates/seed', { method: 'POST', responseSchema: z.object({ added: z.number() }) }),
+    'Starter templates added',
+  )
+}
+
 export function useUpdateTemplate() {
   return useCrmMutation(
     ({ id, patch }: { id: string; patch: UpdateTemplateRequest }) =>
