@@ -7,6 +7,7 @@ import {
   plan,
   subscriptionStatus,
 } from '@ipc/contracts'
+import { planSource } from '@ipc/domain'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireOwner } from '../../middleware/permissions'
@@ -108,6 +109,7 @@ export const subscriptionRouter = new Hono<AppEnv>()
       plan_gate: gate,
       plan_expiry: str(comp['plan_expiry']),
       can_purchase: gate !== 'active',
+      plan_source: planSource(gate, orders),
       latest_order_id: (orders[0]?.['id'] as string | undefined) ?? null,
       latest_order_status: (orders[0]?.['status'] as string | undefined) ?? null,
       webhook_configured: Boolean(c.env.RAZORPAY_WEBHOOK_SECRET),

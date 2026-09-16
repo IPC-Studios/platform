@@ -22,6 +22,7 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { EmptyState, ErrorState } from '@/shared/ui/states'
 import { formatINR, humanize } from '@/shared/ui/format'
 import { openCheckout } from '@/features/billing/razorpay-checkout'
+import { PLAN_SOURCE_LABEL } from '@ipc/domain'
 import { PlanExpiryBanner } from '@/features/billing/PlanExpiryBanner'
 
 const plans = plan.array()
@@ -140,6 +141,13 @@ function Subscription() {
           <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-4 text-sm">
             <span><span className="text-muted-foreground">Current: </span><strong>{status.data.plan_name ?? status.data.plan_key ?? '—'}</strong></span>
             {!status.data.can_purchase && <StatusBadge tone="success">Current plan</StatusBadge>}
+            {/* "Active" reads the same on a free trial and on two years
+                paid up. Which one it is decides what to say on a renewal
+                call, so it belongs beside the plan name. */}
+            <span>
+              <span className="text-muted-foreground">Source: </span>
+              <strong>{PLAN_SOURCE_LABEL[status.data.plan_source]}</strong>
+            </span>
             {status.data.latest_order_status && (
               <span><span className="text-muted-foreground">Latest payment: </span>{humanize(status.data.latest_order_status)}</span>
             )}

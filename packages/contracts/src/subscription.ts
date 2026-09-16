@@ -22,6 +22,12 @@ export const subscriptionStatus = z.object({
   plan_gate: z.enum(['active', 'grandfathered', 'grace', 'expired']),
   plan_expiry: z.string().nullable(),
   can_purchase: z.boolean().default(true),
+  /**
+   * Where the plan on the account came from: a paid order, a trial nobody
+   * paid for, or a grandfathering grant. Two studios both reading "Active"
+   * for different reasons is the whole point of showing it.
+   */
+  plan_source: z.enum(['paid', 'trial', 'grandfathered', 'grace', 'none']).default('none'),
   latest_order_id: z.string().nullable().nullish(),
   latest_order_status: z.string().nullable().nullish(),
   webhook_configured: z.boolean().nullish(),

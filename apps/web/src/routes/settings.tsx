@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { PLAN_SOURCE_LABEL } from '@ipc/domain'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Palette } from 'lucide-react'
@@ -8,6 +9,7 @@ import {
   companyProfile,
   companyTheme,
   myProfile,
+  subscriptionStatus,
   type UpdateCompanyRequest,
   type UpdateMyProfileRequest,
 } from '@ipc/contracts'
@@ -302,6 +304,11 @@ function AccountStatusCard() {
     queryKey: ['settings', 'profile'],
     queryFn: () => callApi('/settings/profile', { responseSchema: myProfile }),
   })
+  // The gate alone cannot tell a trial from a paid year.
+  const sub = useQuery({
+    queryKey: ['subscription', 'status'],
+    queryFn: () => callApi('/subscription/status', { responseSchema: subscriptionStatus }),
+  })
 
   const expiry = session?.plan_expiry ? new Date(session.plan_expiry) : null
   const daysLeft = expiry ? Math.max(0, Math.ceil((expiry.getTime() - Date.now()) / 86_400_000)) : null
@@ -323,6 +330,11 @@ function AccountStatusCard() {
           </Row>
           <Row label="Plan">
             <span className="font-medium">{humanize(gate)}</span>
+          </Row>
+          <Row label="Plan source">
+            <span className="font-medium">
+              {sub.data ? PLAN_SOURCE_LABEL[sub.data.plan_source] : '—'}
+            </span>
           </Row>
           <Row label="Plan expiry">
             <span className="font-medium">{expiry ? expiry.toLocaleDateString('en-IN') : '—'}</span>
