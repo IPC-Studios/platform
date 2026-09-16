@@ -240,23 +240,25 @@ export const personalExpensesRouter = new Hono<AppEnv>()
     const id = uuidParam(c)
     const auth = c.get('auth')
     const row = await attempt(c, 'personal-expenses.detail', () =>
+      // The catch that was here turned a broken query -- a renamed column,
+      // say -- into "We could not find that expense", so the one message that
+      // would have led someone to the cause never appeared. attempt() logs it
+      // and maps the pg code; { data: null } is the real not-found.
       withUser(c.env, auth.userId, async (sql) => {
-        try {
-          const rows = await sql<Record<string, unknown>[]>`select pe.id, pe.company_id, pe.user_id, pe.party_id,
-              (select name from parties where id = pe.party_id) as party_name,
-              pe.amount, pe.expense_date::text as expense_date, pe.category, pe.gst_treatment, pe.gst_rate,
-              pe.description, pe.created_at::text as created_at,
-              pe.invoice_number, pe.amount_is, pe.tax_name, pe.tax_amount, pe.reverse_charge, pe.itemize_json
-            from personal_expense pe
-           where pe.id = ${id} and pe.company_id = ${auth.companyId} and pe.user_id = ${auth.userId}`
-          return rows[0] ?? null
-        } catch {
-          return null
-        }
+        const rows = await sql<Record<string, unknown>[]>`select pe.id, pe.company_id, pe.user_id, pe.party_id,
+            (select name from parties where id = pe.party_id) as party_name,
+            pe.amount, pe.expense_date::text as expense_date, pe.category, pe.gst_treatment, pe.gst_rate,
+            pe.description, pe.created_at::text as created_at,
+            pe.invoice_number, pe.amount_is, pe.tax_name, pe.tax_amount, pe.reverse_charge, pe.itemize_json
+          from personal_expense pe
+         where pe.id = ${id} and pe.company_id = ${auth.companyId} and pe.user_id = ${auth.userId}`
+        return { data: rows[0] ?? null }
       }),
     )
-    if (!row) fail(404, 'We could not find that expense.')
-    return c.json({ ...(row as Record<string, unknown>), itemize_json: Array.isArray((row as Record<string, unknown>)['itemize_json']) ? (row as Record<string, unknown>)['itemize_json'] : null })
+    if (!row) fail(400, 'We could not load that expense.')
+    if (!row.data) fail(404, 'We could not find that expense.')
+    const found = row.data as Record<string, unknown>
+    return c.json({ ...found, itemize_json: Array.isArray(found['itemize_json']) ? found['itemize_json'] : null })
   })
 
   .get('/:id/attachments', requireModule('personal_expenses'), async (c) => {

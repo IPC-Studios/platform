@@ -366,18 +366,24 @@ export const financialsRouter = new Hono<AppEnv>()
     const month = c.req.query('month') || new Date().toISOString().slice(0, 7) + '-01'
     const basis = c.req.query('basis') === 'booked' ? 'booked' : 'cash'
     const alloc = ['equal', 'revenue', 'shoot_days', 'headcount'].includes(c.req.query('alloc') ?? '') ? c.req.query('alloc')! : 'equal'
+    // The inner `try { ... } catch { return null }` that used to be here
+    // swallowed the error before attempt() could see it -- no log line, no
+    // report, no correlation id -- and the null then fell through to the
+    // all-zeros object below. A studio whose profit query failed was shown a
+    // month where it earned nothing and spent nothing, with no error anywhere.
+    //
+    // The wrapper distinguishes the two nulls: attempt() returning null means
+    // the call failed, while { data: null } means the function ran and had
+    // nothing to report, which is the only case zeros are honest.
     const row = await attempt(c, 'financials.monthly_profit', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        try {
-          const r = await sql<{ monthly_profit_summary: unknown }[]>`
-            select monthly_profit_summary(p_month => ${month}::date, p_basis => ${basis}, p_alloc => ${alloc}) as monthly_profit_summary`
-          return rpcJson(r[0]?.monthly_profit_summary, null) as Record<string, unknown> | null
-        } catch {
-          return null
-        }
+        const r = await sql<{ monthly_profit_summary: unknown }[]>`
+          select monthly_profit_summary(p_month => ${month}::date, p_basis => ${basis}, p_alloc => ${alloc}) as monthly_profit_summary`
+        return { data: rpcJson(r[0]?.monthly_profit_summary, null) as Record<string, unknown> | null }
       }),
     )
-    const base = (row ?? { month, basis, alloc, cash_received: 0, booked_revenue: 0, salary_cost: 0, office_fixed: 0, variable_cost: 0, fixed_total: 0, total_cost: 0, net_cash: 0, net_booked: 0 }) as Record<string, unknown>
+    if (!row) fail(400, 'We could not work out this month\u2019s profit.')
+    const base = (row.data ?? { month, basis, alloc, cash_received: 0, booked_revenue: 0, salary_cost: 0, office_fixed: 0, variable_cost: 0, fixed_total: 0, total_cost: 0, net_cash: 0, net_booked: 0 }) as Record<string, unknown>
     const net = basis === 'cash' ? Number(base['net_cash'] ?? 0) : Number(base['net_booked'] ?? 0)
     const denom = basis === 'cash' ? Number(base['cash_received'] ?? 0) : Number(base['booked_revenue'] ?? 0)
     const warnings: string[] = []
