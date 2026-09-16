@@ -496,7 +496,11 @@ function CategoryManager({ open, onOpenChange }: { open: boolean; onOpenChange: 
   )
 }
 
-function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: React.ReactNode } = {}) {
+export function AddExpenseDialog({
+  expense,
+  trigger,
+  presetProjectId,
+}: { expense?: Expense; trigger?: React.ReactNode; presetProjectId?: string } = {}) {
   const isEdit = !!expense
   const create = useCreateExpense()
   const update = useUpdateExpense()
@@ -506,7 +510,7 @@ function AddExpenseDialog({ expense, trigger }: { expense?: Expense; trigger?: R
   const [description, setDescription] = useState(expense?.description ?? '')
   const [amount, setAmount] = useState(String(expense?.amount ?? ''))
   const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? todayISO())
-  const [projectId, setProjectId] = useState(expense?.project_id ?? '')
+  const [projectId, setProjectId] = useState(expense?.project_id ?? presetProjectId ?? '')
   const [partyId, setPartyId] = useState(expense?.party_id ?? '')
   const [overhead, setOverhead] = useState(expense?.is_fixed_overhead ?? false)
   const [gstTreatment, setGstTreatment] = useState<CreateExpenseRequest['gst_treatment']>(expense?.gst_treatment ?? 'non_gst')
