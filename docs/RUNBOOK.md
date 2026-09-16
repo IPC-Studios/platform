@@ -76,6 +76,12 @@ nothing`, so a retried or doubled run adds nothing the first did not.
 Until 2026-09-16 nothing called this function at all, so no studio had ever
 had an absent day recorded: a date nobody touched was simply no row.
 
+Its ticker is the `cron-attendance` service in `docker-compose.yml`. The deploy
+workflow starts services **by name**, so a service added to the compose file is
+defined and never started until it is added to that list too — which is exactly
+what happened to this one on the day it was written. If a scheduled job stops
+firing, check `docker compose ps` on the VPS before suspecting the job.
+
 ## Rate limiting
 
 `services/api/src/middleware/security.ts`. Sign-in surfaces (`/auth/login`,

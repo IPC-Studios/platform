@@ -25,6 +25,32 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     steps:
+      # An SSH timeout says nothing about why. This separates "the box is gone"
+      # from "port 22 specifically is unreachable" — different problems with
+      # different fixes, and the second has now happened twice in a day.
+      - name: Is the host actually up?
+        continue-on-error: true
+        env:
+          API_DOMAIN: ${{ secrets.API_DOMAIN }}
+        run: |
+          if [ -z "$API_DOMAIN" ]; then
+            echo "::notice::Set the API_DOMAIN repo secret to turn an SSH timeout below"
+            echo "::notice::into a diagnosis — it is the one check that tells you whether"
+            echo "::notice::the machine is down or only port 22 is blocked."
+            exit 0
+          fi
+          if curl -fsS --max-time 15 "https://$API_DOMAIN/health"; then
+            echo
+            echo "::notice::Host is serving HTTPS. If the SSH step below times out, the"
+            echo "::notice::machine is fine and port 22 alone is blocked — check fail2ban"
+            echo "::notice::(fail2ban-client status sshd) and the firewall for a ban on the"
+            echo "::notice::runner's address. Runner IPs rotate, so repeated deploys can"
+            echo "::notice::look like distributed SSH attempts."
+          else
+            echo "::warning::Host is not answering on HTTPS either — this looks like the"
+            echo "::warning::machine or its network rather than SSH."
+          fi
+
       - name: Deploy backend over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -41,6 +67,12 @@ jobs:
             # This VPS runs Coolify (its Traefik terminates TLS on 80/443), so we
             # use the coolify overlay and omit our own caddy. --wait blocks on the
             # db/api healthchecks.
+            # Services are named explicitly (caddy is deliberately omitted — see
+            # the overlay). Anything added to docker-compose.yml must be added
+            # HERE too, or it is defined and never started: cron-attendance sat
+            # in the compose file unrun because of exactly that, which meant the
+            # nightly absent sweep never fired.
             docker compose -f docker-compose.yml -f docker-compose.coolify.yml \
-              up -d --build --wait --remove-orphans db migrate api cron backup
+              up -d --build --wait --remove-orphans \
+              db migrate api cron cron-attendance backup
             docker compose ps
