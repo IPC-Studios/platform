@@ -115,14 +115,26 @@ export const THEME_PRESETS: Readonly<Record<string, ThemePreset>> = Object.fromE
       brandDark: { l: 0.82, c: 0.15, h: 70 },
     }),
     preset({
+      // Was navy. `light` was { l: 0.28, c: 0.04, h: 265 } — hue 265 is blue,
+      // chroma 0.04 is all but grey, and it sat nine degrees from IPC Classic's
+      // 274. The gold was only ever in `brand`, which ~11 places in the app
+      // paint against ~271 for `primary`. So applying "Luxury Gold" swapped a
+      // navy for a duller navy and looked exactly like a button that does
+      // nothing — which is how it was reported.
+      //
+      // Gold is light enough to cross FOREGROUND_FLIP, so the text on it comes
+      // out near-black rather than white. That is what makes it read as gold
+      // rather than as mustard.
       key: 'luxury_gold',
       label: 'Luxury Gold',
       description: 'Premium and elegant for luxury wedding brands.',
       font: 'playfair',
-      light: { l: 0.28, c: 0.04, h: 265 },
-      dark: { l: 0.72, c: 0.05, h: 265 },
-      brandLight: { l: 0.72, c: 0.13, h: 90 },
-      brandDark: { l: 0.78, c: 0.13, h: 90 },
+      light: { l: 0.76, c: 0.14, h: 88 },
+      dark: { l: 0.82, c: 0.13, h: 88 },
+      // The deep navy it used to be, kept as the secondary — gold on navy is
+      // the pairing the theme was reaching for.
+      brandLight: { l: 0.3, c: 0.05, h: 265 },
+      brandDark: { l: 0.42, c: 0.06, h: 265 },
     }),
     preset({
       key: 'royal_purple',
@@ -139,8 +151,13 @@ export const THEME_PRESETS: Readonly<Record<string, ThemePreset>> = Object.fromE
       label: 'Blush Wedding',
       description: 'Soft and elegant for wedding photographers.',
       font: 'lato',
-      light: { l: 0.53, c: 0.2, h: 15 },
-      dark: { l: 0.68, c: 0.17, h: 15 },
+      // Was { l: 0.53, c: 0.2, h: 15 } — a strong coral that sat 0.09 from Warm
+      // Terracotta, close enough that swapping one for the other looked like
+      // nothing had happened. A blush is pale and pink: lighter, and far
+      // enough above FOREGROUND_FLIP to take dark text, which is also what
+      // keeps it readable at this lightness.
+      light: { l: 0.72, c: 0.15, h: 8 },
+      dark: { l: 0.8, c: 0.13, h: 8 },
       brandLight: { l: 0.78, c: 0.12, h: 350 },
       brandDark: { l: 0.82, c: 0.11, h: 350 },
     }),
@@ -179,8 +196,10 @@ export const THEME_PRESETS: Readonly<Record<string, ThemePreset>> = Object.fromE
       label: 'Warm Terracotta',
       description: 'Earthy and artistic for creative studios.',
       font: 'merriweather',
-      light: { l: 0.5, c: 0.16, h: 40 },
-      dark: { l: 0.67, c: 0.15, h: 40 },
+      // Nudged from hue 40 to 48 to sit clearly in orange rather than on the
+      // edge of Blush Wedding's pink.
+      light: { l: 0.5, c: 0.16, h: 48 },
+      dark: { l: 0.67, c: 0.15, h: 48 },
       brandLight: { l: 0.8, c: 0.11, h: 65 },
       brandDark: { l: 0.84, c: 0.1, h: 65 },
     }),

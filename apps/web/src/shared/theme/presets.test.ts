@@ -122,3 +122,101 @@ describe('theme presets', () => {
     }
   })
 })
+
+/**
+ * A theme has to LOOK like the thing it is called.
+ *
+ * "Luxury Gold" shipped as `{ l: 0.28, c: 0.04, h: 265 }` — a desaturated navy
+ * nine degrees of hue from IPC Classic, with the actual gold parked in
+ * `--brand`, a token roughly 11 places in the app paint against versus ~271
+ * for `--primary`. Applying it changed the interface so little that it was
+ * reported as "the apply theme button is not working". The button was fine.
+ *
+ * Every assertion below is about that failure: a preset must be saturated
+ * enough to read as a colour, must sit in the hue band its name promises, and
+ * must not be a near-duplicate of another preset. The deliberately neutral
+ * ones are named, so making a theme grey stays a decision somebody wrote down
+ * rather than a value that drifted.
+ */
+describe('a preset looks like its name', () => {
+  /** oklch -> oklab, so hue and chroma can be compared as a distance. */
+  const oklab = (swatch: { l: number; c: number; h: number }) => ({
+    l: swatch.l,
+    a: swatch.c * Math.cos((swatch.h * Math.PI) / 180),
+    b: swatch.c * Math.sin((swatch.h * Math.PI) / 180),
+  })
+
+  const parse = (token: string | undefined) => {
+    const m = /oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)/.exec(token ?? '')
+    if (!m) throw new Error(`not an oklch token: ${token}`)
+    return { l: Number(m[1]), c: Number(m[2]), h: Number(m[3]) }
+  }
+
+  /** Presets that are grey ON PURPOSE. Anything else must carry colour. */
+  const DELIBERATELY_NEUTRAL = new Set(['editorial_black', 'minimal_slate'])
+
+  /** What each name promises, as an inclusive oklch hue range in degrees. */
+  const HUE_PROMISES: Record<string, [number, number]> = {
+    luxury_gold: [70, 105],
+    royal_purple: [280, 330],
+    blush_wedding: [345, 30],
+    ocean_blue: [220, 265],
+    emerald_studio: [140, 180],
+    warm_terracotta: [20, 60],
+    premium_rose_gold: [330, 20],
+  }
+
+  const inBand = (h: number, [lo, hi]: [number, number]) =>
+    lo <= hi ? h >= lo && h <= hi : h >= lo || h <= hi
+
+  it('gives every colourful preset enough chroma to read as a colour', () => {
+    for (const preset of Object.values(THEME_PRESETS)) {
+      if (DELIBERATELY_NEUTRAL.has(preset.key)) continue
+      const { c } = parse(preset.light['--primary'])
+      // Below roughly 0.08 a colour stops reading as a hue and starts reading
+      // as "slightly tinted grey", which is indistinguishable from the theme
+      // the studio is switching away from.
+      expect(c, `${preset.key} light primary chroma`).toBeGreaterThanOrEqual(0.08)
+    }
+  })
+
+  it('puts every named colour in the hue band its name promises', () => {
+    for (const [key, band] of Object.entries(HUE_PROMISES)) {
+      const { h } = parse(THEME_PRESETS[key]?.light['--primary'])
+      expect(inBand(h, band), `${key} light primary hue ${h} outside ${band.join('..')}`).toBe(true)
+    }
+  })
+
+  it('keeps the deliberately neutral presets neutral', () => {
+    // The other half of the rule: if a theme IS meant to be grey, it should
+    // not quietly acquire a colour either.
+    for (const key of DELIBERATELY_NEUTRAL) {
+      const { c } = parse(THEME_PRESETS[key]?.light['--primary'])
+      expect(c, `${key} is meant to be neutral`).toBeLessThan(0.08)
+    }
+  })
+
+  it('makes every pair of presets visibly different from each other', () => {
+    const entries = Object.values(THEME_PRESETS)
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        const a = oklab(parse(entries[i]!.light['--primary']))
+        const b = oklab(parse(entries[j]!.light['--primary']))
+        const d = Math.hypot(a.l - b.l, a.a - b.a, a.b - b.b)
+        // Two presets closer than this look like the same theme, and applying
+        // one over the other looks like nothing happened.
+        expect(d, `${entries[i]!.key} vs ${entries[j]!.key} (distance ${d.toFixed(3)})`).toBeGreaterThan(0.1)
+      }
+    }
+  })
+
+  it('picks readable text for every preset, including the light ones', () => {
+    // Gold and terracotta sit above FOREGROUND_FLIP, so they take dark text.
+    // A fixed near-white foreground on them is the unreadable case this guards.
+    for (const preset of Object.values(THEME_PRESETS)) {
+      const bg = parse(preset.light['--primary'])
+      const fg = parse(preset.light['--primary-foreground'])
+      expect(Math.abs(bg.l - fg.l), `${preset.key} text contrast`).toBeGreaterThan(0.4)
+    }
+  })
+})

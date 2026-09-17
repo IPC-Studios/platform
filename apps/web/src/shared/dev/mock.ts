@@ -290,6 +290,7 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'POST' && /\/team-terms\/templates\/[^/]+\/archive/.test(path)) return { ok: true }
   if (method === 'GET' && path.startsWith('/team-terms/sends')) return atStage(teamTermsSendsFx, 'full')
   if (method === 'GET' && path === '/terms/documents') return atStage(termsDocumentsFx, 'partial')
+  if (method === 'GET' && /^\/terms\/documents\/[^/]+\/payload$/.test(path)) return termsDocumentPayloadFx
   if (method === 'POST' && path === '/terms/issue')
     return { document_id: uid(0xbc), token: 'demo-project-terms-token' }
   if (method === 'POST' && path === '/team-terms/sends')
@@ -1451,6 +1452,51 @@ const termsDocumentsFx = [
     created_at: '2026-06-01T10:00:00Z',
   },
 ]
+
+/** What the in-app document viewer reads — the studio's own copy. */
+const termsDocumentPayloadFx = {
+  title: 'Wedding photography — terms & agreement',
+  body: [
+    '1. Booking is confirmed on receipt of the booking amount.',
+    '2. The shoot date is held only against a confirmed booking.',
+    '3. Edited photographs are delivered within 45 working days of the event.',
+    '4. Raw footage remains with the studio and is not part of the deliverables.',
+    '5. Travel and stay outside city limits are billed at actuals.',
+  ].join('\n\n'),
+  project_name: 'Sharma Wedding',
+  client_name: 'Sharma Family',
+  client_phone: '9876543210',
+  company_name: 'IPC Studios',
+  logo_url: null,
+  company_phone: '9820000000',
+  company_email: 'hello@ipcstudios.test',
+  company_address: '2nd Floor, Linking Road\nBandra West, Mumbai 400050',
+  payment_summary: null,
+  sections: [
+    { heading: 'Cancellation', body: 'The booking amount is non-refundable within 30 days of the event.' },
+  ],
+  expires_at: null,
+  revoked: false,
+  acknowledged_at: '2026-06-05T10:00:00Z',
+  acknowledged_by_name: 'Sharma Family',
+  access_count: 3,
+  company_legal_name: 'IPC Studios Private Limited',
+  company_website: 'ipcstudios.test',
+  client_email: 'sharma@example.test',
+  client_address: 'Juhu, Mumbai',
+  gstin: '27AAAAA0000A1Z5',
+  document_number: 'T-1A2B3C4D',
+  issued_at: '2026-06-01T10:00:00Z',
+  payment_terms: [
+    { id: 't1', label: 'On booking', mode: 'percentage', value: 40, due_trigger: 'On signing', due_date: null, notes: null },
+    { id: 't2', label: 'Before the event', mode: 'percentage', value: 40, due_trigger: '7 days prior', due_date: null, notes: null },
+    { id: 't3', label: 'On delivery', mode: 'percentage', value: 20, due_trigger: 'On handover', due_date: null, notes: null },
+  ],
+  total_cost: 250000,
+  legal_note: 'Subject to Mumbai jurisdiction.',
+  document_footer_note: 'Thank you for choosing IPC Studios.',
+  already_acknowledged: null,
+}
 
 const teamTermsSendsFx = [
   {

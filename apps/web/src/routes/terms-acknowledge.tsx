@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { z, buildMailtoUrl, buildWhatsAppUrl } from '@ipc/contracts'
-import { CheckCircle2, FileText, Printer, MessageCircle, Mail, Copy } from 'lucide-react'
+import { CheckCircle2, Printer, MessageCircle, Mail, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
@@ -8,54 +8,14 @@ import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
+// Shared with the in-app viewer: the studio and the client must read the
+// same document, so the shape and the rendering live in one place.
+import { termsPayload, type TermsPayload } from '@/features/terms/document'
+import { TermsDocumentLetterhead, TermsDocumentSheet } from '@/features/terms/TermsDocumentSheet'
 import { StatusBadge } from '@/shared/ui/status-badge'
 
 const termsBody = z.object({ body: z.string() })
-// Lovable parity: rich payload (title/project/client/company/payment/sections/expiry/status).
-const paymentTerm = z.object({
-  id: z.string().nullish(),
-  label: z.string(),
-  mode: z.string().nullish(),
-  value: z.number().nullish(),
-  due_trigger: z.string().nullish(),
-  due_date: z.string().nullable().nullish(),
-  notes: z.string().nullable().nullish(),
-})
-const termsPayload = z.object({
-  title: z.string().nullable(),
-  body: z.string(),
-  project_name: z.string().nullable(),
-  client_name: z.string().nullable(),
-  client_phone: z.string().nullable(),
-  company_name: z.string().nullable(),
-  logo_url: z.string().nullable(),
-  company_phone: z.string().nullable(),
-  company_email: z.string().nullable(),
-  company_address: z.string().nullable(),
-  payment_summary: z.string().nullable(),
-  sections: z.array(z.record(z.string(), z.unknown())).default([]),
-  expires_at: z.string().nullable(),
-  revoked: z.boolean().default(false),
-  acknowledged_at: z.string().nullable(),
-  acknowledged_by_name: z.string().nullable(),
-  access_count: z.number().default(0),
-  // Letterhead + bill-to: this is a legal document, so it has to say who issued
-  // it, to whom, and when.
-  company_legal_name: z.string().nullable().nullish(),
-  company_website: z.string().nullable().nullish(),
-  client_email: z.string().nullable().nullish(),
-  client_address: z.string().nullable().nullish(),
-  gstin: z.string().nullable().nullish(),
-  document_number: z.string().nullable().nullish(),
-  issued_at: z.string().nullable().nullish(),
-  // Lovable parity round 2: structured payment table + totals + legal/footer.
-  payment_terms: z.array(paymentTerm).nullish(),
-  total_cost: z.number().nullish(),
-  legal_note: z.string().nullable().nullish(),
-  document_footer_note: z.string().nullable().nullish(),
-  already_acknowledged: z.boolean().nullish(),
-})
-type TermsPayload = z.infer<typeof termsPayload>
+
 
 /**
  * PUBLIC page — no auth. A client opens the emailed link (?token=…), reads the
@@ -147,45 +107,7 @@ export function TermsAcknowledgePage() {
     <div className="relative overflow-hidden">
       <CameraBackdrop />
       <div className="paper relative mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-4 p-4">
-      <div className="flex items-center gap-2">
-        {doc?.logo_url ? (
-          <img src={doc.logo_url} alt={doc.company_name ?? 'Studio logo'} className="size-9 rounded-lg object-contain" />
-        ) : (
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <FileText className="size-5" />
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <h1 className="text-lg font-semibold">{doc?.title ?? 'Terms & agreement'}</h1>
-          {(doc?.project_name || doc?.client_name || doc?.company_name) && (
-            <p className="text-xs text-muted-foreground">
-              {[doc.project_name, doc.client_name, doc.company_name].filter(Boolean).join(' · ')}
-            </p>
-          )}
-          {doc?.company_legal_name && doc.company_legal_name !== doc.company_name && (
-            <p className="text-xs text-muted-foreground">{doc.company_legal_name}</p>
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            {[doc?.company_phone, doc?.company_email, doc?.company_website, doc?.gstin ? `GSTIN: ${doc.gstin}` : null]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {doc?.company_address && (
-            <p className="whitespace-pre-line text-[11px] text-muted-foreground">{doc.company_address}</p>
-          )}
-        </div>
-        <div className="text-right">
-          {doc?.document_number && (
-            <p className="font-mono text-xs text-muted-foreground">{doc.document_number}</p>
-          )}
-          {doc?.issued_at && (
-            <p className="text-[11px] text-muted-foreground">
-              Issued {new Date(doc.issued_at).toLocaleDateString('en-IN')}
-            </p>
-          )}
-          {done && <StatusBadge tone="success">Agreed</StatusBadge>}
-        </div>
-      </div>
+      {doc && <TermsDocumentLetterhead doc={doc} trailing={done ? <StatusBadge tone="success">Agreed</StatusBadge> : null} />}
 
       {loadError ? (
         <Card>
@@ -210,84 +132,7 @@ export function TermsAcknowledgePage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-4">
-          {doc.total_cost != null && doc.total_cost > 0 && (
-            <Card>
-              <CardContent className="p-4 text-sm">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold">Project value</p>
-                  <p className="font-semibold tabular-nums">₹{doc.total_cost.toLocaleString('en-IN')}</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          {doc.payment_terms && doc.payment_terms.length > 0 ? (
-            <Card>
-              <CardContent className="p-4 text-sm">
-                <p className="font-semibold">Payment terms</p>
-                <div className="mt-2 overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 text-left">
-                      <tr>
-                        <th className="px-2 py-1.5 font-medium">Label</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Value</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Estimated</th>
-                        <th className="px-2 py-1.5 font-medium">Due</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {doc.payment_terms.map((p, i) => {
-                        const est = p.mode === 'percentage' && doc.total_cost
-                          ? ((Number(p.value) || 0) / 100) * doc.total_cost
-                          : Number(p.value) || 0
-                        return (
-                          <tr key={i} className="border-t border-border">
-                            <td className="px-2 py-1.5">
-                              {p.label}
-                              {p.notes ? <div className="text-[10px] text-muted-foreground">{p.notes}</div> : null}
-                            </td>
-                            <td className="px-2 py-1.5 text-right">{p.mode === 'percentage' ? `${p.value}%` : `₹${Number(p.value ?? 0).toLocaleString('en-IN')}`}</td>
-                            <td className="px-2 py-1.5 text-right">₹{Math.round(est).toLocaleString('en-IN')}</td>
-                            <td className="px-2 py-1.5">{p.due_trigger ?? '—'}{p.due_date ? ` · ${p.due_date}` : ''}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          ) : doc.payment_summary ? (
-            <Card>
-              <CardContent className="p-4 text-sm">
-                <p className="font-semibold">Payment</p>
-                <p className="mt-1 text-muted-foreground">{doc.payment_summary}</p>
-              </CardContent>
-            </Card>
-          ) : null}
-          {doc.sections.length > 0 && (
-            <Card>
-              <CardContent className="p-4 text-sm">
-                {doc.sections.map((s, i) => (
-                  <div key={i} className="mb-3 last:mb-0">
-                    {(s['heading'] as string | undefined) && <p className="font-semibold">{String(s['heading'])}</p>}
-                    <p className="whitespace-pre-wrap text-muted-foreground">{String(s['body'] ?? '')}</p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-          <Card>
-            <CardContent className="max-h-[45vh] overflow-auto whitespace-pre-wrap p-6 text-sm leading-relaxed">
-              {doc.body}
-            </CardContent>
-          </Card>
-          {doc.legal_note && (
-            <p className="border-t border-border pt-3 text-[11px] italic text-muted-foreground">{doc.legal_note}</p>
-          )}
-          {doc.document_footer_note && (
-            <p className="whitespace-pre-line text-[11px] text-muted-foreground">{doc.document_footer_note}</p>
-          )}
+          <TermsDocumentSheet doc={doc} />
           <p className="text-[11px] text-muted-foreground">Views on this link: {doc.access_count} (KPIs stub — per-link analytics arrive with the next rollup).</p>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => window.print()}>
@@ -328,7 +173,6 @@ export function TermsAcknowledgePage() {
               </form>
             </CardContent>
           </Card>
-          </div>
         </>
       )}
       </div>

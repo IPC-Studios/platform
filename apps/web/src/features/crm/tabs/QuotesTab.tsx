@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Copy, FileText, Mail, MessageCircle, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react'
+import { Check, Copy, Eye, FileText, Mail, MessageCircle, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CrmQuote, QuoteStatus } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
@@ -13,6 +13,7 @@ import { formatINR, humanize } from '@/shared/ui/format'
 import { useConfirm } from '@/shared/ui/confirm'
 import { useAccess } from '@/shared/auth/useAccess'
 import { useDeleteQuote, useQuotes, useSendQuote, useSetQuoteOutcome } from '../api'
+import { QuoteViewer } from '../QuoteViewer'
 
 const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 
@@ -89,6 +90,7 @@ export function QuoteRow({
   onEdit?: (() => void) | undefined
   compact?: boolean
 }) {
+  const [viewing, setViewing] = useState<CrmQuote | null>(null)
   const send = useSendQuote()
   const outcome = useSetQuoteOutcome()
   const del = useDeleteQuote()
@@ -137,6 +139,8 @@ export function QuoteRow({
   }
 
   return (
+    <>
+    <QuoteViewer quote={viewing} onClose={() => setViewing(null)} />
     <li className={`flex flex-wrap items-center gap-3 ${compact ? 'py-1.5 text-xs' : 'p-3 text-sm'}`}>
       <FileText className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
@@ -163,6 +167,14 @@ export function QuoteRow({
       </div>
       <span className="tabular-nums">{formatINR(q.total)}</span>
       <StatusBadge tone={QUOTE_TONE[q.status]}>{humanize(q.status)}</StatusBadge>
+      {/*
+        * Outside the canEdit gate on purpose: reading a quote is not editing
+        * one, and this works for a draft that has never been sent.
+        */}
+      <Button size="sm" variant="ghost" onClick={() => setViewing(q)} title="View this quote">
+        <Eye />
+        <span className="sr-only">View quote</span>
+      </Button>
       {canEdit && (q.status === 'draft' || q.status === 'sent') && (
         <span className="flex gap-1">
           {q.status === 'draft' && onEdit && (
@@ -210,5 +222,6 @@ export function QuoteRow({
         </Button>
       )}
     </li>
+    </>
   )
 }

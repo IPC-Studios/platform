@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { FileSignature, Copy, CheckCircle2, Clock, History, Search, MessageCircle, RefreshCw, AlertTriangle, FileText, Send } from 'lucide-react'
+import { FileSignature, Copy, CheckCircle2, Clock, Eye, History, Search, MessageCircle, RefreshCw, AlertTriangle, FileText, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -12,6 +12,7 @@ import { ErrorState, EmptyState } from '@/shared/ui/states'
 import { SkeletonList } from '@/shared/ui/skeleton'
 import { useTermsDocuments, useIssueTerms, useTermsEmailLogs, type TermsDocument } from '@/features/terms/api'
 import { useProjects } from '@/features/projects/api'
+import { TermsDocumentViewer } from '@/features/terms/TermsDocumentViewer'
 
 const when = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -142,6 +143,9 @@ function ProjectDocuments() {
     }
   }
 
+  /** The document being read in-app, if any. */
+  const [viewing, setViewing] = useState<string | null>(null)
+
   const isBusy = (id: string, kind: 'copy' | 'wa' | 'gen') => busy?.id === id && busy.kind === kind
 
   return (
@@ -229,6 +233,10 @@ function ProjectDocuments() {
                       <td className="px-4 py-2 text-muted-foreground">{when.format(new Date(d.created_at))}</td>
                       <td className="px-4 py-2">
                         <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setViewing(d.id)} title="Read this document">
+                            <Eye className="size-4" />
+                            <span className="sr-only">View document</span>
+                          </Button>
                           <Button size="sm" variant="ghost" disabled={isBusy(d.id, 'gen')} onClick={() => void onGenerate(d)} title={d.has_active_link ? 'Rotate link' : 'Generate link'}>
                             <RefreshCw className={isBusy(d.id, 'gen') ? 'animate-spin' : ''} /> {d.has_active_link ? 'Rotate' : 'Generate'}
                           </Button>
@@ -260,6 +268,7 @@ function ProjectDocuments() {
         )}
       </div>
       {logFor && <EmailLogDialog documentId={logFor} onClose={() => setLogFor(null)} />}
+      <TermsDocumentViewer documentId={viewing} onClose={() => setViewing(null)} />
     </>
   )
 }

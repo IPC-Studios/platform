@@ -128,6 +128,40 @@ export const termsRouter = new Hono<AppEnv>()
     return c.json(termsDocumentList.parse(rows))
   })
 
+  /**
+   * Read a document in the app, as the studio rather than as the client.
+   *
+   * Same payload the client link serves, addressed by document id and scoped
+   * to the caller's company. The SQL function behind it is `stable` and bumps
+   * no counters: the token version increments access_count on both the token
+   * and the document, which the Documents page reports as "the client opened
+   * it". Routing internal reads through that would have the studio inflating
+   * its own engagement figure every time it checked what it had sent.
+   *
+   * Revoked and expired documents are returned rather than hidden — the flags
+   * are in the payload and the viewer says so. What a studio most needs to
+   * re-read is usually the one whose link has lapsed.
+   */
+  .get('/documents/:id/payload', requireAction('projects', 'view'), async (c) => {
+    const id = c.req.param('id')
+    if (!id || !z.string().uuid().safeParse(id).success) fail(422, 'Invalid document id.')
+    const rows = await attempt(c, 'terms.document_payload', () =>
+      withUser(
+        c.env,
+        c.get('auth').userId,
+        (sql) => sql`select * from get_terms_payload_for_document(${id}::uuid)`,
+      ),
+    )
+    if (!rows) fail(400, 'We could not open this document.')
+    if (!rows[0]) fail(404, 'That document was not found.')
+    return c.json(
+      termsPayload.parse({
+        ...(rows[0] as Record<string, unknown>),
+        body: (rows[0] as { body?: string }).body ?? '',
+      }),
+    )
+  })
+
   // 5-state lifecycle + KPIs are derived client-side from the same rows;
   // revoke/rotate act on the underlying document + access token.
   .post('/documents/:id/revoke', requireAction('projects', 'edit'), async (c) => {
