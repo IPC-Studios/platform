@@ -4,6 +4,7 @@ import { z, sessionState, type SessionState } from '@ipc/contracts'
 import { callApi, ApiError, markCookieSession, rotateTokens, setAuthLostHandler } from '../api/client'
 import { clearToken, getRefreshToken, getToken, onSessionChange } from './token'
 import { MOCK_ENABLED, mockSession } from '../dev/mock'
+import { setSentryUser } from '@/shared/error/sentry'
 
 const ok = z.object({ ok: z.boolean() })
 
@@ -62,7 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      setSession(await callApi('/auth/session', { responseSchema: sessionState }))
+      const s = await callApi('/auth/session', { responseSchema: sessionState })
+      setSession(s)
+      // Every later event carries who and which studio. Set here rather than
+      // at sign-in so a returning session (page reload, token refresh) is
+      // identified too, not just a fresh login.
+      setSentryUser(s)
     } catch (e) {
       // Network/5xx should NOT log out - keep session for retry; only 401/403 mean gone.
       const status = e instanceof ApiError ? e.status : undefined
@@ -95,6 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [boot])
 
   const signOut = useCallback(async () => {
+    // Stop attributing anything that happens next to the person who left.
+    setSentryUser(null)
     const refresh_token = getRefreshToken()
     // Drop the session first: sign-out must feel instant and must not hinge on
     // the network. The server call revokes the family behind us — from the

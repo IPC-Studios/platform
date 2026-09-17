@@ -20,10 +20,78 @@ them. `deploy/.env.example` lists every variable.
 | `AUTH_COOKIE` / `AUTH_COOKIE_SAMESITE` / `AUTH_COOKIE_DOMAIN` | API | Optional. `AUTH_COOKIE=1` keeps the refresh token in an HttpOnly cookie (see "Refresh-token cookie mode"). |
 | `ALLOWED_ORIGINS` | API | Comma-separated prod origins. Empty in production = deny all. |
 | `CLIENT_IP_HEADER` | API | Which header carries the real client address. `X-Forwarded-For` (default, last hop; Caddy/nginx) or `CF-Connecting-IP` (behind Cloudflare). Trusting the wrong one lets callers pick their own rate-limit bucket. |
-| `SENTRY_DSN` | API | Optional. Unexpected failures are posted as Sentry events. Unset = logs only. |
+| `SENTRY_DSN` | API | Optional. Errors, traces and cron check-ins. Unset = logs only. |
+| `SENTRY_TRACES_SAMPLE_RATE` | API | `0`..`1`. Default `0.1` in production, `1` elsewhere. `0` keeps errors, drops tracing. |
 | `LOG_LEVEL` | API | `debug` / `info` / `warn` / `error`. |
-| `APP_VERSION` | API | Release id shown by `/health` and stamped on error reports. |
+| `APP_VERSION` | API | Release id shown by `/health` and stamped on every Sentry event. Set by the deploy to the commit SHA. |
+| `VITE_SENTRY_DSN` | Web (build) | Browser DSN. Empty = Sentry off and the beacon fallback is used instead. |
+| `VITE_APP_VERSION` | Web (build) | Must equal the API's `APP_VERSION`, or the two halves report different releases. |
+| `VITE_ENVIRONMENT` | Web (build) | `production` etc. Drives the browser sample rates. |
+| `VITE_SENTRY_REPLAY` | Web (build) | `0` drops Session Replay from the bundle (~40 kB gzip). Anything else keeps it. |
+| `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` | CI only | Source-map upload at build time. **Never** in the runtime `.env`. |
 | `ENVIRONMENT` | API | `production` fails closed everywhere (token echo, demo activation, CORS). |
+
+## Sentry
+
+### Which credential goes where
+
+Sentry issues three kinds of credential and they are not interchangeable.
+
+| Credential | Where it lives | Why |
+|---|---|---|
+| **DSN** | `SENTRY_DSN` in the VPS `.env`, `VITE_SENTRY_DSN` in the web build | Not a secret. It only permits submitting events to one project, and the browser one is visible in the bundle by design. |
+| **Organization auth token** | CI secret `SENTRY_AUTH_TOKEN`, build time only | Uploads source maps. Belongs to the org, not a person, and is scoped to releases. |
+| **Personal auth token** | Nowhere in this repo | Carries one human's full access to every project they can see, and stops working the day their account is disabled. Fine for poking the API from your own laptop; never for automation. |
+
+The auth token is **not** needed to run the app. If source maps are the only
+thing you are missing, the app still reports errors — the traces are just
+minified. So put the token in GitHub Actions / Cloudflare build settings and
+leave the VPS `.env` without it.
+
+Create the org token at **Settings → Auth Tokens** (organization level, not
+the one under your user menu), with `project:releases` and `org:read`.
+
+### What is instrumented
+
+- **API errors.** Every `attempt()` failure and every unhandled error already
+  routed through `lib/error-reporter.ts`; it now hands them to the SDK instead
+  of posting a hand-built envelope. Tagged with `label` (the operation name,
+  e.g. `crm.merge`), `pg_code` (the SQLSTATE — `42501` is an RLS refusal,
+  `23505` a duplicate), `request_id`, user id and `company_id`.
+  4xx `HTTPException`s are *not* reported: those are answers, not faults.
+- **API tracing.** Hono routes and postgres.js queries, so a slow endpoint
+  names the query that made it slow. Sampled at `SENTRY_TRACES_SAMPLE_RATE`.
+- **Cron monitors.** `/cron/reminders` checks in as `crm-followup-cron`
+  (hourly) and `/cron/attendance` as `attendance-absent-sweep` (`30 18 * * *`
+  UTC). Sentry raises an issue when a run **fails** and, more importantly, when
+  an expected run **never arrives** — the failure mode that let
+  `cron-attendance` sit unstarted for months. `?dry=1` never checks in.
+- **Browser errors.** React render crashes (via React 19's `onUncaughtError` /
+  `onCaughtError` / `onRecoverableError`), unhandled rejections, failed
+  mutations, and failed fetch/XHR.
+- **Browser tracing**, route-aware: transactions are named `/projects/$id`
+  rather than one per project id. Connected to the API's trace through the
+  `sentry-trace` and `baggage` headers, which is why both are in the CORS
+  `allowHeaders` — without them the browser's preflight fails and *every* API
+  call breaks, not just the tracing.
+- **Session Replay**, masked (`maskAllText`, `maskAllInputs`, `blockAllMedia`)
+  and only kept for sessions that errored.
+
+### What is deliberately not sent
+
+`sendDefaultPii` is off on both halves. This is a multi-tenant CRM: default PII
+would attach headers, cookies and bodies, which here means client phone
+numbers, addresses and auth tokens. Events carry the **user id** and
+**`company_id`** tag and nothing else about a person. `beforeSend` on the API
+additionally redacts connection strings and anything shaped like a JWT out of
+messages and stack traces.
+
+### Turning it off
+
+Unset `SENTRY_DSN` (API) or `VITE_SENTRY_DSN` (web) and redeploy. The API falls
+back to structured logs; the web falls back to the `/health/client-errors`
+beacon, which is what it used before. With no DSN at build time the SDK
+tree-shakes out of the bundle almost entirely (~7 kB gzip remains).
 
 ## Logging, request ids, error tracking
 

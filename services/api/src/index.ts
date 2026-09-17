@@ -67,7 +67,13 @@ app.use('*', (c, next) => {
       }
       return allow.includes((origin ?? '').replace(/\/+$/, '')) ? origin : ''
     },
-    allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
+    // `sentry-trace` and `baggage` carry the browser's trace id so a frontend
+    // transaction and the API request it caused end up on one timeline. They
+    // are NOT optional once the web build sets tracePropagationTargets: the
+    // browser attaches them to every matching call, and a preflight that does
+    // not allow them fails the request itself — the whole app, not just the
+    // tracing.
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'sentry-trace', 'baggage'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     // Without these the browser cannot read the ids the client shows in its
     // error states, nor the limit headers it could back off on.

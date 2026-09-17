@@ -5,6 +5,7 @@ import type { AppEnv } from '../context'
 import { fail } from './errors'
 import { verifyToken } from '../lib/auth-token'
 import { withUser } from '../lib/db'
+import * as Sentry from '@sentry/bun'
 
 function bearer(c: Context<AppEnv>): string {
   const h = c.req.header('Authorization') ?? ''
@@ -60,6 +61,17 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
     profileKey: row.profile_key,
     overrides: row.overrides ?? [],
   })
+
+  // Who and which studio, on every event and span raised for the rest of this
+  // request. Without it a Sentry issue says a thing broke but not for whom,
+  // and in a multi-tenant product "one studio" and "everyone" are the same
+  // stack trace with very different urgency.
+  //
+  // Deliberately id-only: no name, no email. sendDefaultPii is off for the
+  // same reason, and a support question is answerable from the user id.
+  Sentry.setUser({ id: uid })
+  Sentry.setTag('company_id', row.company_id)
+  Sentry.setTag('role', row.role)
 
   c.set('auth', {
     userId: uid,

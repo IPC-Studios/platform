@@ -8,6 +8,8 @@ import { CheckCircle2, XCircle, AlertTriangle, Info, Loader2 } from 'lucide-reac
 import { AuthProvider } from '@/shared/auth/AuthProvider'
 import { MOCK_ENABLED } from '@/shared/dev/mock'
 import { installClientErrorReporting } from '@/shared/error/report'
+import { initSentry, reactErrorHandler } from '@/shared/error/sentry'
+import * as Sentry from '@sentry/react'
 import { ThemeProvider } from '@/shared/theme/ThemeProvider'
 import { ConfirmProvider } from '@/shared/ui/confirm'
 import { router } from '@/app/router'
@@ -15,7 +17,12 @@ import { router } from '@/app/router'
 const queryClient = new QueryClient({
   // Every failed mutation toasts its (UI-copy) error message — one place, all forms.
   mutationCache: new MutationCache({
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Something went wrong.'),
+    onError: (error) => {
+      // The toast is the user's answer; Sentry is ours. A mutation that fails
+      // for everyone looks, from here, like one person seeing one toast.
+      Sentry.captureException(error)
+      toast.error(error instanceof Error ? error.message : 'Something went wrong.')
+    },
   }),
   defaultOptions: {
     // Surface errors immediately in dev instead of masking them as long loads.
@@ -23,13 +30,28 @@ const queryClient = new QueryClient({
   },
 })
 
-// The mock preview has no backend to receive reports.
-if (!MOCK_ENABLED) installClientErrorReporting()
+// Sentry first, so a crash while the tree is mounting is still reported. It
+// needs the router to name transactions after routes rather than URLs.
+const sentryOn = MOCK_ENABLED ? false : initSentry(router)
+
+// The beacon predates Sentry and stays as the fallback: it is what reports
+// crashes when no DSN is configured. With Sentry on it stands down, or every
+// crash would be filed twice, once as a Sentry issue and once as a log line.
+// The mock preview has no backend to receive reports either way.
+if (!MOCK_ENABLED && !sentryOn) installClientErrorReporting()
 
 const el = document.getElementById('root')
 if (!el) throw new Error('#root not found')
 
-createRoot(el).render(
+createRoot(el, {
+  // React 19 hands the framework these instead of letting them reach
+  // window.onerror. Without them a render crash is reported by React to the
+  // console and by nobody to Sentry — the class of bug most worth catching,
+  // because the screen is blank and the user cannot tell you what they did.
+  onUncaughtError: reactErrorHandler(),
+  onCaughtError: reactErrorHandler(),
+  onRecoverableError: reactErrorHandler(),
+}).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

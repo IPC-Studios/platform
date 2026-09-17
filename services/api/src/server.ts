@@ -7,6 +7,9 @@
 //
 // Excluded from `tsc` typecheck (see tsconfig) because it depends on the Bun
 // global rather than @cloudflare/workers-types; Bun runs it directly.
+// FIRST import, always: Sentry patches http/postgres/hono as they load, so
+// anything imported above this line is instrumented too late to produce spans.
+import './instrument'
 import app from './index'
 
 const port = Number(process.env.PORT ?? 8787)

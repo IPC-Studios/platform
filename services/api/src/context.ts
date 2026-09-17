@@ -50,8 +50,17 @@ export interface Env {
    * Default X-Forwarded-For (last hop). See lib/client-ip.ts.
    */
   CLIENT_IP_HEADER: string
-  /** Sentry-compatible DSN. Unset = errors are logged only. */
+  /**
+   * Sentry DSN. Unset = errors are logged only and no traces, cron check-ins
+   * or performance data are sent. Read at startup by `instrument.ts`, which
+   * is why it is process env rather than a binding.
+   */
   SENTRY_DSN: string
+  /**
+   * 0..1. Share of requests traced. Default 0.1 in production, 1 elsewhere.
+   * 0 turns tracing off while leaving error reporting on.
+   */
+  SENTRY_TRACES_SAMPLE_RATE: string
   /** debug | info | warn | error (default info). */
   LOG_LEVEL: string
   /** Build/release identifier surfaced by /health and error reports. */

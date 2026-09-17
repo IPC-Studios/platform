@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import * as Sentry from '@sentry/bun'
 import { attendanceSweepResult, cronRun, cronRunResult } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { fail } from '../../middleware/errors'
@@ -15,6 +16,26 @@ import { drainOutbox } from '../../lib/outbox'
  *
  * The run history is readable by the studio owner (RLS: cron_runs_select_owner)
  * and by platform admins (cron_runs_select_platform), under a normal session.
+ *
+ * ── Why these are wrapped in Sentry.withMonitor ──────────────────────────
+ *
+ * The callers are two `curlimages/curl` containers running a shell loop, and
+ * both end their request with `|| true`. That is deliberate — a failed tick
+ * must not kill the loop — but it means a job that returns 500 every night
+ * looks exactly like a job that works. `cron-attendance` went further and was
+ * never started at all: it sat in the compose file for months, the nightly
+ * absent sweep never fired once, and nothing anywhere said so.
+ *
+ * A check-in raised from INSIDE the handler cannot have that failure mode. It
+ * reports ok/error per run, and — the part that matters — Sentry raises a
+ * MISSED check-in when the expected time passes with no run at all. That
+ * covers the container being down, the secret being wrong, the API being
+ * unreachable and the service never having been started, none of which the
+ * job itself is in a position to report.
+ *
+ * A dry run deliberately does NOT check in: `?dry=1` is a human poking the
+ * endpoint, and counting it as the night's run would mark a missed job
+ * healthy.
  */
 export const cronRouter = new Hono<AppEnv>()
   .post('/reminders', async (c) => {
@@ -23,7 +44,21 @@ export const cronRouter = new Hono<AppEnv>()
     if (!expected || !timingSafeEqual(provided, expected)) fail(401, 'Unauthorized.')
 
     const dryRun = c.req.query('dry') === '1'
-    const result = await attempt(c, 'cron.reminders', () =>
+    // Hourly, from a `sleep 3600` loop rather than a real crontab, so the tick
+    // drifts a little each day. An interval schedule with a generous margin
+    // matches that; a crontab string would report a miss every few weeks for
+    // no reason and train everyone to ignore it.
+    const run = <T>(fn: () => T): T =>
+      dryRun
+        ? fn()
+        : Sentry.withMonitor('crm-followup-cron', fn, {
+            schedule: { type: 'interval', value: 1, unit: 'hour' },
+            checkinMargin: 10,
+            maxRuntime: 10,
+            timezone: 'Etc/UTC',
+          })
+
+    const result = await run(() => attempt(c, 'cron.reminders', () =>
       withService(c.env, async (sql) => {
         const rows = await sql<{ summary: unknown }[]>`
           select run_reminder_cron(p_dry_run => ${dryRun}) as summary`
@@ -52,8 +87,14 @@ export const cronRouter = new Hono<AppEnv>()
           purged_refresh_tokens: purged,
         }
       }),
-    )
-    if (!result) fail(400, 'The job could not run.')
+    ))
+    // attempt() returns null on failure instead of throwing, so without this
+    // the monitor would record a cheerful "ok" for a run that did nothing.
+    // Throwing inside withMonitor is what makes the check-in an error.
+    if (!result) {
+      if (!dryRun) throw new Error('cron.reminders failed')
+      fail(400, 'The job could not run.')
+    }
     log.info({ path: c.req.path, dryRun, ...result }, 'cron reminders ran')
     return c.json(cronRunResult.parse({ ok: true, ...result }))
   })
@@ -77,7 +118,20 @@ export const cronRouter = new Hono<AppEnv>()
     if (!expected || !timingSafeEqual(provided, expected)) fail(401, 'Unauthorized.')
 
     const dryRun = c.req.query('dry') === '1'
-    const marked = await attempt(c, 'cron.attendance', () =>
+    // Once a day, after the working day ends: 18:30 UTC is midnight in
+    // Asia/Kolkata. The caller polls and fires on the first tick past that, so
+    // it can land a few minutes late — hence the margin.
+    const run = <T>(fn: () => T): T =>
+      dryRun
+        ? fn()
+        : Sentry.withMonitor('attendance-absent-sweep', fn, {
+            schedule: { type: 'crontab', value: '30 18 * * *' },
+            checkinMargin: 60,
+            maxRuntime: 15,
+            timezone: 'Etc/UTC',
+          })
+
+    const marked = await run(() => attempt(c, 'cron.attendance', () =>
       withService(c.env, async (sql) => {
         if (dryRun) {
           // What it WOULD write, counted the same way the function selects it.
@@ -96,8 +150,11 @@ export const cronRouter = new Hono<AppEnv>()
         const rows = await sql<{ n: number }[]>`select mark_absent_backstop() as n`
         return rows[0]?.n ?? 0
       }),
-    )
-    if (marked === null) fail(400, 'The job could not run.')
+    ))
+    if (marked === null) {
+      if (!dryRun) throw new Error('cron.attendance failed')
+      fail(400, 'The job could not run.')
+    }
     log.info({ path: c.req.path, dryRun, marked_absent: marked }, 'cron attendance ran')
     return c.json(attendanceSweepResult.parse({ ok: true, marked_absent: marked }))
   })

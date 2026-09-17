@@ -53,6 +53,8 @@ jobs:
 
       - name: Deploy backend over SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          GIT_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -60,10 +62,20 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script_stop: true
           command_timeout: 20m
+          envs: GIT_SHA
           script: |
             cd "${{ secrets.VPS_PATH }}"
             git fetch origin main
             git checkout -B main origin/main
+            # Stamp the release the containers will report. Without this every
+            # Sentry issue and every /health response says "dev", and nobody
+            # can tell which deploy introduced a problem. Rewritten in place so
+            # .env keeps every other value it holds.
+            if grep -q '^APP_VERSION=' .env; then
+              sed -i "s|^APP_VERSION=.*|APP_VERSION=${GIT_SHA}|" .env
+            else
+              echo "APP_VERSION=${GIT_SHA}" >> .env
+            fi
             # This VPS runs Coolify (its Traefik terminates TLS on 80/443), so we
             # use the coolify overlay and omit our own caddy. --wait blocks on the
             # db/api healthchecks.
