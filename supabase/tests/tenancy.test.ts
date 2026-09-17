@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
@@ -38,103 +38,26 @@ async function freshDb() {
   await db.exec(`create role authenticated;`)
   await db.exec(`create role anon;`)
   await db.exec(`create role service_role;`)
-  // Real migrations (0000 extensions are Supabase-only; core covers what we need here).
-  await db.exec(mig('0001_tenancy_core.sql'))
-  await db.exec(mig('0002_auth_functions.sql'))
-  await db.exec(mig('0003_tenancy_rls.sql'))
-  await db.exec(mig('0004_access_control.sql'))
-  await db.exec(mig('0005_company_theme.sql'))
-  await db.exec(mig('0006_projects_core.sql'))
-  await db.exec(mig('0007_tasks_production.sql'))
-  await db.exec(mig('0008_team_allocation.sql'))
-  await db.exec(mig('0009_data_management.sql'))
-  await db.exec(mig('0010_work_delivery.sql'))
-  await db.exec(mig('0011_billing.sql'))
-  await db.exec(mig('0012_expenses_financials.sql'))
-  await db.exec(mig('0013_crm.sql'))
-  await db.exec(mig('0014_hr_attendance.sql'))
-  await db.exec(mig('0015_notifications_jobs.sql'))
-  await db.exec(mig('0016_subscription_platform.sql'))
-  await db.exec(mig('0017_terms_templates.sql'))
-  await db.exec(mig('0018_open_trial_by_default.sql'))
-  await db.exec(mig('0019_platform_console.sql'))
-  await db.exec(mig('0020_platform_ops.sql'))
-  await db.exec(mig('0021_email_verification.sql'))
-  await db.exec(mig('0022_password_reset.sql'))
-  await db.exec(mig('0023_password_version.sql'))
-  await db.exec(mig('0024_refresh_tokens.sql'))
-  await db.exec(mig('0025_session_hardening.sql'))
-  await db.exec(mig('0026_team_directory.sql'))
-  await db.exec(mig('0027_theme_fonts.sql'))
-  await db.exec(mig('0028_crm_followups.sql'))
-  await db.exec(mig('0029_lead_sources.sql'))
-  await db.exec(mig('0030_attendance_ops.sql'))
-  await db.exec(mig('0031_task_bundles.sql'))
-  await db.exec(mig('0032_crm_v2.sql'))
-  await db.exec(mig('0033_auth_hardening.sql'))
-  await db.exec(mig('0034_plan_gate_and_audit.sql'))
-  await db.exec(mig('0035_crm_v3.sql'))
-  await db.exec(mig('0036_crm_v4.sql'))
-  await db.exec(mig('0037_truly_amazing.sql'))
-  await db.exec(mig('0038_shoot_details.sql'))
-  await db.exec(mig('0039_deliverable_sets.sql'))
-  await db.exec(mig('0040_role_library.sql'))
-  await db.exec(mig('0041_team_terms.sql'))
-  await db.exec(mig('0042_client_documents.sql'))
-  await db.exec(mig('0043_enquiries.sql'))
-  await db.exec(mig('0044_crm_bulk_lost.sql'))
-  await db.exec(mig('0045_crm_objects.sql'))
-  await db.exec(mig('0046_crm_activities.sql'))
-  await db.exec(mig('0047_crm_workflows.sql'))
-  await db.exec(mig('0048_crm_quotes_prefs.sql'))
-  await db.exec(mig('0049_crm_gaps.sql'))
-  await db.exec(mig('0050_personal_expenses.sql'))
-  await db.exec(mig('0051_gopo.sql'))
-  await db.exec(mig('0052_referrals.sql'))
-  await db.exec(mig('0053_project_templates.sql'))
-  await db.exec(mig('0054_attendance_enhancements.sql'))
-  await db.exec(mig('0055_theme_enhancements.sql'))
-  await db.exec(mig('0056_invoice_templates.sql'))
-  await db.exec(mig('0057_quotation_enhancements.sql'))
-  await db.exec(mig('0058_financial_filters.sql'))
-  await db.exec(mig('0059_team_payouts.sql'))
-  await db.exec(mig('0060_reminders.sql'))
-  await db.exec(mig('0061_custom_lookups.sql'))
-  await db.exec(mig('0062_activity_log.sql'))
-  await db.exec(mig('0063_security_fixes.sql'))
-  await db.exec(mig('0064_gopo_gst_fixes.sql'))
-  await db.exec(mig('0065_client_fields.sql'))
-  await db.exec(mig('0066_crm_lead_event_fields.sql'))
-  await db.exec(mig('0067_referral_slug.sql'))
-  await db.exec(mig('0068_work_submission_reminders.sql'))
-  await db.exec(mig('0069_employee_compensation.sql'))
-  await db.exec(mig('0070_overhead_allocation.sql'))
-  await db.exec(mig('0071_crm_lead_contact_fields.sql'))
-  await db.exec(mig('0072_personal_expense_gst_rate.sql'))
-  await db.exec(mig('0073_work_submission_location.sql'))
-  await db.exec(mig('0074_invoice_edit.sql'))
-  await db.exec(mig('0075_quote_edit.sql'))
-  await db.exec(mig('0076_work_submission_edit.sql'))
-  await db.exec(mig('0077_reminder_entity_name.sql'))
-  await db.exec(mig('0078_invoice_template_link.sql'))
-  await db.exec(mig('0079_attendance_fence_toggle.sql'))
-  await db.exec(mig('0080_lead_group_source.sql'))
-  await db.exec(mig('0081_reminder_assign_link.sql'))
-  await db.exec(mig('0082_referral_event_fields.sql'))
-  await db.exec(mig('0083_profile_photo.sql'))
-  await db.exec(mig('0084_lookup_categories_expansion.sql'))
-  await db.exec(mig('0085_invoice_line_presets.sql'))
-  await db.exec(mig('0086_project_profitability_report.sql'))
-  await db.exec(mig('0087_invoice_number_override.sql'))
-  await db.exec(mig('0088_invoice_item_title.sql'))
-  await db.exec(mig('0089_invoice_note_templates.sql'))
-  await db.exec(mig('0090_team_payout_settlements.sql'))
-  await db.exec(mig('0091_auth_users_email_optional.sql'))
-  await db.exec(mig('0092_gst_analysis_state_name.sql'))
-  await db.exec(mig('0093_terms_documents_list_fn.sql'))
-  await db.exec(mig('0094_team_payment_type_and_status.sql'))
-  await db.exec(mig('0095_enquiry_status_lookup.sql'))
-  await db.exec(mig('0096_theme_custom_colors.sql'))
+  // Every migration on disk, in order.
+  //
+  // This used to be 96 hand-written `mig('00xx_....sql')` lines, and the
+  // convention was that you added one whenever you added a migration. Nobody
+  // did: the list stopped at 0096 while the schema reached 0152, so these 270
+  // tenancy tests — the ones that prove RLS actually isolates studios — were
+  // running against a database 56 migrations behind production. Every table
+  // added since 0096 had its policies asserted by nothing at all.
+  //
+  // Reading the directory removes the convention instead of restating it. A
+  // new migration is covered because it exists, not because someone
+  // remembered.
+  //
+  // 0000_* is skipped: those are Supabase-only extension installs that PGlite
+  // neither has nor needs.
+  for (const f of readdirSync(migDir)
+    .filter((x) => x.endsWith('.sql') && !x.startsWith('0000_'))
+    .sort()) {
+    await db.exec(mig(f))
+  }
   return db
 }
 
@@ -606,10 +529,18 @@ describe('work submission -> review -> tokenised delivery (Phase 8)', () => {
     )
     const subId = sub.rows[0]!.submit_work
 
-    // Delivery is blocked until approved.
-    await expect(db.query(`select deliver_work_to_client('${subId}');`)).rejects.toThrow(
-      /must be approved/i,
+    // 0115 relaxed this deliberately: a studio can send the client work that
+    // is still 'submitted', and the submission becomes 'sent'. Only a REJECTED
+    // one is refused. (Before 0155 this path raised a check-constraint
+    // violation instead, because 'sent' was not an allowed status.)
+    const early = await db.query<{ deliver_work_to_client: string }>(
+      `select deliver_work_to_client('${subId}') as deliver_work_to_client;`,
     )
+    expect(early.rows[0]!.deliver_work_to_client).toBeTruthy()
+    expect(
+      (await db.query<{ status: string }>(`select status from team_work_submissions where id = '${subId}';`))
+        .rows[0]!.status,
+    ).toBe('sent')
 
     await db.query(`select review_work('${subId}', true, 'looks good');`)
     const token = await db.query<{ deliver_work_to_client: string }>(
@@ -630,11 +561,14 @@ describe('work submission -> review -> tokenised delivery (Phase 8)', () => {
     )
     expect(bad.rows[0]!.resolve_access_token).toBeNull()
 
-    // A delivery row was recorded.
+    // One row per send, and this submission was sent twice — once while still
+    // submitted, once after approval. Each delivery is its own record with its
+    // own token and expiry, which is what makes "when did we send this, and
+    // which link did they open" answerable.
     const del = await db.query<{ n: string }>(
       `select count(*) as n from team_work_client_deliveries where submission_id = '${subId}';`,
     )
-    expect(Number(del.rows[0]!.n)).toBe(1)
+    expect(Number(del.rows[0]!.n)).toBe(2)
   })
 
   it('consume_access_token is one-time', async () => {
@@ -1134,19 +1068,31 @@ describe('HR — geo-fenced attendance + payout ledger (Phase 12)', () => {
     expect(e.rows[0]?.status).toBe('present')
   })
 
-  it('payout ledger balance = sum of credits and debits', async () => {
-    await asUser(db, OWNER)
-    await db.query(`select settle_payout('${emp}', 8000, 'credit', 'shoot-1');`)
-    await db.query(`select settle_payout('${emp}', -3000, 'debit', 'advance');`)
-    const bal = await db.query<{ payout_balance: string }>(`select payout_balance('${emp}');`)
-    expect(Number(bal.rows[0]!.payout_balance)).toBe(5000)
-  })
-
-  it('a non-owner cannot settle payouts', async () => {
-    await asUser(db, emp)
-    await expect(db.query(`select settle_payout('${emp}', 1000, 'credit');`)).rejects.toThrow(
-      /not allowed/i,
+  /**
+   * The per-member credit/debit ledger from 0014 is gone.
+   *
+   * settle_payout() and payout_balance() wrote and read team_payout_settlements,
+   * a ledger nothing in the API or the web app has touched since team payouts
+   * moved to being settled per BOOKING SLOT. 0143 dropped both functions after
+   * confirming they had no caller, and commented the table SUPERSEDED rather
+   * than dropping it, because a table drop cannot be undone.
+   *
+   * The two tests that stood here exercised those functions. They are not
+   * replaced by weaker assertions — the live ledger is covered in full by
+   * "team payout settlements (0090)" further down this file, which tests
+   * partial payment, over-collection, reversal, the paid-total aggregate and
+   * the adjustment exemption against team_slot_settlements.
+   *
+   * What is worth asserting here is that the retired pair really is gone, so
+   * nobody reintroduces a second money ledger by restoring one of them.
+   */
+  it('the superseded per-member payout ledger functions are gone', async () => {
+    const left = await db.query<{ proname: string }>(
+      `select proname from pg_proc
+        where proname in ('settle_payout', 'payout_balance')
+          and pronamespace = 'public'::regnamespace;`,
     )
+    expect(left.rows.map((r) => r.proname)).toEqual([])
   })
 })
 
@@ -2462,10 +2408,21 @@ describe('CRM v2 — events, archive, merge, stats (0032 + 0034)', () => {
       )
     ).rows[0]!.id
 
+  /**
+   * The lead's own timeline, minus the automation chatter.
+   *
+   * A studio is seeded with default workflows, and those enrol on lead
+   * creation and write their own events ("workflow: ... · notify_assignee").
+   * They are real history and belong on the lead — but they are not what these
+   * tests are about, and counting them made the assertions here depend on how
+   * many default workflows the seed happens to ship.
+   */
   const events = async (leadId: string) =>
     (
       await db.query<{ from_status: string | null; to_status: string | null; note: string | null }>(
-        `select from_status, to_status, note from crm_lead_events where lead_id = '${leadId}' order by created_at;`,
+        `select from_status, to_status, note from crm_lead_events
+          where lead_id = '${leadId}' and coalesce(note, '') not like 'workflow:%'
+          order by created_at;`,
       )
     ).rows
 
@@ -2626,6 +2583,9 @@ describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations
     )
     expect(fresh.rows[0]).toEqual({ source_key: 'csv_import', notes: 'from sheet' })
     // Not skipping inserts beside the existing row, for the duplicates tab.
+    // Before 0156 this call silently skipped instead: p_mode defaulted to
+    // 'skip', so the coalesce that was meant to fall back to this boolean
+    // never reached it.
     const again = await db.query<{ r: { created: number; skipped: number } }>(
       `select crm_import_leads('[{"phone":"9876700002"}]'::jsonb, false) as r;`,
     )
@@ -2695,8 +2655,14 @@ describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations
     const l = await lead(id)
     expect(l.is_hot).toBe(true)
     expect(l.assigned_to).toBe(member)
+    // Scoped to the workflows this test built. A studio is seeded with default
+    // workflows of its own ("New lead not contacted", "Unassigned lead", ...)
+    // which enrol on arrival too and write their own lines — real history, but
+    // not what is under test, and counting them would tie this assertion to
+    // however many defaults the seed happens to ship.
+    const ours = `note in ('workflow: Hot enquiries · mark_hot', 'workflow: Assign Meera · assign_to', 'workflow: Quote follow-up · set_follow_up_days')`
     const trail = await db.query<{ note: string | null }>(
-      `select note from crm_lead_events where lead_id = '${id}' and note like 'workflow:%' order by created_at;`,
+      `select note from crm_lead_events where lead_id = '${id}' and ${ours} order by created_at;`,
     )
     expect(trail.rows.map((r) => r.note)).toEqual(['workflow: Hot enquiries · mark_hot', 'workflow: Assign Meera · assign_to'])
 
@@ -2704,7 +2670,7 @@ describe('CRM v3 — merge/unmerge, import, bulk undo, ranged stats, automations
     expect((await lead(id)).follow_up_at).not.toBeNull()
     // Exactly one application per workflow: the nested updates did not loop.
     const applied = await db.query<{ n: number }>(
-      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and note like 'workflow:%';`,
+      `select count(*)::int as n from crm_lead_events where lead_id = '${id}' and ${ours};`,
     )
     expect(applied.rows[0]!.n).toBe(3)
   })
@@ -3612,7 +3578,11 @@ describe('CRM quotes, preferences, lost analysis (0041)', () => {
     const q2 = await quote(lead)
     await db.query(`select issue_quote_link('${q2.id}');`)
     await db.exec(`update crm_quotes set valid_until = current_date - 1 where id = '${q2.id}';`)
-    expect((await db.query<{ n: number }>(`select crm_expire_quotes() as n;`)).rows[0]!.n).toBe(1)
+    // 0150 moved the sweep into the CRM cron and widened its return from an
+    // int to the {due, expired, dry_run} summary its sibling sweeps report.
+    expect(
+      (await db.query<{ n: { expired: number } }>(`select crm_expire_quotes() as n;`)).rows[0]!.n.expired,
+    ).toBe(1)
     expect((await db.query<{ status: string }>(`select status from crm_quotes where id = '${q2.id}';`)).rows[0]!.status).toBe('expired')
   })
 
@@ -4176,8 +4146,16 @@ describe('client documents (0042)', () => {
     expect((await db.query(`select * from get_delivery_for_token('nope');`)).rows).toHaveLength(0)
   })
 
-  // Delivery only opens once the work has been reviewed and approved.
-  it('opens a delivery link only for approved work', async () => {
+  /**
+   * 0115 widened this on purpose.
+   *
+   * 0042 opened a delivery link only for APPROVED work. 0115 ("delivery
+   * visibility") changed the rule to submitted / approved / sent, so a studio
+   * can send the client a link while the work is still in review. What stays
+   * shut is a REJECTED submission — the one case where the client must not see
+   * the file.
+   */
+  it('opens a delivery link for work in flight, but never for rejected work', async () => {
     const submission = (
       await db.query<{ id: string }>(
         `insert into team_work_submissions (company_id, project_id, submission_link, status)
@@ -4190,7 +4168,8 @@ describe('client documents (0042)', () => {
         `select issue_access_token('work_delivery', '${submission}'::uuid, 168);`,
       )
     ).rows[0]!.issue_access_token
-    expect((await db.query(`select * from get_delivery_for_token('${token}');`)).rows).toHaveLength(0)
+    // Still 'submitted': the link opens, because that is what 0115 enabled.
+    expect((await db.query(`select * from get_delivery_for_token('${token}');`)).rows).toHaveLength(1)
 
     await db.query(`update team_work_submissions set status = 'approved' where id = '${submission}';`)
     const open = await db.query<{ submission_link: string; project_name: string }>(
@@ -4200,6 +4179,11 @@ describe('client documents (0042)', () => {
       submission_link: 'https://drive.example/album',
       project_name: 'Sharma Wedding',
     })
+
+    // Rejected work is the one state the client must never reach, token or no
+    // token — the link they were already sent has to stop working.
+    await db.query(`update team_work_submissions set status = 'rejected' where id = '${submission}';`)
+    expect((await db.query(`select * from get_delivery_for_token('${token}');`)).rows).toHaveLength(0)
   })
 })
 
@@ -4271,7 +4255,9 @@ describe('enquiries (0043)', () => {
     expect(row.rows[0]).toMatchObject({
       name: 'Anita',
       source: 'enquiry',
-      notes: 'Wedding in December',
+      // A later migration stamped the provenance onto the note, so the lead
+      // says which enquiry it came from and when.
+      notes: expect.stringContaining('Wedding in December'),
     })
   })
 
@@ -5676,20 +5662,55 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
     expect(Number(row.rows[0]!.amount)).toBe(6000)
   })
 
-  it('a work submission\'s link and notes can be fixed by the person who submitted it, before review', async () => {
+  /**
+   * Editing a submission moved from a function to a policy.
+   *
+   * update_work_submission() enforced "your studio, you or a manager, and only
+   * while still submitted" and RAISED when you broke a rule. 0139 put the same
+   * three conditions into the tws_update policy and the work router now
+   * updates the row directly; 0143 then dropped the function, which had no
+   * caller left.
+   *
+   * The guarantee is identical but the FAILURE is not: a policy filters rather
+   * than raises, so a refused edit is now zero rows changed instead of an
+   * exception. These assert row counts for that reason.
+   *
+   * They are also the only tests in this file that switch role. Everything
+   * else here runs as superuser, which bypasses RLS entirely — fine when the
+   * guard lives in a definer function, useless when it lives in a policy. The
+   * grants mirror what deploy/db/00_bootstrap.sql gives `authenticated` in
+   * production; without them "permission denied for table" would masquerade as
+   * a policy rejection and the test would pass for the wrong reason.
+   */
+  it('a submitter can fix their own submission before review', async () => {
+    await db.exec(`grant select, update on team_work_submissions to authenticated;`)
     await asUser(db, MEMBER)
     const sub = await db.query<{ id: string }>(
       `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/wrong') as id;`,
     )
     const id = sub.rows[0]!.id
-    await db.query(`select update_work_submission('${id}', 'https://drive.example.com/right', 'fixed', 'HDD 2');`)
+
+    await db.exec(`set role authenticated;`)
+    const changed = await db.query(
+      `update team_work_submissions
+          set submission_link = 'https://drive.example.com/right', notes = 'fixed', location_note = 'HDD 2'
+        where id = '${id}' returning id;`,
+    )
+    await db.exec(`reset role;`)
+    expect(changed.rows.length).toBe(1)
+
     const row = await db.query<{ submission_link: string; notes: string; location_note: string }>(
       `select submission_link, notes, location_note from team_work_submissions where id = '${id}';`,
     )
-    expect(row.rows[0]).toEqual({ submission_link: 'https://drive.example.com/right', notes: 'fixed', location_note: 'HDD 2' })
+    expect(row.rows[0]).toEqual({
+      submission_link: 'https://drive.example.com/right',
+      notes: 'fixed',
+      location_note: 'HDD 2',
+    })
   })
 
-  it('a work submission cannot be edited by someone else, or once it has been reviewed', async () => {
+  it('nobody else can edit it, and nobody can once it has been reviewed', async () => {
+    await db.exec(`grant select, update on team_work_submissions to authenticated;`)
     await asUser(db, MEMBER)
     const sub = await db.query<{ id: string }>(
       `select submit_work(p_task_id => null, p_project_id => null, p_link => 'https://drive.example.com/x') as id;`,
@@ -5703,12 +5724,35 @@ describe('Lovable parity round 8: editing settings, invitations, payouts, and wo
       `insert into users (user_id, company_id, role, name, email)
        values ('${OTHER}', '${companyId}', 'employee', 'Other Eight', 'other8@s.test');`,
     )
-    await asUser(db, OTHER)
-    await expect(db.query(`select update_work_submission('${id}', 'https://hijack.example.com');`)).rejects.toThrow(/not allowed/)
 
+    // A colleague in the same studio: same company, not the submitter, not a
+    // manager. The row is invisible to their UPDATE.
+    await asUser(db, OTHER)
+    await db.exec(`set role authenticated;`)
+    const hijack = await db.query(
+      `update team_work_submissions set submission_link = 'https://hijack.example.com'
+        where id = '${id}' returning id;`,
+    )
+    await db.exec(`reset role;`)
+    expect(hijack.rows.length).toBe(0)
+
+    const stillMine = await db.query<{ submission_link: string }>(
+      `select submission_link from team_work_submissions where id = '${id}';`,
+    )
+    expect(stillMine.rows[0]!.submission_link).toBe('https://drive.example.com/x')
+
+    // And once it is approved it is frozen, for the submitter too — the policy
+    // requires status = 'submitted'.
     await asUser(db, OWNER)
     await db.query(`select review_work(p_submission_id => '${id}', p_approve => true);`)
-    await expect(db.query(`select update_work_submission('${id}', 'https://drive.example.com/after');`)).rejects.toThrow(/cannot be edited/)
+    await asUser(db, MEMBER)
+    await db.exec(`set role authenticated;`)
+    const afterReview = await db.query(
+      `update team_work_submissions set submission_link = 'https://drive.example.com/after'
+        where id = '${id}' returning id;`,
+    )
+    await db.exec(`reset role;`)
+    expect(afterReview.rows.length).toBe(0)
   })
 })
 
