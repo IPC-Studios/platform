@@ -24,7 +24,23 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
  * comment in the shipped JS, so the browser never fetches them and the code
  * is not readable by visitors — Sentry resolves them server-side by release.
  */
-const release = process.env['VITE_APP_VERSION']
+/**
+ * The release this build reports, matched to the API's APP_VERSION.
+ *
+ * The two halves deploy independently — Cloudflare builds the frontend, a
+ * GitHub Action redeploys the API — so nothing lines them up unless the commit
+ * is read from the build environment on both sides. Cloudflare names it
+ * differently for Pages and for Workers Builds, and neither is documented in
+ * this repo, so all the plausible ones are tried and an explicit
+ * VITE_APP_VERSION still wins. Empty means the app reports "dev", exactly as
+ * /health does when APP_VERSION is unset.
+ */
+const release =
+  process.env['VITE_APP_VERSION'] ||
+  process.env['CF_PAGES_COMMIT_SHA'] ||
+  process.env['WORKERS_CI_COMMIT_SHA'] ||
+  process.env['GITHUB_SHA'] ||
+  ''
 // Narrowed as one object rather than three booleans: under
 // exactOptionalPropertyTypes a `string | undefined` cannot be handed to an
 // optional `string` field, even inside an `if` that checked all three.
@@ -53,6 +69,11 @@ export default defineConfig({
         ]
       : []),
   ],
+  // config.ts reads import.meta.env.VITE_APP_VERSION; this is what puts the
+  // build environment's commit there when nobody set the variable by hand.
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(release),
+  },
   build: {
     sourcemap: uploadMaps ? 'hidden' : false,
     rollupOptions: {
