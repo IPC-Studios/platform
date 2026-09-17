@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Download, Eye, Search, Trash2, Users, X } from 'lucide-react'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
@@ -12,7 +12,7 @@ import { useConfirm } from '@/shared/ui/confirm'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { downloadCsv, toCsv } from '@/shared/ui/csv'
 import { cn } from '@/shared/ui/cn'
-import { useClients, useDeleteClient } from '@/features/clients/api'
+import { useClient, useClients, useDeleteClient } from '@/features/clients/api'
 import { ClientFormDialog } from '@/features/clients/ClientFormDialog'
 import { ClientDetailDialog } from '@/features/clients/ClientDetailDialog'
 import type { Client } from '@ipc/contracts'
@@ -23,6 +23,24 @@ export function ClientsListPage() {
       <ClientsList />
     </AuthedPage>
   )
+}
+
+/**
+ * ?client=<id> opens that client's drawer.
+ *
+ * The list is paginated on the server, so a client linked to from elsewhere —
+ * a converted lead, a project — is usually not on the page that loads. This
+ * fetches the one client by id rather than hunting for it in `rows`, which
+ * is why the link works for the two-hundredth client as well as the second.
+ */
+function useDeepLinkedClient(open: (c: Client) => void) {
+  const id = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('client') ?? ''
+  const { data } = useClient(id)
+  useEffect(() => {
+    // Keyed on the fetched client alone: re-running whenever `open` changed
+    // identity would re-open the drawer the moment the user closed it.
+    if (data) open(data)
+  }, [data, open])
 }
 
 const SORTS = [
@@ -43,6 +61,7 @@ function ClientsList() {
   const pageSize = 25
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [viewing, setViewing] = useState<Client | null>(null)
+  useDeepLinkedClient(setViewing)
 
   const { data, isLoading, isError, refetch } = useClients({
     page,

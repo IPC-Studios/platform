@@ -163,6 +163,13 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
                 </Link>
               </Button>
             )}
+            {lead.converted_client_id && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/clients" search={{ client: lead.converted_client_id } as never}>
+                  Open client
+                </Link>
+              </Button>
+            )}
             {lead.contact_id && (
               <Button size="sm" variant="ghost" asChild>
                 <Link to="/crm/contacts" search={{ contact: lead.contact_id } as never}>
@@ -460,7 +467,14 @@ export function LeadDrawer({ lead, onClose }: { lead: CrmLead; onClose: () => vo
             )}
           </div>
 
-          {canEdit && !lead.converted_project_id && lead.status !== 'lost' && <ConvertPanel lead={lead} onDone={onClose} />}
+          {/*
+            * Both converts count. Offering the panel again to a lead that was
+            * converted client-only is how one enquiry ends up as two clients,
+            * each with its own projects and invoices.
+            */}
+          {canEdit && !lead.converted_project_id && !lead.converted_client_id && lead.status !== 'lost' && (
+            <ConvertPanel lead={lead} onDone={onClose} />
+          )}
 
           <QuotesPanel lead={lead} canEdit={canEdit} />
 

@@ -80,7 +80,7 @@ const remove = requireAction('crm', 'delete')
 const selectLead = (sql: TransactionSql) => sql`
   select l.id, l.name, l.phone, l.email, l.source, l.status, l.assigned_to, l.notes,
          l.follow_up_at, l.last_contacted_at, l.converted_at, l.is_hot, l.is_archived,
-         l.merged_into, l.converted_project_id, l.deal_value, l.probability, l.lost_reason, l.lost_competitor,
+         l.merged_into, l.converted_project_id, l.converted_client_id, l.deal_value, l.probability, l.lost_reason, l.lost_competitor,
          l.sla_due_at, l.pipeline_id, l.stage_id, s.name as stage_name, l.contact_id, l.crm_company_id,
          co.name as crm_company_name, l.title, l.close_date, l.currency, l.score, l.created_at,
          l.event_type, l.event_date, l.event_location, l.alternate_phone, l.city, l.group_name,
@@ -1392,7 +1392,11 @@ export const crmRouter = new Hono<AppEnv>()
         }[]>`
           select id, name, phone, email, source_id from fb_lead_imports
           where id = ${importId} and source_id = ${sourceId} and status = 'failed'`
-        if (!imp || !imp.phone) return null
+        if (!imp) return null
+        // A Facebook lead with no phone can never become a lead — capture_lead
+        // needs one. Saying "not found" sends the studio hunting for a row
+        // that is right there on the screen; say what is actually wrong.
+        if (!imp.phone) return 'no-phone' as const
         const [src] = await sql<{ source_key: string }[]>`
           select source_key from crm_webhook_sources where id = ${sourceId}`
         if (!src) return null
@@ -1405,6 +1409,7 @@ export const crmRouter = new Hono<AppEnv>()
         return out ?? null
       }),
     )
+    if (row === 'no-phone') fail(422, 'That lead arrived without a phone number, so it cannot be imported.')
     if (!row) fail(404, 'That failed import was not found.')
     return c.json(fbLeadImport.parse(row))
   })

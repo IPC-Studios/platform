@@ -57,6 +57,12 @@ export const crmLead = z.object({
   merged_into: uuid.nullable().default(null),
   /** The project this lead became, once converted. */
   converted_project_id: uuid.nullable().default(null),
+  /**
+   * The client this lead became. Set by both converts — the one that also
+   * makes a project, and the "won, project comes later" one, which is the
+   * only record that convert leaves behind at all.
+   */
+  converted_client_id: uuid.nullable().default(null),
   /** Deal value in INR (for forecast). */
   deal_value: z.number().nullable().default(null),
   probability: z.number().int().min(0).max(100).nullable().default(null),
