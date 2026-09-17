@@ -42,7 +42,7 @@ export const hrRouter = new Hono<AppEnv>()
         c.env,
         auth.userId,
         (sql) => sql`
-          select id, a_date, check_in_at, check_out_at, status
+          select id, a_date, check_in_at, check_out_at, status, late_minutes
           from attendance where user_id = ${auth.userId}
             and ${month ? sql`extract(month from a_date)::int = ${month}` : sql`true`}
             and ${year ? sql`extract(year from a_date)::int = ${year}` : sql`true`}
@@ -72,7 +72,7 @@ export const hrRouter = new Hono<AppEnv>()
         c.env,
         auth.userId,
         (sql) => sql`
-          select id, a_date, check_in_at, check_out_at, status
+          select id, a_date, check_in_at, check_out_at, status, late_minutes
           from attendance where user_id = ${userId}
             and ${month ? sql`extract(month from a_date)::int = ${month}` : sql`true`}
             and ${year ? sql`extract(year from a_date)::int = ${year}` : sql`true`}
@@ -113,7 +113,8 @@ export const hrRouter = new Hono<AppEnv>()
         (sql) => sql`
           select u.user_id, u.name, u.email, u.phone, u.engagement_type,
                  coalesce(a.status, 'absent') as status,
-                 a.check_in_at, a.check_out_at, a.corrected_by, a.correction_note
+                 a.check_in_at, a.check_out_at, a.corrected_by, a.correction_note,
+                 coalesce(a.late_minutes, 0) as late_minutes
           from users u
           left join attendance a
             on a.user_id = u.user_id
@@ -212,7 +213,10 @@ export const hrRouter = new Hono<AppEnv>()
   .get('/location', async (c) => {
     const row = await attempt(c, 'hr.location', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
-        const rows = await sql`select lat, lng, radius_m, timezone, is_active from company_location`
+        const rows = await sql`
+          select lat, lng, radius_m, timezone, is_active,
+                 expected_checkin_time, late_grace_minutes, missed_cutoff_time
+            from company_location`
         return rows[0] ?? null
       }),
     )
@@ -229,7 +233,9 @@ export const hrRouter = new Hono<AppEnv>()
     const row = await attempt(c, 'hr.location_set', () =>
       withUser(c.env, c.get('auth').userId, async (sql) => {
         const rows = await sql`
-          select * from set_company_location(${v.lat}, ${v.lng}, ${v.radius_m}, ${v.timezone}, ${v.is_active})`
+          select * from set_company_location(
+            ${v.lat}, ${v.lng}, ${v.radius_m}, ${v.timezone}, ${v.is_active},
+            ${v.expected_checkin_time}::time, ${v.late_grace_minutes}, ${v.missed_cutoff_time}::time)`
         return rows[0] ?? null
       }),
     )

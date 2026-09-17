@@ -9,6 +9,8 @@ export const attendanceRecord = z.object({
   check_in_at: isoDateTime.nullable(),
   check_out_at: isoDateTime.nullable(),
   status: attendanceStatus,
+  /** Minutes past the studio's expected start. 0 unless the status is 'late'. */
+  late_minutes: z.number().int().default(0),
 })
 export type AttendanceRecord = z.infer<typeof attendanceRecord>
 
@@ -25,6 +27,17 @@ export const companyFence = z.object({
   timezone: z.string().default('Asia/Kolkata'),
   /** When off, check-in still works but location is not validated — for a shoot day away from the studio, or while re-measuring. */
   is_active: z.boolean().default(true),
+  /**
+   * HH:MM, or null when the studio has not declared a start of day.
+   *
+   * Null is the important value: nobody can be late for a day that has no
+   * declared start, so lateness stays off until an owner sets this.
+   */
+  expected_checkin_time: z.string().nullable().default(null),
+  /** Minutes after the start that are still forgiven. */
+  late_grace_minutes: z.number().int().default(15),
+  /** HH:MM, or null — after this, a day with no check-in reads as missed. */
+  missed_cutoff_time: z.string().nullable().default(null),
 })
 export type CompanyFence = z.infer<typeof companyFence>
 
@@ -35,6 +48,24 @@ export const setFenceRequest = z.object({
   radius_m: z.number().int().min(20).max(5000).default(150),
   timezone: z.string().min(3).max(60).default('Asia/Kolkata'),
   is_active: z.boolean().default(true),
+  // HH:MM or HH:MM:SS — an <input type="time"> sends the first, Postgres
+  // returns the second. An empty input means "no start of day declared", so
+  // '' is coerced to null rather than rejected.
+  expected_checkin_time: z
+    .string()
+    .regex(/^(\d{2}:\d{2}(:\d{2})?)?$/, 'Use HH:MM')
+    .transform((v) => v || null)
+    .nullable()
+    .default(null),
+  // Four hours is already generous; beyond it the concept stops meaning
+  // anything and the studio wants a later start time instead.
+  late_grace_minutes: z.number().int().min(0).max(240).default(15),
+  missed_cutoff_time: z
+    .string()
+    .regex(/^(\d{2}:\d{2}(:\d{2})?)?$/, 'Use HH:MM')
+    .transform((v) => v || null)
+    .nullable()
+    .default(null),
 })
 export type SetFenceRequest = z.infer<typeof setFenceRequest>
 
@@ -57,6 +88,8 @@ export const attendanceDayRow = z.object({
   /** Set when an owner or admin corrected the day by hand. */
   corrected_by: uuid.nullable().default(null),
   correction_note: z.string().nullable().default(null),
+  /** Minutes past the studio's expected start. 0 unless the status is 'late'. */
+  late_minutes: z.number().int().default(0),
 })
 export type AttendanceDayRow = z.infer<typeof attendanceDayRow>
 

@@ -49,6 +49,7 @@ import {
   STATUS_LABEL,
   STATUS_TONE,
   displayStatus,
+  lateBy,
   formatTime,
   hasFilters,
   hoursWorked,
@@ -501,6 +502,7 @@ function RosterTable({
                   </Link>
                 </p>
                 <StatusBadge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</StatusBadge>
+                {lateBy(r) && <span className="text-xs text-warning">{lateBy(r)}</span>}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 In {formatTime(r.check_in_at)} · Out {formatTime(r.check_out_at)}
@@ -554,6 +556,7 @@ function RosterTable({
                 </td>
                 <td className="px-4 py-2">
                   <StatusBadge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</StatusBadge>
+                  {lateBy(r) && <span className="ml-2 text-xs text-warning">{lateBy(r)}</span>}
                   {r.corrected_by && (
                     <span className="ml-2 text-xs text-muted-foreground" title={r.correction_note ?? undefined}>
                       corrected

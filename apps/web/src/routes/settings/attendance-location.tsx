@@ -36,7 +36,15 @@ function AttendanceLocation() {
     enabled: !!session,
   })
   const save = useMutation({
-    mutationFn: (body: { lat: number; lng: number; radius_m: number; is_active: boolean }) =>
+    mutationFn: (body: {
+      lat: number
+      lng: number
+      radius_m: number
+      is_active: boolean
+      expected_checkin_time: string | null
+      late_grace_minutes: number
+      missed_cutoff_time: string | null
+    }) =>
       callApi('/hr/location', { method: 'PATCH', body: setFenceRequest.parse({ ...body, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }), responseSchema: companyFence }),
     onSuccess: () => {
       toast.success('Attendance location updated.')
@@ -49,6 +57,11 @@ function AttendanceLocation() {
   const [lng, setLng] = useState('')
   const [radius, setRadius] = useState('100')
   const [active, setActive] = useState(true)
+  // Empty means the studio has not declared a start of day, and nobody is
+  // marked late. That is the default, and it is not the same as 00:00.
+  const [expected, setExpected] = useState('')
+  const [grace, setGrace] = useState('15')
+  const [cutoff, setCutoff] = useState('')
   const [locating, setLocating] = useState(false)
 
   useEffect(() => {
@@ -57,6 +70,11 @@ function AttendanceLocation() {
       setLng(String(fence.data.lng))
       setRadius(String(fence.data.radius_m))
       setActive(fence.data.is_active)
+      // Postgres returns HH:MM:SS; <input type="time"> wants HH:MM. Null
+      // stays empty.
+      setExpected(fence.data.expected_checkin_time?.slice(0, 5) ?? '')
+      setGrace(String(fence.data.late_grace_minutes))
+      setCutoff(fence.data.missed_cutoff_time?.slice(0, 5) ?? '')
     }
   }, [fence.data])
 
@@ -86,7 +104,23 @@ function AttendanceLocation() {
     if (!Number.isFinite(la) || la < -90 || la > 90) return toast.error('Latitude must be between -90 and 90.')
     if (!Number.isFinite(ln) || ln < -180 || ln > 180) return toast.error('Longitude must be between -180 and 180.')
     if (!Number.isFinite(r) || r < 20 || r > 5000) return toast.error('Radius must be between 20 and 5000 meters.')
-    save.mutate({ lat: la, lng: ln, radius_m: Math.round(r), is_active: active })
+    const g = Number(grace)
+    if (!Number.isFinite(g) || g < 0 || g > 240) return toast.error('Grace must be between 0 and 240 minutes.')
+    // Checked here as well as in the database so the studio is told which
+    // field is wrong, rather than shown a failed save. Only when both are set:
+    // leaving the working day undeclared is a valid choice.
+    if (expected && cutoff && cutoff <= expected) {
+      return toast.error('The missed check-in cutoff must be after the start time.')
+    }
+    save.mutate({
+      lat: la,
+      lng: ln,
+      radius_m: Math.round(r),
+      is_active: active,
+      expected_checkin_time: expected || null,
+      late_grace_minutes: Math.round(g),
+      missed_cutoff_time: cutoff || null,
+    })
   }
 
   return (
@@ -135,6 +169,62 @@ function AttendanceLocation() {
               <div className="rounded-lg border border-border p-3">
                 <Switch checked={active} onChange={setActive} label="Enforce geo-fence" description="When off, check-in still works but location is not validated." />
               </div>
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="font-medium">The working day</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Optional. Leave the start time empty and nobody is ever marked late — which is
+                  how every studio behaves until someone fills it in. Set it, and a check-in after
+                  the start plus the grace is recorded as late, with the attendance list showing
+                  by how much.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="expected">Day starts at</Label>
+                    <Input
+                      id="expected"
+                      type="time"
+                      value={expected}
+                      onChange={(e) => setExpected(e.target.value)}
+                      disabled={!isOwner}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="grace">Grace (minutes)</Label>
+                    <Input
+                      id="grace"
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={grace}
+                      onChange={(e) => setGrace(e.target.value)}
+                      disabled={!isOwner}
+                    />
+                    {/*
+                      * Worth saying plainly, because it surprises people: the
+                      * grace decides WHETHER someone is late, not from when the
+                      * minutes count.
+                      */}
+                    <p className="text-xs text-muted-foreground">
+                      Arriving within this is on time. Past it, the minutes are counted from the
+                      start of the day, not from the end of the grace.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="cutoff">Missed after</Label>
+                    <Input
+                      id="cutoff"
+                      type="time"
+                      value={cutoff}
+                      onChange={(e) => setCutoff(e.target.value)}
+                      disabled={!isOwner}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      After this, a day with no check-in reads as missed rather than still pending.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <Button type="submit" disabled={save.isPending}>
                   {save.isPending ? 'Saving…' : 'Save location'}

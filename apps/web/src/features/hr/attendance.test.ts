@@ -18,6 +18,7 @@ const row = (name: string, over: Partial<AttendanceDayRow> = {}): AttendanceDayR
   email: `${name.toLowerCase()}@studio.in`,
   phone: '9876543210',
   engagement_type: 'in_house',
+  late_minutes: 0,
   status: 'present',
   check_in_at: '2026-09-01T03:34:00Z',
   check_out_at: '2026-09-01T12:04:00Z',

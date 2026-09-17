@@ -551,7 +551,18 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
   if (method === 'GET' && path === '/hr/location')
-    return { lat: 19.076, lng: 72.8777, radius_m: 150, timezone: 'Asia/Kolkata' }
+    return {
+      lat: 19.076,
+      lng: 72.8777,
+      radius_m: 150,
+      timezone: 'Asia/Kolkata',
+      is_active: true,
+      // A studio that has declared its working day, so the preview shows the
+      // fields populated rather than the untouched state.
+      expected_checkin_time: '10:00:00',
+      late_grace_minutes: 15,
+      missed_cutoff_time: '12:00:00',
+    }
   if (method === 'PATCH' && path === '/hr/location')
     return { ...(body as Record<string, unknown>), timezone: 'Asia/Kolkata' }
   if (method === 'GET' && path.startsWith('/hr/attendance?')) return atStage(rosterFx, 'partial')
@@ -760,6 +771,9 @@ const rosterFx = [
     phone: null,
     engagement_type: 'freelancer',
     status: 'late',
+    // 11:11 against a 10:00 start: seventy-one minutes, so the preview shows
+    // the hours-and-minutes form rather than only the badge.
+    late_minutes: 71,
     check_in_at: '2026-09-01T05:41:00Z',
     check_out_at: '2026-09-01T12:30:00Z',
   },

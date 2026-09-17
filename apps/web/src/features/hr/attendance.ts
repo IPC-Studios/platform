@@ -15,6 +15,23 @@ export type { DisplayStatus }
 
 export const displayStatus = (row: AttendanceDayRow): DisplayStatus => displayStatusOf(row)
 
+/**
+ * "20m late", or nothing at all.
+ *
+ * Only ever shown beside a late badge: a zero here means on time, and "0m
+ * late" next to a Present badge reads like a fault rather than the absence of
+ * one. Over an hour it switches to hours and minutes, because "95m late" is
+ * arithmetic the reader should not have to do.
+ */
+export function lateBy(row: AttendanceDayRow): string {
+  const m = row.late_minutes
+  if (!m || m <= 0) return ''
+  if (m < 60) return `${m}m late`
+  const h = Math.floor(m / 60)
+  const rem = m % 60
+  return rem === 0 ? `${h}h late` : `${h}h ${rem}m late`
+}
+
 export const STATUS_LABEL: Record<DisplayStatus, string> = {
   present: 'Present',
   late: 'Late',
@@ -108,6 +125,7 @@ export const CSV_HEADERS = [
   'Phone',
   'Engagement',
   'Status',
+  'Late by (min)',
   'Checked in',
   'Checked out',
   'Hours',
@@ -122,6 +140,7 @@ export function toCsv(rows: readonly AttendanceDayRow[]): string {
       r.phone,
       r.engagement_type,
       STATUS_LABEL[displayStatus(r)],
+      r.late_minutes > 0 ? String(r.late_minutes) : '',
       r.check_in_at,
       r.check_out_at,
       hoursWorked(r),
