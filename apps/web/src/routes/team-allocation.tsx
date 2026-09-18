@@ -22,6 +22,7 @@ import { useConfirm } from '@/shared/ui/confirm'
 import { formatINR } from '@/shared/ui/format'
 import { cn } from '@/shared/ui/cn'
 import { useSlots, useMembers, useBookSlot, useSetSlotStatus, useSetSlotCost, useUpdateSlot, ApiError } from '@/features/allocation/api'
+import { crewState, rolesFilled, rolesNeeded } from '@ipc/domain'
 
 export function TeamAllocationPage({ initialTab }: { initialTab?: Tab } = {}) {
   return (
@@ -777,22 +778,21 @@ function BookingDashboard({
   const [role, setRole] = useState('')
   const [search, setSearch] = useState('')
 
+  const slotRows = slots
   const booked = slots.filter((s) => s.status === 'booked')
   const released = slots.filter((s) => s.status === 'released')
   const cancelled = slots.filter((s) => s.status === 'cancelled')
 
-  const needed = shoots.reduce((n, s) => n + s.requirements.reduce((m, r) => m + r.quantity, 0), 0)
-  const filledForShoot = (s: ShootListItem) =>
-    s.requirements.reduce((m, r) => {
-      const have = booked.filter((x) => x.shoot_id === s.id && same(x.service_name, r.name)).length
-      return m + Math.min(r.quantity, have)
-    }, 0)
-  const filled = shoots.reduce((n, s) => n + filledForShoot(s), 0)
+  // From @ipc/domain, so this screen and the shoots list cannot disagree about
+  // which days still need people — this tile links straight to that list.
+  const needed = shoots.reduce((n, s) => n + rolesNeeded(s.requirements), 0)
+  const filled = shoots.reduce((n, s) => n + rolesFilled(s.id, s.requirements, slotRows), 0)
   const pending = Math.max(0, needed - filled)
-  const unstaffed = shoots.filter((s) => s.requirements.length === 0).length
-  const unassignedShoots = shoots.filter(
-    (s) => s.requirements.length > 0 && filledForShoot(s) < s.requirements.reduce((m, r) => m + r.quantity, 0),
-  ).length
+  const unstaffed = shoots.filter((s) => crewState(s.id, s.requirements, slotRows) === 'unplanned').length
+  const unassignedShoots = shoots.filter((s) => {
+    const state = crewState(s.id, s.requirements, slotRows)
+    return state === 'unassigned' || state === 'partial'
+  }).length
   // Only booked slots can clash for real — a released or cancelled slot freed up
   // its time, so counting it here would flag a false double-booking.
   const conflicts = findClashes(booked).length
@@ -823,10 +823,18 @@ function BookingDashboard({
           tone={needed === 0 ? undefined : filled >= needed ? 'success' : 'warning'}
         />
         <Figure label="Pending" value={String(pending)} tone={pending > 0 ? 'warning' : undefined} />
+        {/*
+          * A count of a problem should reach the rows behind it. This one was
+          * a dead end: it said three shoots needed crew and the shoots list
+          * had no way to show which three.
+          */}
         <Figure
           label="Unassigned shoots"
           value={String(unassignedShoots)}
           tone={unassignedShoots > 0 ? 'warning' : undefined}
+          {...(unassignedShoots > 0
+            ? { to: '/shoots', search: { crew: 'unassigned' }, hint: 'See which' }
+            : {})}
         />
         <Figure label="Conflicts" value={String(conflicts)} tone={conflicts > 0 ? 'warning' : undefined} />
         <Figure label="Active members" value={String(activeMemberIds.size)} />
@@ -908,15 +916,29 @@ function Figure({
   label,
   value,
   tone,
+  to,
+  search,
+  hint,
 }: {
   label: string
   value: string
   tone?: 'success' | 'warning' | 'danger' | undefined
+  /** Set when the number has rows behind it worth reaching. */
+  to?: string | undefined
+  search?: Record<string, string> | undefined
+  hint?: string | undefined
 }) {
   return (
     <Card>
       <CardContent className="p-4">
-        <p className="text-sm text-muted-foreground">{label}</p>
+        <p className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+          {label}
+          {to && (
+            <Link to={to as never} search={search as never} className="text-xs font-medium text-primary hover:underline">
+              {hint ?? 'View'}
+            </Link>
+          )}
+        </p>
         <p
           className={cn(
             'mt-0.5 text-xl font-semibold tabular-nums',

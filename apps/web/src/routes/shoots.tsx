@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { useAccess } from '@/shared/auth/useAccess'
+import { useSlots } from '@/features/allocation/api'
+import { crewState, rolesFilled, rolesNeeded, type CrewState } from '@ipc/domain'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
@@ -51,9 +53,22 @@ export function ShootsPage() {
 
 type SortKey = 'date_asc' | 'date_desc' | 'name_az' | 'recent'
 type DateFilter = 'all' | 'upcoming' | 'past' | 'today'
+type CrewFilter = 'all' | CrewState
+
+/** Warning, not danger: an uncrewed shoot is work to do, not a failure. */
+const CREW_TONE: Record<CrewState, 'success' | 'warning' | 'neutral'> = {
+  full: 'success',
+  partial: 'warning',
+  unassigned: 'warning',
+  unplanned: 'neutral',
+}
 
 function Shoots() {
   const { data, isLoading, isError, refetch } = useShoots()
+  // Booked crew, to answer "which shoots still need people". Team Booking
+  // counts that on its own screen and could not say WHICH — the tile was a
+  // number with no way through to the rows behind it.
+  const slots = useSlots()
   const access = useAccess()
   const canEdit = access.hasAction('projects', 'edit')
   const canDelete = access.hasAction('projects', 'delete')
@@ -64,9 +79,34 @@ function Shoots() {
   const [status, setStatus] = useState<'all' | ShootStatus>('all')
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
   const [sort, setSort] = useState<SortKey>('date_asc')
+  const [crew, setCrew] = useState<CrewFilter>(
+    // ?crew=unassigned arrives from Team Booking's tile.
+    () => {
+      const v = new URLSearchParams(window.location.search).get('crew') ?? ''
+      return (['unplanned', 'unassigned', 'partial', 'full'] as const).includes(v as CrewState)
+        ? (v as CrewState)
+        : 'all'
+    },
+  )
 
   const today = new Date().toISOString().slice(0, 10)
   const all = useMemo(() => data ?? [], [data])
+
+  // The same rule Team Booking uses, from @ipc/domain rather than a second
+  // copy — a tile saying three while the filter shows two is worse than
+  // neither existing.
+  const crewOf = useMemo(() => {
+    const bookings = slots.data ?? []
+    const m = new Map<string, { state: CrewState; filled: number; needed: number }>()
+    for (const sh of all) {
+      m.set(sh.id, {
+        state: crewState(sh.id, sh.requirements, bookings),
+        filled: rolesFilled(sh.id, sh.requirements, bookings),
+        needed: rolesNeeded(sh.requirements),
+      })
+    }
+    return m
+  }, [all, slots.data])
 
   // Stats over the unfiltered set (Lovable parity).
   const stats = useMemo(
@@ -75,8 +115,12 @@ function Shoots() {
       upcoming: all.filter((s) => s.shoot_date && s.shoot_date >= today).length,
       past: all.filter((s) => s.shoot_date && s.shoot_date < today).length,
       unscheduled: all.filter((s) => !s.shoot_date).length,
+      needsCrew: all.filter((s) => {
+        const c = crewOf.get(s.id)?.state
+        return c === 'unassigned' || c === 'partial'
+      }).length,
     }),
-    [all, today],
+    [all, today, crewOf],
   )
 
   const rows = useMemo(() => {
@@ -86,6 +130,7 @@ function Shoots() {
       if (dateFilter === 'upcoming' && !(s.shoot_date && s.shoot_date >= today)) return false
       if (dateFilter === 'past' && !(s.shoot_date && s.shoot_date < today)) return false
       if (dateFilter === 'today' && s.shoot_date !== today) return false
+      if (crew !== 'all' && crewOf.get(s.id)?.state !== crew) return false
       if (q) {
         const hay = [s.name, s.project_name ?? '', s.location ?? '', s.client_name ?? '']
           .join(' ')
@@ -103,7 +148,7 @@ function Shoots() {
       return sort === 'date_desc' ? bk.localeCompare(ak) : ak.localeCompare(bk)
     })
     return sorted
-  }, [all, search, status, dateFilter, sort, today])
+  }, [all, search, status, dateFilter, crew, crewOf, sort, today])
 
   async function onDelete(s: ShootListItem) {
     const yes = await confirm({
@@ -137,6 +182,7 @@ function Shoots() {
         <StatCard label="Upcoming" value={stats.upcoming} />
         <StatCard label="Past" value={stats.past} />
         <StatCard label="Unscheduled" value={stats.unscheduled} />
+        <StatCard label="Needs crew" value={stats.needsCrew} />
       </div>
 
       <div className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
@@ -159,6 +205,19 @@ function Shoots() {
             <option value="upcoming">Upcoming</option>
             <option value="past">Past</option>
             <option value="today">Today</option>
+          </Select>
+          <Select
+            value={crew}
+            onChange={(e) => setCrew(e.target.value as CrewFilter)}
+            aria-label="Crew"
+          >
+            <option value="all">All crew states</option>
+            <option value="unassigned">Needs crew — nobody booked</option>
+            <option value="partial">Partly crewed</option>
+            <option value="full">Fully crewed</option>
+            {/* Kept separate from "needs crew": nothing has been asked for
+                yet, so nobody is missing. */}
+            <option value="unplanned">No roles set yet</option>
           </Select>
           <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort">
             <option value="date_asc">Date ↑</option>
@@ -227,8 +286,21 @@ function Shoots() {
                   )}
                 </div>
                 {s.requirements.length > 0 && (
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    Needs: {s.requirements.map((r) => `${r.name} ×${r.quantity}`).join(', ')}
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="truncate">
+                      Needs: {s.requirements.map((r) => `${r.name} ×${r.quantity}`).join(', ')}
+                    </span>
+                    {(() => {
+                      const c = crewOf.get(s.id)
+                      if (!c) return null
+                      return (
+                        <StatusBadge tone={CREW_TONE[c.state]}>
+                          {c.state === 'full'
+                            ? 'Fully crewed'
+                            : `${c.filled} of ${c.needed} booked`}
+                        </StatusBadge>
+                      )
+                    })()}
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
