@@ -3,6 +3,7 @@ import type { CrmQuote } from '@ipc/contracts'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { formatINR } from '@/shared/ui/format'
 
 /**
@@ -125,7 +126,8 @@ export function QuoteViewer({ quote, onClose }: { quote: CrmQuote | null; onClos
             </p>
           )}
 
-          <div className="flex justify-end border-t border-border pt-3">
+          <div className="flex justify-end gap-2 border-t border-border pt-3">
+            <DownloadDocumentButton name={`${quote.quote_number}${quote.title ? ` ${quote.title}` : ''}`} />
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="mr-1 size-4" /> Print
             </Button>

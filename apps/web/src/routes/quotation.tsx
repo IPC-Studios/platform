@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -372,8 +373,12 @@ export function QuotationPage() {
 
               {/* ── Actions (never printed) ───────────────────── */}
               <div className="no-print mt-6 flex flex-wrap gap-2 border-t border-border pt-5">
+                <DownloadDocumentButton
+                  name={`Quotation${quote.client_name ? ` ${quote.client_name}` : ''}`}
+                  label="Download PDF"
+                />
                 <Button variant="outline" size="sm" onClick={() => window.print()}>
-                  <Printer className="mr-1 size-4" /> Print or save as PDF
+                  <Printer className="mr-1 size-4" /> Print
                 </Button>
                 <Button size="sm" variant="outline" asChild>
                   <a href={buildWhatsAppUrl(null, shareText)} target="_blank" rel="noreferrer noopener">

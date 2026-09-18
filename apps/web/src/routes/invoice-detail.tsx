@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
-import { Printer, ArrowLeft, Download, Pencil, Trash2, Copy, Mail, MessageCircle, Plus, X } from 'lucide-react'
+import { Printer, ArrowLeft, Pencil, Trash2, Copy, Mail, MessageCircle, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { amountInWords, type GstSlab } from '@ipc/domain'
 import { buildMailtoUrl, buildWhatsAppUrl, companyProfile, friendlyInvoiceError, type InvoiceDetail } from '@ipc/contracts'
 import { callApi } from '@/shared/api/client'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { SkeletonCards } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState } from '@/shared/ui/states'
@@ -72,9 +73,10 @@ function InvoiceDoc({ edit }: { edit?: boolean | undefined }) {
           )}
           {data.balance_due > 0 && <DetailRecordPayment invoiceId={data.id} balance={data.balance_due} />}
           <InvoiceShareActions invoice={data} />
-          <Button size="sm" variant="outline" onClick={() => window.print()}>
-            <Download /> Download PDF
-          </Button>
+          <DownloadDocumentButton
+            name={`Invoice ${data.invoice_number}${data.client_name ? ` ${data.client_name}` : ''}`}
+            label="Download PDF"
+          />
           <Button size="sm" onClick={() => window.print()}>
             <Printer /> Print Invoice
           </Button>

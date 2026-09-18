@@ -4,6 +4,7 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { ErrorState } from '@/shared/ui/states'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { useTermsDocumentPayload } from './document'
 import { TermsDocumentLetterhead, TermsDocumentSheet } from './TermsDocumentSheet'
 
@@ -83,9 +84,14 @@ export function TermsDocumentViewer({
               <StatusBadge tone="neutral">
                 Opened by the client {data.access_count} {data.access_count === 1 ? 'time' : 'times'}
               </StatusBadge>
-              <Button variant="outline" size="sm" onClick={() => window.print()}>
-                <Printer className="mr-1 size-4" /> Print
-              </Button>
+              <div className="flex gap-2">
+                <DownloadDocumentButton
+                  name={`${data.document_number ?? 'Terms'}${data.project_name ? ` ${data.project_name}` : ''}`}
+                />
+                <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Printer className="mr-1 size-4" /> Print
+                </Button>
+              </div>
             </div>
           </div>
         )}

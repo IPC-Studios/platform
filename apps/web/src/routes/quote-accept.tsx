@@ -4,6 +4,7 @@ import { okResponse, publicQuote, type PublicQuote } from '@ipc/contracts'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -77,6 +78,17 @@ export function QuoteAcceptPage() {
               <p className="text-xs uppercase tracking-wider text-muted-foreground">{quote?.studio ?? 'Quote'}</p>
               <h1 className="truncate text-lg font-semibold">{quote ? `${quote.quote_number}${quote.title ? ` · ${quote.title}` : ''}` : 'Your quote'}</h1>
             </div>
+            {/*
+              * A client agreeing to a price should be able to keep a copy of
+              * it. Shown whatever the quote's state — the copy matters most
+              * after they have accepted, not before.
+              */}
+            {quote && (
+              <DownloadDocumentButton
+                name={`${quote.quote_number}${quote.title ? ` ${quote.title}` : ''}`}
+                className="no-print shrink-0"
+              />
+            )}
           </div>
 
           {loadError ? (

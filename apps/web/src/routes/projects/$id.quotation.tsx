@@ -22,6 +22,7 @@ import { AuthedPage } from '@/shared/layout/AuthedPage'
 import { Breadcrumbs } from '@/shared/layout/breadcrumbs'
 import { PageHeader } from '@/shared/layout/page-header'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Input } from '@/shared/ui/input'
 import { StatusBadge } from '@/shared/ui/status-badge'
 import { ErrorState, EmptyState } from '@/shared/ui/states'
@@ -248,6 +249,10 @@ function ProjectQuotation() {
             <Button variant="outline" size="sm" onClick={() => void onShare()} disabled={issue.isPending}>
               <Link2 /> {issue.isPending ? 'Preparing…' : 'Share link'}
             </Button>
+            <DownloadDocumentButton
+              name={`Quotation ${data.name}`}
+              label="Download PDF"
+            />
             <Button size="sm" onClick={() => window.print()}>
               <Printer /> Print
             </Button>

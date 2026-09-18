@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -135,6 +136,9 @@ export function TermsAcknowledgePage() {
           <TermsDocumentSheet doc={doc} />
           <p className="text-[11px] text-muted-foreground">Views on this link: {doc.access_count} (KPIs stub — per-link analytics arrive with the next rollup).</p>
           <div className="flex flex-wrap gap-2">
+            <DownloadDocumentButton
+              name={`${doc.document_number ?? 'Terms'}${doc.project_name ? ` ${doc.project_name}` : ''}`}
+            />
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="mr-1 size-4" /> Print
             </Button>

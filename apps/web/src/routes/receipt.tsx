@@ -4,6 +4,7 @@ import { IndianRupee, Printer, Mail, MessageCircle, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { callApi } from '@/shared/api/client'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StatusBadge } from '@/shared/ui/status-badge'
@@ -175,8 +176,13 @@ export function ReceiptPage() {
               )}
 
               <div className="no-print mt-5 flex flex-wrap gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => window.print()}>
-                  <Printer /> Print or save as PDF
+                <DownloadDocumentButton
+                  name={`Receipt ${receipt.receipt_number}${receipt.client_name ? ` ${receipt.client_name}` : ''}`}
+                  label="Download PDF"
+                  className="flex-1"
+                />
+                <Button variant="outline" onClick={() => window.print()}>
+                  <Printer /> Print
                 </Button>
               </div>
               <div className="no-print mt-2 flex flex-wrap gap-2">

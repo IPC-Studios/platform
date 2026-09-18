@@ -4,6 +4,7 @@ import { CalendarDays, CheckCircle2, Printer, ShieldCheck } from 'lucide-react'
 import { callApi, ApiError } from '@/shared/api/client'
 import { CameraBackdrop } from '@/shared/brand/CameraBackdrop'
 import { Button } from '@/shared/ui/button'
+import { DownloadDocumentButton } from '@/shared/ui/download-document'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Input, Label } from '@/shared/ui/input'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -157,6 +158,10 @@ export function TeamTermsAcknowledgePage() {
                       <Button type="submit" disabled={busy || name.trim().length < 1}>
                         {busy ? 'Recording…' : 'I agree'}
                       </Button>
+                      <DownloadDocumentButton
+                        name={`Team terms ${terms.recipient_name}${terms.shoot_name ? ` ${terms.shoot_name}` : ''}`}
+                        size="default"
+                      />
                       <Button type="button" variant="outline" onClick={() => window.print()}>
                         <Printer className="mr-1 size-4" /> Print
                       </Button>
