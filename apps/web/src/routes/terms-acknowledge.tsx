@@ -134,7 +134,6 @@ export function TermsAcknowledgePage() {
       ) : (
         <>
           <TermsDocumentSheet doc={doc} />
-          <p className="text-[11px] text-muted-foreground">Views on this link: {doc.access_count} (KPIs stub — per-link analytics arrive with the next rollup).</p>
           <div className="flex flex-wrap gap-2">
             <DownloadDocumentButton
               name={`${doc.document_number ?? 'Terms'}${doc.project_name ? ` ${doc.project_name}` : ''}`}

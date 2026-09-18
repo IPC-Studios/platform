@@ -8,10 +8,14 @@ import {
   updateCompanyRequest,
   updateMyProfileRequest,
   updateThemeRequest,
+  integrationStatusList,
 } from '@ipc/contracts'
 import type { AppEnv } from '../../context'
 import { requireAuth } from '../../middleware/auth'
 import { requireOwner } from '../../middleware/permissions'
+import { razorpayConfigured } from '../../lib/env'
+import { whatsappConfigured } from '../../lib/whatsapp'
+import { twilioConfigured } from '../../lib/twilio'
 import { fail } from '../../middleware/errors'
 import { withUser } from '../../lib/db'
 import { attempt } from '../../lib/attempt'
@@ -187,6 +191,80 @@ export const settingsRouter = new Hono<AppEnv>()
   // ── Audit trail ─────────────────────────────────────────────
   // Owner-only by RLS (audit_logs_select_owner) and by the gate here. Cursor
   // is the created_at of the last row seen; entries are newest first.
+  /**
+   * Which outside services this deployment can actually reach.
+   *
+   * Each of these degrades quietly rather than failing: with no WhatsApp
+   * credentials the app opens wa.me for a human to press send, with no Twilio
+   * it logs the call as one made by hand, with no Resend key it writes a line
+   * to the log and carries on. All sensible fallbacks, and all invisible — a
+   * studio can believe for months that the system is sending its messages.
+   *
+   * Owner-only, and booleans only. That a key exists is not a secret; the key
+   * is, and it never leaves the server.
+   */
+  .get('/integrations', requireOwner(), (c) => {
+    const env = c.env
+    const items = [
+      {
+        key: 'email' as const,
+        label: 'Email (Resend)',
+        configured: !!env.RESEND_API_KEY && !!env.EMAIL_FROM,
+        detail: env.RESEND_API_KEY
+          ? 'Verification, invitations, quotations and receipts are delivered by the system.'
+          : 'Nothing is emailed. Sends are written to the server log and skipped, including sign-up verification.',
+        requires: ['RESEND_API_KEY', 'EMAIL_FROM'],
+      },
+      {
+        key: 'whatsapp' as const,
+        label: 'WhatsApp (Cloud API)',
+        configured: whatsappConfigured(env),
+        detail: whatsappConfigured(env)
+          ? 'The system sends the message itself and the lead history records it as sent.'
+          : 'Opens wa.me with the text filled in, for someone to press send by hand. Nothing is delivered automatically.',
+        requires: ['WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_ACCESS_TOKEN'],
+      },
+      {
+        key: 'calls' as const,
+        label: 'Click to call (Twilio)',
+        configured: twilioConfigured(env),
+        detail: twilioConfigured(env)
+          ? 'Call rings your phone first, then bridges the lead.'
+          : 'Call only logs an activity. Dial the number yourself — the timeline looks the same either way.',
+        requires: ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER'],
+      },
+      {
+        key: 'payments' as const,
+        label: 'Subscription payments (Razorpay)',
+        configured: razorpayConfigured(env),
+        detail: razorpayConfigured(env)
+          ? 'Plan renewals take a real payment and the signature is verified.'
+          : 'Renewal cannot take a payment. Outside production a plan can be activated without one; in production it is refused.',
+        requires: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET'],
+      },
+      {
+        key: 'meta_leads' as const,
+        label: 'Meta lead ads',
+        configured: !!env.META_APP_SECRET && !!env.META_PAGE_ACCESS_TOKEN,
+        detail:
+          env.META_APP_SECRET && env.META_PAGE_ACCESS_TOKEN
+            ? "Facebook and Instagram lead forms arrive signed, and the lead's own fields are fetched."
+            : 'Only a generic JSON webhook works. Posts are not signature-verified and form fields are not fetched from Meta.',
+        requires: ['META_VERIFY_TOKEN', 'META_APP_SECRET', 'META_PAGE_ACCESS_TOKEN'],
+      },
+      {
+        key: 'errors' as const,
+        label: 'Error tracking (Sentry)',
+        configured: !!env.SENTRY_DSN,
+        detail: env.SENTRY_DSN
+          ? 'Errors, traces and nightly job check-ins are reported.'
+          : 'Errors reach the server log only, and a job that stops running says nothing.',
+        requires: ['SENTRY_DSN'],
+      },
+    ]
+    return c.json(integrationStatusList.parse({ items, environment: env.ENVIRONMENT ?? 'unknown' }))
+  })
+
   .get('/audit', requireOwner(), async (c) => {
     const parsed = auditLogQuery.safeParse({
       cursor: c.req.query('cursor'),

@@ -176,3 +176,33 @@ export const updateThemeRequest = z.object({
   border_color: hexColor.nullish(),
 })
 export type UpdateThemeRequest = z.infer<typeof updateThemeRequest>
+
+/**
+ * Which outside services this deployment can actually reach.
+ *
+ * Every one of these has a working degraded mode, which is the problem: with
+ * no credentials the app does something reasonable instead of failing, so a
+ * studio can go months believing WhatsApp messages are being delivered by the
+ * system when each one has been opening a wa.me tab for somebody to send by
+ * hand. This is the screen that answers "is it actually on".
+ *
+ * Booleans only. The values themselves are secrets and never leave the server
+ * — knowing that Twilio is configured is not the same as being told its token.
+ */
+export const integrationStatus = z.object({
+  key: z.enum(['email', 'whatsapp', 'calls', 'payments', 'meta_leads', 'errors']),
+  label: z.string(),
+  configured: z.boolean(),
+  /** What the studio gets right now, in either state. */
+  detail: z.string(),
+  /** The env vars an administrator has to set. Names, never values. */
+  requires: z.array(z.string()),
+})
+export type IntegrationStatus = z.infer<typeof integrationStatus>
+
+export const integrationStatusList = z.object({
+  items: z.array(integrationStatus),
+  /** production / development / … — the same value the API reports at /health. */
+  environment: z.string(),
+})
+export type IntegrationStatusList = z.infer<typeof integrationStatusList>

@@ -6,6 +6,7 @@ import {
   companyProfile,
   cronRun,
   healthBody,
+  integrationStatusList,
   z,
   type ChangePasswordRequest,
 } from '@ipc/contracts'
@@ -65,6 +66,22 @@ export function useCronRuns() {
  * The public liveness probe. Fetched directly rather than through callApi so a
  * 503 (database unreachable) still yields the body instead of an exception.
  */
+/**
+ * Which outside services this deployment can reach.
+ *
+ * Owner-only on the server, so the hook stays disabled for everyone else
+ * rather than firing a request that will 403.
+ */
+export function useIntegrations() {
+  const { session } = useAuth()
+  return useQuery({
+    queryKey: ['settings', 'integrations'],
+    queryFn: () => callApi('/settings/integrations', { responseSchema: integrationStatusList }),
+    enabled: !!session?.is_owner,
+    staleTime: 60_000,
+  })
+}
+
 export function useHealth() {
   return useQuery({
     queryKey: ['health'],

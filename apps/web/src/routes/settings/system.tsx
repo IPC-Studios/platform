@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2, Pencil } from 'lucide-react'
+import { Activity, Database, ScrollText, Timer, Settings, Plus, Trash2, Pencil, Plug } from 'lucide-react'
 import type { AuditLogEntry, CronRun } from '@ipc/contracts'
 import { useAuth } from '@/shared/auth/AuthProvider'
 import { AuthedPage } from '@/shared/layout/AuthedPage'
@@ -18,7 +18,7 @@ import { Switch } from '@/shared/ui/switch'
 import { RecordCard, RecordCards } from '@/shared/ui/record-card'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { humanize } from '@/shared/ui/format'
-import { useAuditLog, useCronRuns, useHealth, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup, useUpdateCustomLookup } from '@/features/settings/api'
+import { useAuditLog, useCronRuns, useHealth, useIntegrations, useCustomLookups, useDeleteCustomLookup, useCreateCustomLookup, useUpdateCustomLookup } from '@/features/settings/api'
 import { useServices, useCreateService, useUpdateService, useDeleteService } from '@/features/shoots/api'
 import { useTaskPriorities, useCreateTaskPriority, useUpdateTaskPriority, useDeleteTaskPriority } from '@/features/tasks/api'
 import { useWorkReminderSettings, useUpdateWorkReminderSettings, useRunWorkReminders } from '@/features/work/api'
@@ -77,6 +77,7 @@ function System({ focus }: { focus?: 'services' | 'work-submissions' | undefined
       <HealthCard />
       {session?.is_owner ? (
         <>
+          <Integrations />
           <CustomLookups />
           <div id="services">
             <Services />
@@ -96,6 +97,88 @@ function System({ focus }: { focus?: 'services' | 'work-submissions' | undefined
         </Card>
       )}
     </>
+  )
+}
+
+/**
+ * Which outside services are actually switched on.
+ *
+ * Every one of these degrades quietly instead of failing — no WhatsApp
+ * credentials means the app opens wa.me for a person to press send, no Resend
+ * key means email is logged and skipped. Sensible fallbacks, and completely
+ * invisible: a studio can believe for months that the system is sending its
+ * messages. This card is the answer to "is it actually on", and it is the only
+ * place that says what happens when it is not.
+ *
+ * The API returns booleans and never the values.
+ */
+function Integrations() {
+  const { data, isLoading, isError, refetch } = useIntegrations()
+
+  if (isError) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="py-4">
+          <ErrorState onRetry={() => void refetch()} />
+        </CardContent>
+      </Card>
+    )
+  }
+  if (isLoading || !data) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="py-4">
+          <SkeletonList rows={4} />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const off = data.items.filter((i) => !i.configured).length
+
+  return (
+    <Card className="mt-4">
+      <CardContent className="py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 font-medium">
+            <Plug className="size-4 text-muted-foreground" aria-hidden /> Connected services
+          </p>
+          <StatusBadge tone={off === 0 ? 'success' : 'warning'}>
+            {off === 0 ? 'All connected' : `${off} not connected`}
+          </StatusBadge>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Each of these keeps working without its credentials — just not the way you might assume.
+          What happens today is written beside each one.
+        </p>
+
+        <ul className="mt-3 divide-y divide-border">
+          {data.items.map((i) => (
+            <li key={i.key} className="flex flex-wrap items-start gap-3 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{i.label}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground">{i.detail}</span>
+                {!i.configured && (
+                  // The variable NAMES, so whoever has access to the server
+                  // knows exactly what to set. Never the values.
+                  <span className="mt-1 block font-mono text-xs text-muted-foreground">
+                    Needs: {i.requires.join(', ')}
+                  </span>
+                )}
+              </span>
+              <StatusBadge tone={i.configured ? 'success' : 'neutral'}>
+                {i.configured ? 'Connected' : 'Not connected'}
+              </StatusBadge>
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          Set on the server, not here — these are secrets, so they live in the deployment&rsquo;s
+          environment rather than in the app. Environment: {data.environment}.
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 

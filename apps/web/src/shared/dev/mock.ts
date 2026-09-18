@@ -550,6 +550,32 @@ export function mockResponse(path: string, method: string, body?: unknown): unkn
     }
   if (method === 'PATCH' && path.startsWith('/crm/leads/')) return {}
   if (method === 'GET' && path === '/hr/attendance/my') return attendanceFx
+  // Two on, four off — the state most studios are actually in, and the one
+  // worth seeing in the preview.
+  if (method === 'GET' && path === '/settings/integrations')
+    return {
+      environment: 'development',
+      items: [
+        { key: 'email', label: 'Email (Resend)', configured: true,
+          detail: 'Verification, invitations, quotations and receipts are delivered by the system.',
+          requires: ['RESEND_API_KEY', 'EMAIL_FROM'] },
+        { key: 'whatsapp', label: 'WhatsApp (Cloud API)', configured: false,
+          detail: 'Opens wa.me with the text filled in, for someone to press send by hand. Nothing is delivered automatically.',
+          requires: ['WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_ACCESS_TOKEN'] },
+        { key: 'calls', label: 'Click to call (Twilio)', configured: false,
+          detail: 'Call only logs an activity. Dial the number yourself.',
+          requires: ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER'] },
+        { key: 'payments', label: 'Subscription payments (Razorpay)', configured: false,
+          detail: 'Renewal cannot take a payment.',
+          requires: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET'] },
+        { key: 'meta_leads', label: 'Meta lead ads', configured: false,
+          detail: 'Only a generic JSON webhook works. Posts are not signature-verified.',
+          requires: ['META_VERIFY_TOKEN', 'META_APP_SECRET', 'META_PAGE_ACCESS_TOKEN'] },
+        { key: 'errors', label: 'Error tracking (Sentry)', configured: true,
+          detail: 'Errors, traces and nightly job check-ins are reported.',
+          requires: ['SENTRY_DSN'] },
+      ],
+    }
   if (method === 'GET' && path === '/hr/location')
     return {
       lat: 19.076,
